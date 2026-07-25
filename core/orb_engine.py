@@ -177,6 +177,35 @@ class OrbEngine:
             return None
         return {"high": st["high"], "low": st["low"]}
 
+    def reconcile_early_with_exchange(self, symbol, ex_high, ex_low):
+        """
+        Same exchange-truth widening as reconcile_with_exchange(), but
+        for the EARLY (first ~5 min) range.
+
+        Gap found 2026-07-25, hours after shipping the early-momentum
+        entry: the main ORB gets corrected from the exchange's OHLC at
+        09:30, but the early range is USED at ~09:21 -- before any
+        reconcile has happened. So early entries were still trading off
+        a sampled, too-narrow range: exactly the false-breakout problem
+        the reconcile exists to kill, on the noisiest range of the day.
+
+        Right after EARLY_ORB_END the exchange's day high/low IS the
+        early range (only those minutes have traded), so it is the
+        authoritative source here too. Only ever widens.
+        """
+        state = self._early_ranges.get(symbol)
+        if state is None:
+            return False
+        changed = False
+        try:
+            if ex_high and float(ex_high) > state["high"]:
+                state["high"] = float(ex_high); changed = True
+            if ex_low and 0 < float(ex_low) < state["low"]:
+                state["low"] = float(ex_low); changed = True
+        except (TypeError, ValueError):
+            return False
+        return changed
+
     def reconcile_with_exchange(self, symbol, ex_high, ex_low):
         """
         Widen this symbol's opening range to the EXCHANGE's own

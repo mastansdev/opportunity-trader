@@ -2697,6 +2697,88 @@ def test_slot_rotation_evicts_the_weakest_for_a_stronger_breakout(monkeypatch):
     assert len(rotated) == 1
 
 
+def test_daily_pnl_carries_across_a_restart():
+    """Real money risk: lose the daily limit, restart (crash / feed
+    drop / code change -- all happened 2026-07-24), and the old code
+    reset the counter to zero and let the bot lose it all again."""
+    engine = _engine()
+    assert engine._daily_realized_pnl() == 0
+    engine.seed_daily_pnl(-7500.0)
+    assert engine._daily_realized_pnl() == -7500.0
+    # In-session P&L adds on top of what was carried in.
+    engine.closed_positions.append({"pnl": -300.0})
+    assert engine._daily_realized_pnl() == -7800.0
+
+
+def test_seed_daily_pnl_handles_junk_safely():
+    engine = _engine()
+    engine.seed_daily_pnl(None)
+    assert engine._daily_realized_pnl() == 0
+    engine.seed_daily_pnl("not-a-number")
+    assert engine._daily_realized_pnl() == 0
+
+
+def test_daily_loss_halt_uses_the_carried_pnl(monkeypatch):
+    """A restart must NOT re-arm the loss switch."""
+    import core.engine as em
+    monkeypatch.setattr(em, "DAILY_MAX_LOSS_RS", 8000.0)
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+    engine = _engine()
+    engine.seed_daily_pnl(-8500.0)        # already past the limit today
+    _long_breakout(engine, "TCS", "1")
+    assert "TCS" not in engine.open_positions
+
+
+def test_liquidity_floor_blocks_a_thin_stock(monkeypatch):
+    import core.engine as em
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+    monkeypatch.setattr(em, "ENABLE_LIQUIDITY_FLOOR", True)
+    monkeypatch.setattr(em, "MIN_TURNOVER_RS", 20_000_000)
+    # 100 shares x ~110 = Rs 11,000 turnover -- far too thin.
+    cm = _FakeOHLCCircuit({"TCS": {"volume": 100, "last_price": 110.0,
+                                   "prev_close": 100.0}})
+    engine = _engine(circuit_monitor=cm)
+    _long_breakout(engine, "TCS", "1")
+    assert "TCS" not in engine.open_positions
+
+
+def test_liquidity_floor_allows_a_liquid_stock(monkeypatch):
+    import core.engine as em
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+    monkeypatch.setattr(em, "ENABLE_LIQUIDITY_FLOOR", True)
+    monkeypatch.setattr(em, "MIN_TURNOVER_RS", 20_000_000)
+    cm = _FakeOHLCCircuit({"TCS": {"volume": 5_000_000, "last_price": 110.0,
+                                   "prev_close": 100.0}})
+    engine = _engine(circuit_monitor=cm)
+    _long_breakout(engine, "TCS", "1")
+    assert "TCS" in engine.open_positions
+
+
+def test_liquidity_floor_fails_open_without_volume_data(monkeypatch):
+    import core.engine as em
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+    monkeypatch.setattr(em, "ENABLE_LIQUIDITY_FLOOR", True)
+    cm = _FakeOHLCCircuit({"TCS": {"last_price": 110.0, "prev_close": 100.0}})
+    engine = _engine(circuit_monitor=cm)
+    _long_breakout(engine, "TCS", "1")
+    assert "TCS" in engine.open_positions      # missing volume never blocks
+
+
+def test_early_range_is_reconciled_from_the_exchange():
+    """The early 5-min range is USED at ~09:21, before the main ORB
+    reconcile at 09:30 -- so it needs its own exchange correction or
+    early entries fire on a too-narrow, sampled range."""
+    cm = _FakeOHLCCircuit({"X": {"high": 118.0, "low": 92.0,
+                                 "last_price": 112.0, "prev_close": 100.0}})
+    engine = _engine(circuit_monitor=cm)
+    engine.process_tick("X", "9", 100.0, _t(9, 15, 0))
+    engine.process_tick("X", "9", 110.0, _t(9, 17, 0))
+    engine.process_tick("X", "9", 105.0, _t(9, 21, 0))   # closes early range
+    engine.process_tick("X", "9", 106.0, _t(9, 22, 0))   # triggers reconcile
+    early = engine.orb_engine.get_early_range("X")
+    assert early["high"] == 118.0 and early["low"] == 92.0
+
+
 def test_corrupt_tick_is_rejected_before_it_can_trade():
     """The INFY/JLHL class of bad data: 1037 -> 111 -> back in a
     minute. Live, that would fire every stop in the symbol. It must

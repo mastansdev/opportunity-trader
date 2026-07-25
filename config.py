@@ -691,8 +691,8 @@ ROTATION_MIN_STRENGTH_EDGE = 0.004   # challenger must lead by >0.4% move
 # Trade only breakouts whose move-vs-market sits inside this band:
 # strong enough to be real, not so extended it's spent.
 ENABLE_RS_BAND = True
-RS_BAND_MIN = 0.006      # >= +0.6% vs the market median move
-RS_BAND_MAX = 0.030      # <= +3.0% (beyond this = exhausted)
+RS_BAND_MIN = 0.004      # >= +0.4% vs the market median move
+RS_BAND_MAX = 0.050      # <= +5.0% (beyond this = exhausted)
 # Absolute-move ceiling regardless of RS (the APAR/parabolic guard).
 MAX_ABS_MOVE_PCT = 0.05
 
@@ -1204,3 +1204,15 @@ ENABLE_EARLY_MOMENTUM_ENTRY = True
 EARLY_ORB_END = "09:20"           # first 5 minutes forms the early range
 EARLY_ENTRY_MIN_RS = 0.010        # needs >= +1.0% vs market (vs 0.6% normally)
 EARLY_ENTRY_MAX_POSITIONS = 2     # at most this many early trades per day
+
+# ==========================================================
+# LIQUIDITY FLOOR  (2026-07-25)
+# ==========================================================
+# A breakout in a thin stock is untradeable in real life: the spread and
+# market impact eat the edge before it exists. Charges already consume
+# ~78% of gross profit; slippage on illiquid names would finish it.
+# Turnover = last_price x day volume, from circuit_monitor's existing
+# REST quote. Fail-open: no volume data -> no gate (the WebSocket feed
+# doesn't always carry volume, and a missing number must never block).
+ENABLE_LIQUIDITY_FLOOR = True
+MIN_TURNOVER_RS = 20_000_000      # Rs 2 crore traded so far today

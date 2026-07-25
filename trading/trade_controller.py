@@ -43,6 +43,8 @@ will resume after all open positions will exit":
     throughout the flush.
 """
 
+import os
+
 
 class TradeController:
 
@@ -105,16 +107,51 @@ class TradeController:
 
     # --------------------------------------------------
 
+    # The pause flag is PERSISTED (2026-07-25). It is a deliberate
+    # operator decision -- "stop trading" -- and a restart (crash, feed
+    # drop, code change) must not silently undo it. A file is used
+    # rather than session_state.json because that file's load() returns
+    # a fixed-shape tuple every caller unpacks; a separate flag keeps
+    # this independent and impossible to break by accident. Presence of
+    # the file = paused. All I/O is best-effort: if it fails, the flag
+    # still works in memory for this session.
+    PAUSE_FLAG_PATH = os.path.join("data", "entries_paused.flag")
+
+    def _write_pause_flag(self, paused):
+        try:
+            if paused:
+                directory = os.path.dirname(self.PAUSE_FLAG_PATH)
+                if directory:
+                    os.makedirs(directory, exist_ok=True)
+                with open(self.PAUSE_FLAG_PATH, "w", encoding="utf-8") as f:
+                    f.write("paused\n")
+            elif os.path.exists(self.PAUSE_FLAG_PATH):
+                os.remove(self.PAUSE_FLAG_PATH)
+        except OSError:
+            pass          # never let bookkeeping break trading control
+
+    def restore_pause_state(self):
+        """Called once at startup. Re-arms the pause if the operator
+        left entries stopped when the process last ended."""
+        try:
+            if os.path.exists(self.PAUSE_FLAG_PATH):
+                self._entries_paused = True
+                return True
+        except OSError:
+            pass
+        return False
+
     def request_pause_new_entries(self):
         """EXIT ALL popup's "Stop New Entries + Exit All" option --
         gates off automated (structural) entries in
-        core/engine.py's _try_structural_entry() until the engine
-        itself calls resume_new_entries() (once the book is flat
-        again, see core/engine.py's _exit())."""
+        core/engine.py's _try_structural_entry() until the operator
+        explicitly clicks Resume. Persisted across restarts."""
         self._entries_paused = True
+        self._write_pause_flag(True)
 
     def is_new_entries_paused(self):
         return self._entries_paused
 
     def resume_new_entries(self):
         self._entries_paused = False
+        self._write_pause_flag(False)

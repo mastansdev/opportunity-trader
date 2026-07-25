@@ -87,6 +87,7 @@ from config import (
     ENABLE_NO_PROGRESS_EXIT, NO_PROGRESS_MINUTES, NO_PROGRESS_R,
     ENABLE_ORB_EXCHANGE_RECONCILE,
     ENABLE_TICK_SANITY, MAX_TICK_JUMP_PCT,
+    ENABLE_LIQUIDITY_FLOOR, MIN_TURNOVER_RS,
     ENABLE_SECTOR_STRENGTH_GATE, SECTOR_STRENGTH_TOP_N,
     SECTOR_STRENGTH_MIN_SYMBOLS, SECTOR_STRENGTH_REFRESH_SECONDS,
     ENABLE_EARLY_MOMENTUM_ENTRY, EARLY_ENTRY_MIN_RS,
@@ -321,6 +322,14 @@ class Engine:
         # the corrupt-tick guard (_is_insane_tick).
         self._last_good_price = {}
         self._insane_tick_warned = set()
+
+        # Realized P&L already booked earlier today (seeded at startup
+        # from the persisted portfolio) so the daily guardrails survive a
+        # restart -- see _daily_realized_pnl()/seed_daily_pnl().
+        self._carried_pnl = 0.0
+
+        # Symbols whose EARLY range has been exchange-reconciled.
+        self._early_orb_reconciled = set()
 
         # Sector leaderboard cache (strong, weak, ranked, computed_at)
         self._sector_cache = None
@@ -743,6 +752,53 @@ class Engine:
                 weakest = (sym, s)
         return weakest
 
+    def _reconcile_early_orb_once(self, symbol):
+        """Exchange-truth correction for the EARLY range, once per
+        symbol. Same reasoning as _reconcile_orb_once; see
+        OrbEngine.reconcile_early_with_exchange()."""
+        if not ENABLE_ORB_EXCHANGE_RECONCILE:
+            return
+        if symbol in self._early_orb_reconciled or self.circuit_monitor is None:
+            return
+        info = (self.circuit_monitor.get_snapshot() or {}).get(symbol)
+        if not info:
+            return                       # snapshot not ready -- retry next tick
+        self._early_orb_reconciled.add(symbol)
+        before = self.orb_engine.get_early_range(symbol)
+        if before and self.orb_engine.reconcile_early_with_exchange(
+                symbol, info.get("high"), info.get("low")):
+            after = self.orb_engine.get_early_range(symbol)
+            diagnostic(
+                f"[ORB_FIX_EARLY] {symbol} early range widened "
+                f"{before['high']:.2f}/{before['low']:.2f} -> "
+                f"{after['high']:.2f}/{after['low']:.2f}"
+            )
+
+    def _has_liquidity(self, symbol, price):
+        """
+        True if the symbol has traded enough value today to be worth
+        touching. A breakout in a thin name is untradeable in real life
+        -- the spread and impact eat the edge before it exists, and
+        charges already take ~78% of gross profit here.
+
+        Turnover = last price x day volume, from circuit_monitor's
+        existing REST quote. Fail-OPEN when the feature is off, there's
+        no monitor, or the quote carries no usable volume -- a missing
+        number must never block a trade.
+        """
+        if not ENABLE_LIQUIDITY_FLOOR or self.circuit_monitor is None:
+            return True
+        info = (self.circuit_monitor.get_snapshot() or {}).get(symbol)
+        if not info:
+            return True
+        try:
+            volume = float(info.get("volume") or 0)
+        except (TypeError, ValueError):
+            return True
+        if volume <= 0:
+            return True                  # no volume data -> don't judge
+        return volume * price >= MIN_TURNOVER_RS
+
     def _is_insane_tick(self, symbol, price):
         """
         True if this price is impossible relative to the last one we
@@ -852,6 +908,12 @@ class Engine:
         # real ORB completing -- after that the normal path takes over.
         if not (EARLY_ORB_END_T <= t < ORB_WINDOW_END_T):
             return
+
+        # Correct the EARLY range from the exchange first (2026-07-25).
+        # The main ORB is reconciled at 09:30, but this range is used at
+        # ~09:21 -- so without this, early entries trade a sampled,
+        # too-narrow range and fire on false breakouts.
+        self._reconcile_early_orb_once(symbol)
 
         early = self.orb_engine.get_early_range(symbol)
         if early is None:
@@ -1112,15 +1174,37 @@ class Engine:
         Sum of realized P&L over today's closed trades, partial
         exits included -- read fresh from closed_positions on every
         call, same "derive, don't book-keep" pattern used for
-        used_margin. KNOWN LIMITATION: closed_positions is
-        in-memory, so a mid-session restart resets this to 0 --
-        the daily loss/profit guardrails then govern only the
-        post-restart portion of the day. Documented, accepted for
-        now (trade_log.csv remains the durable record).
+        used_margin.
+
+        RESTART FIX, 2026-07-25: closed_positions is in-memory, so a
+        mid-session restart used to reset this to 0 and RE-ARM the daily
+        loss switch. Real risk: lose the full DAILY_MAX_LOSS_RS, restart
+        for any reason (crash, feed drop, code change -- all of which
+        happened on 2026-07-24), and the bot would happily lose it again
+        because as far as it knew the day had just begun. `_carried_pnl`
+        is seeded once at startup from the persisted portfolio, so the
+        guardrail now governs the WHOLE day, not just the current
+        process's slice of it.
         """
-        return sum(
+        return self._carried_pnl + sum(
             (record.get("pnl") or 0) for record in self.closed_positions
         )
+
+    def seed_daily_pnl(self, realized_pnl):
+        """Called once at startup with the realized P&L already booked
+        earlier today (from the persisted portfolio), so the daily
+        loss/goal guardrails survive a restart. Safe to call with None
+        or 0."""
+        try:
+            self._carried_pnl = float(realized_pnl or 0.0)
+        except (TypeError, ValueError):
+            self._carried_pnl = 0.0
+        if self._carried_pnl:
+            decision(
+                f"[DAILY_PNL] Carrying forward {self._carried_pnl:,.0f} "
+                f"realized from earlier today -- the daily loss/goal "
+                f"guardrails cover the full session, not just this run."
+            )
 
     def _breakout_has_volume(self, symbol, closed_candle):
         """
@@ -1198,6 +1282,13 @@ class Engine:
         # as the momentum-universe shortlist check below, not a news/
         # sector REASON.
         if closed_candle is not None and closed_candle["close"] < self.min_tradable_price:
+            return
+
+        # Liquidity floor (2026-07-25) -- a breakout in a thin stock is
+        # untradeable in real life; spread and impact eat the edge before
+        # it exists. Fail-open when volume data is missing.
+        if closed_candle is not None and not self._has_liquidity(
+                symbol, closed_candle["close"]):
             return
 
         # Square-off entry block. 2026-07-24 (evening) #0 FIX: this now

@@ -246,6 +246,20 @@ def main():
         engine.trailing_stop.load_state(saved_trailing_stops)
     if saved_portfolio:
         portfolio.load_state(saved_portfolio)
+        # RESTART SAFETY (2026-07-25): hand the engine the P&L already
+        # realized earlier today so the daily loss/goal guardrails cover
+        # the WHOLE session. Without this, a restart reset the counter to
+        # zero and re-armed the loss switch -- the bot could lose its
+        # full daily limit, restart, and lose it again.
+        engine.seed_daily_pnl(getattr(portfolio, "realized_pnl", 0.0))
+
+    # A deliberate "stop new entries" must survive a restart -- a crash
+    # or reconnect should never silently resume trading (2026-07-25).
+    if engine.trade_controller.restore_pause_state():
+        warn(
+            "[PAUSED] New entries are STILL PAUSED from an earlier "
+            "session. Click Resume on the dashboard to start trading."
+        )
     if saved_entry_blocks:
         engine.load_entry_blocks(saved_entry_blocks)
     if saved_momentum_universe:

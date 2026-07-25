@@ -14,3 +14,4 @@ data/dashboard_token.txt
 # Databases (regenerated; keep the repo light)
 data/*.db
 *.db-journal
+data/entries_paused.flag
