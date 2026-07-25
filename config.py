@@ -1235,3 +1235,16 @@ MIN_TURNOVER_RS = 20_000_000      # Rs 2 crore traded so far today
 # Fail-open: an empty memory blocks nothing.
 ENABLE_STOCK_MEMORY = True
 MEMORY_ACTION_WINDOW_DAYS = 1     # +/- days around the ex-date to avoid
+
+# ==========================================================
+# TRADE MEMORY / LEARNING LOOP  (2026-07-25)
+# ==========================================================
+# From the operator's architecture: "Every completed trade becomes new
+# memory, improving future decisions." Records each closed trade WITH
+# the conditions it was taken in (sector, relative strength, hour,
+# regime), so the bot can eventually answer "which conditions work?"
+#
+# OBSERVATION ONLY, operator-approved. Nothing reads this back to block
+# or size a trade. A handful of samples looks like a pattern long before
+# it is one -- it earns a vote after enough real sessions, not before.
+ENABLE_TRADE_MEMORY = True

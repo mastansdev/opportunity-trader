@@ -209,7 +209,8 @@ class Engine:
                  candle_recorder=None,
                  enable_rs_band=None, enable_staged_entry=None,
                  one_trade_per_symbol=None, enable_no_progress=None,
-                 enable_tick_sanity=None, stock_memory=None):
+                 enable_tick_sanity=None, stock_memory=None,
+                 trade_memory=None):
         # config.py's real value by default -- injectable purely so
         # tests can construct an Engine without it (this whole
         # suite's pre-existing price convention uses toy values like
@@ -273,6 +274,12 @@ class Engine:
         # behaviour.
         self.stock_memory = stock_memory
         self._memory_cache = None
+
+        # The LEARNING loop (core/trade_memory.py). Records completed
+        # trades WITH the context they were taken in. Deliberately
+        # OBSERVATION-ONLY: nothing in this engine reads it back to
+        # make a decision -- see that module's docstring.
+        self.trade_memory = trade_memory
 
         # Cached last-known-price reader -- see core/market_data.py.
         # None is fully supported (mirrors every other optional
@@ -2003,10 +2010,28 @@ class Engine:
         # symbol's single daily attempt. See _already_attempted().
         self._mark_attempted(symbol, direction)
 
+        # Entry CONTEXT for the learning loop -- the conditions this
+        # trade was taken in, which is the part worth learning from
+        # later (the P&L alone is already in trade_log.csv). Captured
+        # here, at entry, because none of it can be reconstructed after
+        # the fact. Best-effort: never let it break an entry.
+        try:
+            entry_sector = (self.sector_monitor.sector_of(symbol)
+                            if self.sector_monitor is not None else None)
+        except Exception:
+            entry_sector = None
+        try:
+            entry_rel = self._relative_strength(symbol, direction)
+        except Exception:
+            entry_rel = None
+
         self.open_positions[symbol] = {
             "security_id": security_id,
             "qty": qty,
             "entry_price": price,
+            "sector": entry_sector,
+            "rel_strength": entry_rel,
+            "regime": self._last_logged_regime,
             "entry_reason": entry_reason,
             "entry_time": entry_time,
             "direction": direction,
@@ -2485,7 +2510,24 @@ class Engine:
             "exit_reason": reason,
             "holding_seconds": holding_seconds,
             "pnl": pnl,
+            # Entry context, carried through so the learning loop can
+            # ask "which CONDITIONS worked", not just "what was the P&L".
+            "sector": position.get("sector"),
+            "rel_strength": position.get("rel_strength"),
+            "regime": position.get("regime"),
         })
+
+        # LEARN -> MEMORY (the operator's architecture, slide 5). Purely
+        # observational: this records the completed trade with the
+        # conditions it was taken in. NOTHING reads it back to make a
+        # trading decision -- see core/trade_memory.py's docstring for
+        # why that vote is deliberately withheld for now. Wrapped so a
+        # bookkeeping failure can never affect an exit.
+        if self.trade_memory is not None:
+            try:
+                self.trade_memory.record(self.closed_positions[-1])
+            except Exception as exc:
+                diagnostic(f"[LEARN] Could not record {symbol}: {exc}")
 
         del self.open_positions[symbol]
         self.trailing_stop.clear(symbol)

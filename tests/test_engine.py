@@ -2697,6 +2697,66 @@ def test_slot_rotation_evicts_the_weakest_for_a_stronger_breakout(monkeypatch):
     assert len(rotated) == 1
 
 
+class _RecordingMemory:
+    """TradeMemory stand-in that just captures what it was handed."""
+    def __init__(self):
+        self.records = []
+
+    def record(self, closed_position):
+        self.records.append(closed_position)
+        return True
+
+
+def test_completed_trade_is_recorded_with_its_entry_context(monkeypatch):
+    """LEARN -> MEMORY: a closed trade must carry the CONDITIONS it was
+    taken in (sector, relative strength, hour), not just the P&L --
+    that's the part worth learning from later."""
+    import core.engine as em
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+    monkeypatch.setattr(em, "SECTOR_STRENGTH_TOP_N", 3)
+    monkeypatch.setattr(em, "SECTOR_STRENGTH_REFRESH_SECONDS", 0)
+    monkeypatch.setattr(em, "TREND_RANK_TOP_N", 5)
+    monkeypatch.setattr(em, "TREND_RANK_REFRESH_SECONDS", 0)
+
+    mem = _RecordingMemory()
+    snap, mapping = _sector_world("X", "DEFENCE", 0.02, 0.04)
+    engine = _engine(trade_memory=mem,
+                     portfolio=Portfolio(),      # P&L comes from here
+                     circuit_monitor=_FakeTrendCircuit(snap),
+                     sector_monitor=_SectorAwareMonitor(mapping))
+
+    _long_breakout(engine, "X", "9")
+    assert "X" in engine.open_positions
+
+    engine.trade_controller.request_exit("X")
+    engine.process_tick("X", "9", 118.0, _t(10, 15, 0))
+    assert "X" not in engine.open_positions
+
+    assert len(mem.records) == 1
+    rec = mem.records[0]
+    assert rec["symbol"] == "X"
+    assert rec["direction"] == "LONG"
+    assert rec["sector"] == "DEFENCE"          # context, not just P&L
+    assert rec["rel_strength"] is not None
+    assert rec["pnl"] is not None
+
+
+def test_a_broken_trade_memory_never_breaks_an_exit(monkeypatch):
+    import core.engine as em
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+
+    class _Broken:
+        def record(self, _):
+            raise RuntimeError("disk full")
+
+    engine = _engine(trade_memory=_Broken())
+    _long_breakout(engine, "TCS", "1")
+    engine.trade_controller.request_exit("TCS")
+    engine.process_tick("TCS", "1", 115.0, _t(10, 15, 0))
+    assert "TCS" not in engine.open_positions    # the exit still happened
+    assert engine.closed_positions[-1]["symbol"] == "TCS"
+
+
 class _FakeMemory:
     """StockMemory stand-in: returns a fixed {symbol: [reasons]} map."""
     def __init__(self, distorting=None, raises=False):

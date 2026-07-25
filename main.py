@@ -45,9 +45,10 @@ from core.circuit_monitor import CircuitMonitor
 from core.index_monitor import IndexMonitor
 from core.candle_recorder import CandleRecorder
 from core.stock_memory import StockMemory
+from core.trade_memory import TradeMemory
 from core import corporate_actions
 from config import ENABLE_INDEX_FEED, INDEX_INSTRUMENTS, ENABLE_CANDLE_RECORDING
-from config import ENABLE_STOCK_MEMORY
+from config import ENABLE_STOCK_MEMORY, ENABLE_TRADE_MEMORY
 from core.logger import decision, diagnostic, warn
 from core import state_store
 from core.news_gate import NewsGate
@@ -243,11 +244,24 @@ def main():
             warn(f"[MEMORY] Stock memory unavailable this session: {exc}")
             stock_memory = None
 
+    # LEARNING LOOP -- records every completed trade with the context
+    # it was taken in. Observation only; nothing reads it back yet.
+    trade_memory = None
+    if ENABLE_TRADE_MEMORY:
+        try:
+            trade_memory = TradeMemory()
+            decision(
+                f"[LEARN] Trade memory active -- {trade_memory.count()} "
+                f"past trades remembered."
+            )
+        except Exception as exc:
+            warn(f"[LEARN] Trade memory unavailable this session: {exc}")
+
     engine = Engine(
         news_gate=news_gate, portfolio=portfolio, sector_monitor=sector_monitor,
         momentum_universe=momentum_universe, circuit_monitor=circuit_monitor,
         market_data=market_data, candle_recorder=candle_recorder,
-        stock_memory=stock_memory,
+        stock_memory=stock_memory, trade_memory=trade_memory,
     )
 
     (
