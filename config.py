@@ -1216,3 +1216,22 @@ EARLY_ENTRY_MAX_POSITIONS = 2     # at most this many early trades per day
 # doesn't always carry volume, and a missing number must never block).
 ENABLE_LIQUIDITY_FLOOR = True
 MIN_TURNOVER_RS = 20_000_000      # Rs 2 crore traded so far today
+
+# ==========================================================
+# STOCK MEMORY  (2026-07-25, operator's proposal)
+# ==========================================================
+# "A memory bot for every 750 stocks, so Brain Bot understands the stock
+# situation BEFORE selecting any trade." Stores corporate actions
+# (split / bonus / dividend / rights / demerger) with their ex-dates,
+# fetched from NSE+BSE, and refuses to trade a symbol whose PRICE SCALE
+# is being changed around today.
+#
+# The failure it fixes: JLHL's 2:10 split on 2026-07-24 read as an -80%
+# crash, because our previous close was the unadjusted one. The bot
+# ranked a routine corporate action as the day's biggest loser.
+# A stock going ex-dividend opens lower by the dividend too -- that is
+# not weakness, and shorting it is a mistake.
+#
+# Fail-open: an empty memory blocks nothing.
+ENABLE_STOCK_MEMORY = True
+MEMORY_ACTION_WINDOW_DAYS = 1     # +/- days around the ex-date to avoid

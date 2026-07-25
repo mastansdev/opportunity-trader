@@ -88,6 +88,7 @@ from config import (
     ENABLE_ORB_EXCHANGE_RECONCILE,
     ENABLE_TICK_SANITY, MAX_TICK_JUMP_PCT,
     ENABLE_LIQUIDITY_FLOOR, MIN_TURNOVER_RS,
+    ENABLE_STOCK_MEMORY, MEMORY_ACTION_WINDOW_DAYS,
     ENABLE_SECTOR_STRENGTH_GATE, SECTOR_STRENGTH_TOP_N,
     SECTOR_STRENGTH_MIN_SYMBOLS, SECTOR_STRENGTH_REFRESH_SECONDS,
     ENABLE_EARLY_MOMENTUM_ENTRY, EARLY_ENTRY_MIN_RS,
@@ -208,7 +209,7 @@ class Engine:
                  candle_recorder=None,
                  enable_rs_band=None, enable_staged_entry=None,
                  one_trade_per_symbol=None, enable_no_progress=None,
-                 enable_tick_sanity=None):
+                 enable_tick_sanity=None, stock_memory=None):
         # config.py's real value by default -- injectable purely so
         # tests can construct an Engine without it (this whole
         # suite's pre-existing price convention uses toy values like
@@ -264,6 +265,14 @@ class Engine:
         # None in tests and any setup that doesn't want recording --
         # the candle-close path simply skips it.
         self.candle_recorder = candle_recorder
+
+        # Per-stock facts (core/stock_memory.py) -- corporate actions
+        # that change the PRICE SCALE. Consulted before every entry so
+        # the bot never mistakes a split for a crash (the JLHL case).
+        # None = no memory wired; every check then passes, i.e. today's
+        # behaviour.
+        self.stock_memory = stock_memory
+        self._memory_cache = None
 
         # Cached last-known-price reader -- see core/market_data.py.
         # None is fully supported (mirrors every other optional
@@ -773,6 +782,39 @@ class Engine:
                 f"{before['high']:.2f}/{before['low']:.2f} -> "
                 f"{after['high']:.2f}/{after['low']:.2f}"
             )
+
+    def _memory_block_reason(self, symbol, on_date):
+        """
+        The Stock Memory check (operator's proposal, 2026-07-25): does
+        the bot KNOW something about this stock that makes today's price
+        misleading? Returns a reason string to block, or None to allow.
+
+        This is the JLHL fix. On 2026-07-24 that stock did a 2:10 split;
+        the exchange halved the reference price, our previous close was
+        the unadjusted one, and the bot read a routine corporate action
+        as an **-80% crash** -- ranking it the day's biggest loser. Same
+        class: a stock going ex-dividend opens lower by the dividend
+        amount; that is not weakness, and shorting it is a mistake.
+
+        Only PRICE-SCALE-CHANGING actions block (split / bonus / rights
+        / demerger / dividend). Informational facts are memory, not a
+        veto. Cached per day, so the tick path never hits the database.
+        Fail-OPEN: no memory wired, or a read failure, allows the trade.
+        """
+        if not ENABLE_STOCK_MEMORY or self.stock_memory is None or on_date is None:
+            return None
+        try:
+            if self._memory_cache is None or self._memory_cache[0] != on_date:
+                self._memory_cache = (
+                    on_date,
+                    self.stock_memory.price_distorting_symbols(
+                        on_date, window_days=MEMORY_ACTION_WINDOW_DAYS
+                    ),
+                )
+        except Exception:
+            return None                  # a broken memory never blocks trading
+        reasons = self._memory_cache[1].get(symbol)
+        return "; ".join(reasons) if reasons else None
 
     def _has_liquidity(self, symbol, price):
         """
@@ -1331,6 +1373,22 @@ class Engine:
         candle_date = effective_time.date() if effective_time is not None else None
         if candle_date is not None \
                 and symbol in EARNINGS_CALENDAR.get(candle_date.isoformat(), ()):
+            return
+
+        # STOCK MEMORY (2026-07-25) -- the bot's own knowledge of what is
+        # happening to this share TODAY. A split/bonus/rights/demerger/
+        # dividend changes the price SCALE, so every %-move, ORB range
+        # and breakout computed against yesterday's close is a lie.
+        # Blocked with a loud, once-per-symbol reason -- unlike the
+        # silent skips above, this one the operator wants to SEE.
+        memory_reason = self._memory_block_reason(symbol, candle_date)
+        if memory_reason is not None:
+            if direction not in self.entry_blocked.get(symbol, {}):
+                self._block_entry(
+                    symbol, direction,
+                    f"corporate action today -- {memory_reason}. Price is "
+                    f"not comparable to yesterday's close"
+                )
             return
 
         # Frozen price (see FROZEN_PRICE_STREAK_CANDLES) -- a circuit

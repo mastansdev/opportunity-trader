@@ -2697,6 +2697,56 @@ def test_slot_rotation_evicts_the_weakest_for_a_stronger_breakout(monkeypatch):
     assert len(rotated) == 1
 
 
+class _FakeMemory:
+    """StockMemory stand-in: returns a fixed {symbol: [reasons]} map."""
+    def __init__(self, distorting=None, raises=False):
+        self._d = distorting or {}
+        self._raises = raises
+
+    def price_distorting_symbols(self, on_date, window_days=1):
+        if self._raises:
+            raise RuntimeError("memory unavailable")
+        return self._d
+
+
+def test_stock_memory_blocks_a_split_symbol(monkeypatch):
+    """THE JLHL CASE. On 2026-07-24 a 2:10 split read as an -80% crash
+    and the bot ranked it the day's biggest loser. With memory, the
+    corporate action is known and the trade is refused."""
+    import core.engine as em
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+    engine = _engine(stock_memory=_FakeMemory({"TCS": ["SPLIT (2:10)"]}))
+    _long_breakout(engine, "TCS", "1")
+    assert "TCS" not in engine.open_positions
+    # And it says WHY -- this block is loud, not silent.
+    assert "corporate action" in engine.entry_blocked["TCS"]["LONG"]
+
+
+def test_stock_memory_allows_a_clean_symbol(monkeypatch):
+    import core.engine as em
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+    engine = _engine(stock_memory=_FakeMemory({"OTHER": ["SPLIT"]}))
+    _long_breakout(engine, "TCS", "1")
+    assert "TCS" in engine.open_positions
+
+
+def test_stock_memory_fails_open_when_unavailable(monkeypatch):
+    """A broken memory must never stop trading."""
+    import core.engine as em
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+    engine = _engine(stock_memory=_FakeMemory(raises=True))
+    _long_breakout(engine, "TCS", "1")
+    assert "TCS" in engine.open_positions
+
+
+def test_no_memory_wired_behaves_exactly_as_before(monkeypatch):
+    import core.engine as em
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+    engine = _engine()                    # stock_memory=None
+    _long_breakout(engine, "TCS", "1")
+    assert "TCS" in engine.open_positions
+
+
 def test_daily_pnl_carries_across_a_restart():
     """Real money risk: lose the daily limit, restart (crash / feed
     drop / code change -- all happened 2026-07-24), and the old code

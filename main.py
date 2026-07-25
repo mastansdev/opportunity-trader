@@ -44,7 +44,10 @@ from core.momentum_universe import MomentumUniverse
 from core.circuit_monitor import CircuitMonitor
 from core.index_monitor import IndexMonitor
 from core.candle_recorder import CandleRecorder
+from core.stock_memory import StockMemory
+from core import corporate_actions
 from config import ENABLE_INDEX_FEED, INDEX_INSTRUMENTS, ENABLE_CANDLE_RECORDING
+from config import ENABLE_STOCK_MEMORY
 from core.logger import decision, diagnostic, warn
 from core import state_store
 from core.news_gate import NewsGate
@@ -224,10 +227,27 @@ def main():
         candle_recorder = CandleRecorder()
         decision("[RECORDER] Recording this session's candles for replay.")
 
+    # STOCK MEMORY (2026-07-25) -- what the bot KNOWS about each of the
+    # 750 before it trades any of them. Refreshed from NSE/BSE corporate
+    # actions at startup so a split/dividend ex-date is known BEFORE the
+    # open, not discovered as a fake -80% crash (JLHL, 2026-07-24).
+    # Entirely fail-open: a failed fetch just leaves the memory as-is.
+    stock_memory = None
+    if ENABLE_STOCK_MEMORY:
+        try:
+            stock_memory = StockMemory()
+            corporate_actions.refresh(
+                stock_memory, known_symbols=set(resolved.keys())
+            )
+        except Exception as exc:
+            warn(f"[MEMORY] Stock memory unavailable this session: {exc}")
+            stock_memory = None
+
     engine = Engine(
         news_gate=news_gate, portfolio=portfolio, sector_monitor=sector_monitor,
         momentum_universe=momentum_universe, circuit_monitor=circuit_monitor,
         market_data=market_data, candle_recorder=candle_recorder,
+        stock_memory=stock_memory,
     )
 
     (
