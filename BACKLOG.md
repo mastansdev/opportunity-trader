@@ -1,5 +1,53 @@
 # Opportunity Trader — Backlog (leftover work)
 
+---
+## ⚠️ AUDIT 2026-07-25 — discussed but NOT in the code
+
+Verified by scanning every config flag against real usage. Everything
+below was talked about; only the first item has since been fixed.
+
+**FIXED during the audit:**
+- ~~`ENABLE_TICK_SANITY` / `MAX_TICK_JUMP_PCT` were in config but never
+  wired~~ → now enforced in `Engine.process_tick()` with 4 tests. This
+  was the guard for the INFY/JLHL corrupt-tick class; it would have been
+  dead config on Monday.
+
+**STILL NOT BUILT (agreed as valuable, never coded):**
+
+1. **Higher-timeframe / daily trend alignment.** The single biggest gap.
+   The bot cannot see yesterday. It bought SRF long after the stock fell
+   10% over two days. Needs 20-day daily OHLC at startup + a rule that
+   longs only trade above daily structure. *Blocked on: nothing, just
+   not built.*
+2. **Entry on the retest, not the breakout candle.** Mechanically better
+   R:R with no new prediction required. Discussed twice, never built.
+3. **Relative strength vs OWN SECTOR** (we built RS vs *market*, and a
+   separate sector gate — but not the stock-vs-its-own-sector measure).
+4. **Regime detection** (ADX + ATR percentile + persistence). Fully
+   designed in `REGIME_NOTES.md`; zero code.
+5. **Loosening the RS band for Monday.** I recommended 0.4–5.0% since
+   the current 0.6–3.0% was fitted to corrupted ORB data — then left the
+   old values in. **Config still says 0.6–3.0%.** Decide deliberately.
+6. **Story clustering / news decay** (item 13, open since 2026-07-23).
+7. **Per-sector CAPITAL cap** (Phase-2 leftover; the panic filter is not
+   an exposure cap).
+8. **Daily loss/goal counters reset on restart** — a mid-session restart
+   re-arms the loss switch.
+9. **Persist "entries paused" across restart.**
+10. **Trade log: market-time + per-exit realized P&L column.**
+11. **Liquidity floor** (turnover/spread) — matters for live slippage.
+12. **Telegram alerts** — never started.
+13. **Railway deploy** — code + guide ready, never deployed (your action).
+
+**Known live issue, mitigated but not solved:**
+- The tick feed is *sampled*, so the bot's ORB is narrower than reality.
+  `ENABLE_ORB_EXCHANGE_RECONCILE` now widens it from the exchange OHLC
+  at 09:30 — but any range used BEFORE that reconcile (i.e. the early
+  5-minute momentum range) is still built from sampled ticks only.
+
+---
+
+
 Consolidated from PHASES.md, PHASE3_NEWS_DESIGN.md, TRADING_POLICY.md and
 ISSUES_LOG.md on 2026-07-24. Only items NOT yet done are listed. Grouped by
 theme; each has a rough size and whether it needs an operator working-session

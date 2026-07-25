@@ -68,6 +68,10 @@ def _engine(**kwargs):
     kwargs.setdefault("enable_staged_entry", False)
     kwargs.setdefault("one_trade_per_symbol", False)
     kwargs.setdefault("enable_no_progress", False)
+    # Toy fixtures here move price 100 -> 50 to trigger stops, which
+    # the corrupt-tick guard would (correctly) call impossible. Off by
+    # default; its own tests below switch it on.
+    kwargs.setdefault("enable_tick_sanity", False)
     return Engine(**kwargs)
 
 
@@ -2691,6 +2695,49 @@ def test_slot_rotation_evicts_the_weakest_for_a_stronger_breakout(monkeypatch):
     rotated = [c for c in engine.closed_positions
                if c["symbol"] == "WEAK" and c["exit_reason"] == "ROTATED_OUT"]
     assert len(rotated) == 1
+
+
+def test_corrupt_tick_is_rejected_before_it_can_trade():
+    """The INFY/JLHL class of bad data: 1037 -> 111 -> back in a
+    minute. Live, that would fire every stop in the symbol. It must
+    never reach the ORB range, a candle, or a position."""
+    engine = _engine(enable_tick_sanity=True)
+    engine.process_tick("TCS", "1", 1000.0, _t(9, 15, 0))
+    engine.process_tick("TCS", "1", 1005.0, _t(9, 16, 0))
+    engine.process_tick("TCS", "1", 111.0, _t(9, 17, 0))     # corrupt
+    rng = engine.orb_engine.get_range("TCS")
+    assert rng["low"] == 1000.0        # the garbage never widened it
+    assert rng["high"] == 1005.0
+
+
+def test_corrupt_tick_does_not_drag_the_reference_price():
+    """A RUN of bad ticks must all be rejected -- the last GOOD price
+    stays the reference, so garbage can't walk the bot down."""
+    engine = _engine(enable_tick_sanity=True)
+    engine.process_tick("TCS", "1", 1000.0, _t(9, 15, 0))
+    for i in range(3):
+        engine.process_tick("TCS", "1", 111.0, _t(9, 16 + i, 0))
+    engine.process_tick("TCS", "1", 1002.0, _t(9, 20, 0))    # good again
+    rng = engine.orb_engine.get_range("TCS")
+    assert rng["low"] == 1000.0
+    assert rng["high"] == 1002.0
+
+
+def test_normal_moves_are_never_rejected():
+    """A real 5% move must pass untouched."""
+    engine = _engine(enable_tick_sanity=True)
+    engine.process_tick("TCS", "1", 1000.0, _t(9, 15, 0))
+    engine.process_tick("TCS", "1", 1050.0, _t(9, 16, 0))
+    assert engine.orb_engine.get_range("TCS")["high"] == 1050.0
+
+
+def test_non_positive_price_is_always_rejected():
+    engine = _engine(enable_tick_sanity=False)   # even with the gate off
+    engine.process_tick("TCS", "1", 100.0, _t(9, 15, 0))
+    engine.process_tick("TCS", "1", 0.0, _t(9, 16, 0))
+    engine.process_tick("TCS", "1", -5.0, _t(9, 17, 0))
+    rng = engine.orb_engine.get_range("TCS")
+    assert rng["low"] == 100.0 and rng["high"] == 100.0
 
 
 class _SectorAwareMonitor:

@@ -86,6 +86,7 @@ from config import (
     ONE_TRADE_PER_SYMBOL_PER_DAY,
     ENABLE_NO_PROGRESS_EXIT, NO_PROGRESS_MINUTES, NO_PROGRESS_R,
     ENABLE_ORB_EXCHANGE_RECONCILE,
+    ENABLE_TICK_SANITY, MAX_TICK_JUMP_PCT,
     ENABLE_SECTOR_STRENGTH_GATE, SECTOR_STRENGTH_TOP_N,
     SECTOR_STRENGTH_MIN_SYMBOLS, SECTOR_STRENGTH_REFRESH_SECONDS,
     ENABLE_EARLY_MOMENTUM_ENTRY, EARLY_ENTRY_MIN_RS,
@@ -205,7 +206,8 @@ class Engine:
                  min_tradable_price=MIN_TRADABLE_PRICE_RS,
                  candle_recorder=None,
                  enable_rs_band=None, enable_staged_entry=None,
-                 one_trade_per_symbol=None, enable_no_progress=None):
+                 one_trade_per_symbol=None, enable_no_progress=None,
+                 enable_tick_sanity=None):
         # config.py's real value by default -- injectable purely so
         # tests can construct an Engine without it (this whole
         # suite's pre-existing price convention uses toy values like
@@ -315,6 +317,11 @@ class Engine:
         # the exchange's own high/low (see _reconcile_orb_once).
         self._orb_reconciled = set()
 
+        # Last price ACCEPTED per symbol + one-shot warn set, for
+        # the corrupt-tick guard (_is_insane_tick).
+        self._last_good_price = {}
+        self._insane_tick_warned = set()
+
         # Sector leaderboard cache (strong, weak, ranked, computed_at)
         self._sector_cache = None
 
@@ -341,6 +348,9 @@ class Engine:
         self.enable_no_progress = (
             ENABLE_NO_PROGRESS_EXIT if enable_no_progress is None
             else enable_no_progress)
+        self.enable_tick_sanity = (
+            ENABLE_TICK_SANITY if enable_tick_sanity is None
+            else enable_tick_sanity)
 
         # Edge-triggered logging for regime changes -- log the
         # regime ONCE when it changes, not on every skipped entry.
@@ -367,6 +377,20 @@ class Engine:
     # --------------------------------------------------
 
     def process_tick(self, symbol, security_id, price, tick_time, cum_volume=None):
+        # TICK SANITY (2026-07-25). Reject an impossible price before it
+        # can touch the ORB range, a candle, a stop, or an entry.
+        #
+        # Real corrupt data found in one session's feed: INFY printed
+        # 1037 -> 111 -> back within a minute; JLHL moved -80% in a
+        # minute. In a backtest that manufactured a fake +Rs145,000
+        # "profit". LIVE, the same glitch would fire every stop in that
+        # symbol and could trigger a phantom breakout entry -- with real
+        # money. A >20% single-tick move is not a market move, it is bad
+        # data (genuine limit moves are capped far below this, and a
+        # halted/circuit stock simply stops ticking).
+        if self._is_insane_tick(symbol, price):
+            return
+
         self._maybe_snapshot_exit_all()
 
         self.orb_engine.update(symbol, price, tick_time)
@@ -718,6 +742,46 @@ class Engine:
             if weakest is None or s < weakest[1]:
                 weakest = (sym, s)
         return weakest
+
+    def _is_insane_tick(self, symbol, price):
+        """
+        True if this price is impossible relative to the last one we
+        accepted for the symbol, so process_tick() can drop it.
+
+        Guards against corrupt feed data reaching ANY trading decision.
+        Verified real (2026-07-24 session): INFY printed 1037 -> 111 ->
+        back inside one minute; JLHL -80.1% in a minute. Live, that one
+        bad print would fire every stop in the symbol and could open a
+        phantom breakout with real money.
+
+        A >MAX_TICK_JUMP_PCT single-tick move is bad data, not a market
+        move: NSE price bands cap genuine moves well below this, and a
+        circuit-locked stock stops ticking rather than teleporting. The
+        LAST GOOD price per symbol is kept, so a run of garbage can't
+        drag the reference along with it. Non-positive prices are always
+        rejected. Fail-open: disabled by config, or no prior price yet,
+        means the tick passes.
+        """
+        if price is None or price <= 0:
+            return True
+        if not self.enable_tick_sanity:
+            return False
+        last = self._last_good_price.get(symbol)
+        if last is None or last <= 0:
+            self._last_good_price[symbol] = price
+            return False
+        if abs(price - last) / last > MAX_TICK_JUMP_PCT:
+            if symbol not in self._insane_tick_warned:
+                self._insane_tick_warned.add(symbol)
+                warn(
+                    f"[BAD_TICK] {symbol} rejected {price:.2f} -- a "
+                    f"{abs(price - last) / last:.1%} jump from {last:.2f} "
+                    f"in one tick is corrupt feed data, not a real move. "
+                    f"Ignoring these for {symbol} (warned once)."
+                )
+            return True
+        self._last_good_price[symbol] = price
+        return False
 
     def _reconcile_orb_once(self, symbol):
         """
