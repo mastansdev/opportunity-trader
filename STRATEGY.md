@@ -22,6 +22,22 @@ survive costs, variance, and bad days.
 - Reject ticks jumping > 20% in a minute (`MAX_TICK_JUMP_PCT`) — INFY/JLHL class
 - Skip: earnings-day names, circuit-proximity, frozen feeds, unreliable ORB windows
 
+## 1b. What the bot KNOWS before it looks at price (2026-07-25)
+
+Two memories, both consulted before any decision:
+
+- **Stock Memory** (`core/stock_memory.py`) — corporate actions with
+  ex-dates, pulled from NSE/BSE at startup. A split / bonus / rights /
+  demerger / dividend changes the price SCALE, so every %-move and range
+  computed against yesterday's close is a lie. Those symbols are refused
+  with a loud reason. *This is the JLHL fix: a 2:10 split read as an
+  −80% crash.* Informational facts (board meetings) are remembered but
+  never veto.
+- **Trade Memory** (`core/trade_memory.py`) — every completed trade with
+  the CONDITIONS it was taken in (sector, relative strength, hour,
+  regime). **Observation only — it has no vote.** Report:
+  `py tools/learning_report.py`.
+
 ## 2. Entry — every condition must pass
 
 | # | Gate | Config | Evidence |

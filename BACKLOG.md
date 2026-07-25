@@ -12,6 +12,18 @@ below was talked about; only the first item has since been fixed.
   was the guard for the INFY/JLHL corrupt-tick class; it would have been
   dead config on Monday.
 
+**BUILT LATER THE SAME DAY (2026-07-25, after the audit):**
+- ORB now reconciled against the exchange's own high/low (the sampled
+  feed ran too narrow -> false breakouts). Early 5-min range too.
+- Daily P&L carries across a restart; "entries paused" persists.
+- Liquidity floor; corrupt-tick guard wired.
+- RS band widened 0.6-3.0% -> 0.4-5.0%.
+- Sector/theme strength gate (operator's core thesis).
+- Early-momentum entry (5-min range, max 2/day).
+- **Stock Memory** -- corporate actions from NSE/BSE, consulted before
+  every trade (the JLHL split fix).
+- **Trade Memory** -- the learning loop, OBSERVATION ONLY.
+
 **STILL NOT BUILT (agreed as valuable, never coded):**
 
 1. **Higher-timeframe / daily trend alignment.** The single biggest gap.
@@ -25,17 +37,17 @@ below was talked about; only the first item has since been fixed.
    separate sector gate — but not the stock-vs-its-own-sector measure).
 4. **Regime detection** (ADX + ATR percentile + persistence). Fully
    designed in `REGIME_NOTES.md`; zero code.
-5. **Loosening the RS band for Monday.** I recommended 0.4–5.0% since
+5. ~~Loosening the RS band~~ **DONE 2026-07-25** -- I recommended 0.4–5.0% since
    the current 0.6–3.0% was fitted to corrupted ORB data — then left the
    old values in. **Config still says 0.6–3.0%.** Decide deliberately.
 6. **Story clustering / news decay** (item 13, open since 2026-07-23).
 7. **Per-sector CAPITAL cap** (Phase-2 leftover; the panic filter is not
    an exposure cap).
-8. **Daily loss/goal counters reset on restart** — a mid-session restart
+8. ~~Daily loss/goal counters reset on restart~~ **DONE** -- — a mid-session restart
    re-arms the loss switch.
-9. **Persist "entries paused" across restart.**
+9. ~~Persist "entries paused"~~ **DONE.**
 10. **Trade log: market-time + per-exit realized P&L column.**
-11. **Liquidity floor** (turnover/spread) — matters for live slippage.
+11. ~~Liquidity floor~~ **DONE** -- (turnover/spread) — matters for live slippage.
 12. **Telegram alerts** — never started.
 13. **Railway deploy** — code + guide ready, never deployed (your action).
 
