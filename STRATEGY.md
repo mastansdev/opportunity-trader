@@ -44,13 +44,16 @@ Two memories, both consulted before any decision:
 |---|---|---|---|
 | 1 | Fresh ORB cross (transition, not state) | — | stops standing-signal refills |
 | 2 | In top-20 gainers (long) / losers (short) | `TREND_RANK_TOP_N` | clock-order was the original sin |
-| 3 | **Relative strength in band 0.6%–3.0%** | `RS_BAND_MIN/MAX` | **the one predictive feature** |
+| 3 | **Relative strength in band 0.4%–5.0%** | `RS_BAND_MIN/MAX` | **the one predictive feature** (widened 2026-07-25 — the old band was fitted to corrupted data) |
 | 4 | Absolute move ≤ 5% | `MAX_ABS_MOVE_PCT` | inverted-U / exhaustion |
 | 5 | Breakout clears margin | `BREAKOUT_MIN_MARGIN_PCT` | grazes = range noise |
 | 6 | Volume ≥ 1.5× average (fail-open) | `VOLUME_SURGE_MULT` | conviction |
 | 7 | Regime allows the direction | `REGIME_*` | don't fight the tape |
 | 8 | No contradicting HIGH news | news gate | — |
 | 9 | **One attempt per symbol per direction per day** | `ONE_TRADE_PER_SYMBOL_PER_DAY` | CHENNPETRO traded 9× |
+| 10 | No corporate action distorting today's price | `ENABLE_STOCK_MEMORY` | JLHL split read as −80% |
+| 11 | Liquidity ≥ ₹2cr turnover | `MIN_TURNOVER_RS` | spread/impact eat thin names |
+| 12 | Tick sanity — no >20% single-tick jump | `MAX_TICK_JUMP_PCT` | INFY 1037→111 |
 
 ## 3. Staged deployment — never fill the book at once
 

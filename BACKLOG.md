@@ -37,17 +37,16 @@ below was talked about; only the first item has since been fixed.
    separate sector gate — but not the stock-vs-its-own-sector measure).
 4. **Regime detection** (ADX + ATR percentile + persistence). Fully
    designed in `REGIME_NOTES.md`; zero code.
-5. ~~Loosening the RS band~~ **DONE 2026-07-25** -- I recommended 0.4–5.0% since
-   the current 0.6–3.0% was fitted to corrupted ORB data — then left the
-   old values in. **Config still says 0.6–3.0%.** Decide deliberately.
+5. ~~Loosening the RS band~~ — **DONE 2026-07-25.** Widened to 0.4–5.0%;
+   the old 0.6–3.0% had been fitted to the corrupted ORB ranges.
 6. **Story clustering / news decay** (item 13, open since 2026-07-23).
 7. **Per-sector CAPITAL cap** (Phase-2 leftover; the panic filter is not
    an exposure cap).
-8. ~~Daily loss/goal counters reset on restart~~ **DONE** -- — a mid-session restart
-   re-arms the loss switch.
+8. ~~Daily loss/goal counters reset on restart~~ — **DONE.** The daily
+   guardrails now cover the whole session, not just the current process.
 9. ~~Persist "entries paused"~~ **DONE.**
 10. **Trade log: market-time + per-exit realized P&L column.**
-11. ~~Liquidity floor~~ **DONE** -- (turnover/spread) — matters for live slippage.
+11. ~~Liquidity floor~~ — **DONE.** ₹2cr turnover minimum, fail-open.
 12. **Telegram alerts** — never started.
 13. **Railway deploy** — code + guide ready, never deployed (your action).
 
