@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Opportunity Trader — Live Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #131722;
+    --panel-2: #1a1f2e;
+    --border: #262c3d;
+    --text: #e6e9f0;
+    --text-dim: #8b93a7;
+    --green: #22c55e;
+    --red: #ef4444;
+    --amber: #f59e0b;
+    --blue: #3b82f6;
+    --accent: #6366f1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 24px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  header h1 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+  }
+  header h1 span { color: var(--text-dim); font-weight: 400; }
+  .topbar-stats { display: flex; align-items: center; gap: 22px; font-size: 12px; flex-wrap: wrap; }
+  .topbar-stat { display: flex; flex-direction: column; gap: 2px; }
+  .topbar-stat .tl { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .topbar-stat .tv { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .status-wrap { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--text-dim); }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.down { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+  main { padding: 16px 20px 40px; max-width: 1800px; margin: 0 auto; }
+
+  .layout-2col { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; align-items: start; margin-top: 14px; }
+  @media (max-width: 1200px) {
+    .layout-2col { grid-template-columns: 1fr; }
+  }
+  .col { display: flex; flex-direction: column; gap: 14px; }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .card .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .card .value { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .value.pos { color: var(--green); }
+  .value.neg { color: var(--red); }
+
+  .breadth-row { display: flex; gap: 8px; margin-top: 8px; }
+  .breadth-chip { flex: 1; text-align: center; padding: 4px 0; border-radius: 6px; font-size: 12px; }
+  .breadth-chip.adv { background: rgba(34,197,94,0.12); color: var(--green); }
+  .breadth-chip.dec { background: rgba(239,68,68,0.12); color: var(--red); }
+  .breadth-chip.unc { background: rgba(139,147,167,0.12); color: var(--text-dim); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .panel h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-dim);
+    margin: 0 0 10px 0;
+    font-weight: 600;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .grid-5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+
+  .chip-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 22px; }
+  .chip { padding: 3px 10px; border-radius: 999px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); }
+  .chip.green { color: var(--green); border-color: rgba(34,197,94,0.4); }
+  .chip.red { color: var(--red); border-color: rgba(239,68,68,0.4); }
+  .empty-note { color: var(--text-dim); font-size: 12px; font-style: italic; }
+
+  .dir-bull { color: var(--green); }
+  .dir-bear { color: var(--red); }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; }
+  .badge.long { background: rgba(34,197,94,0.15); color: var(--green); }
+  .badge.short { background: rgba(239,68,68,0.15); color: var(--red); }
+
+  .risk-row { display: flex; justify-content: space-between; align-items: flex-start; padding: 7px 8px; border-radius: 6px; background: var(--panel-2); margin-bottom: 6px; font-size: 12px; }
+  .risk-row .reason { color: var(--text-dim); font-size: 11px; max-width: 60%; text-align: right; }
+
+  .news-item { padding: 7px 8px; border-radius: 6px; background: var(--panel-2); margin-bottom: 6px; font-size: 12px; }
+  .news-item .nh { display: flex; justify-content: space-between; margin-bottom: 2px; }
+  .news-item .reason { color: var(--text-dim); font-size: 11px; }
+  .news-item .time { color: var(--text-dim); font-size: 10px; }
+
+  .health-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 12px; }
+  .health-item { display: flex; justify-content: space-between; padding: 6px 8px; background: var(--panel-2); border-radius: 6px; }
+  .health-item .hl { color: var(--text-dim); }
+
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sell { background: var(--red); color: #2b0808; }
+  .btn-exit-all { background: var(--amber); color: #2b1c02; }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--text-dim); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 7px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 8px 6px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.pos { color: var(--green); }
+  td.neg { color: var(--red); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .table-wrap { overflow-x: auto; }
+  .table-wrap-scroll { max-height: 480px; overflow-y: auto; }
+  .table-wrap-scroll th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .no-rows { text-align: center; color: var(--text-dim); padding: 18px; font-style: italic; }
+  .gl-col-title { font-size: 12px; font-weight: 600; margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .gl-up { color: var(--green); }
+  .gl-down { color: var(--red); }
+
+  .panel-head-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .panel-head-row h2 { margin: 0; }
+
+  footer {
+    max-width: 1800px; margin: 0 auto; padding: 10px 20px 30px;
+    display: flex; flex-wrap: wrap; gap: 18px; font-size: 11px; color: var(--text-dim);
+    border-top: 1px solid var(--border); margin-top: 10px; padding-top: 14px;
+  }
+  footer strong { color: var(--text); }
+
+  .toast {
+    position: fixed; bottom: 20px; right: 20px; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px;
+    font-size: 13px; opacity: 0; transform: translateY(8px);
+    transition: opacity 0.25s, transform 0.25s; z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.err { border-color: var(--red); color: var(--red); }
+  .toast.ok { border-color: var(--green); color: var(--green); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Opportunity Trader <span>· NSE Equity ORB · PAPER MODE</span></h1>
+  <div class="topbar-stats" id="topbarStats"></div>
+  <div class="status-wrap">
+    <span id="viewOnlyBadge" style="display:none;color:var(--amber);font-weight:600;">VIEW ONLY</span>
+    <span id="updatedAt">—</span>
+    <span><span class="status-dot down" id="statusDot"></span><span id="statusText">Connecting…</span></span>
+  </div>
+</header>
+
+<main>
+
+  <div class="cards" id="statCards"></div>
+
+  <div class="panel" style="margin-bottom:14px;">
+    <h2>Market Breadth</h2>
+    <div class="breadth-row" id="breadthRow"></div>
+  </div>
+
+  <!-- ============ Momentum Universe (TOP_N_MOMENTUM_MODE, 2026-07-24 experiment) ============ -->
+  <div class="panel" id="momentumPanel" style="margin-bottom:14px;">
+    <div class="panel-head-row">
+      <h2>Momentum Universe</h2>
+      <span id="momentumStatusBadge"></span>
+    </div>
+    <div class="empty-note" style="margin-bottom:8px;">
+      Today's shortlist -- only these symbols are eligible for a new structural entry, ranked by
+      %-change vs day open and locked ONCE at 09:30 (core/momentum_universe.py). Everything else in
+      the 750-symbol universe is skipped, not because it broke a rule, but because it isn't on
+      today's list. Each of these trades a fixed bracket (stop + target set at entry, no trailing --
+      config.FIXED_STOP_LOSS_RS / FIXED_TARGET_RS), not the usual dynamic trailing stop.
+    </div>
+    <div class="grid-2">
+      <div>
+        <h3 style="color:var(--green);font-size:11px;margin:0 0 6px;">Long-eligible (top gainers)</h3>
+        <div class="chip-list" id="momentumLong"></div>
+      </div>
+      <div>
+        <h3 style="color:var(--red);font-size:11px;margin:0 0 6px;">Short-eligible (top losers)</h3>
+        <div class="chip-list" id="momentumShort"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Open Positions (full width) ============ -->
+  <div class="panel">
+    <div class="panel-head-row">
+      <h2>Open Positions</h2>
+      <button class="btn-exit-all btn-sm" id="exitAllBtn">EXIT ALL</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>S.No</th><th>Symbol</th><th>Direction</th><th>Entry Time</th>
+            <th>Entry Price</th><th>CMP</th><th>MTM</th><th>Stop</th><th>Target</th>
+            <th>Reason</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="openRows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============ Top Gainers / Top Losers -- right below Open Positions ============ -->
+  <div class="panel" style="margin-top:14px;">
+    <div class="panel-head-row">
+      <h2>Top 50 Gainers &amp; Losers</h2>
+      <span class="empty-note" id="glUpdatedAt"></span>
+    </div>
+    <div class="empty-note" style="margin-bottom:10px;">
+      Ranked by % change vs each symbol's previous day close, across the bot's own ~750-symbol
+      universe (not all of NSE -- that's all the bot has live data for). Refreshes every 5 minutes,
+      independent of the rest of this page.
+    </div>
+    <div class="grid-2">
+      <div>
+        <h3 class="gl-col-title gl-up">Top 50 Gainers</h3>
+        <div class="table-wrap table-wrap-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>S.No</th><th>Symbol</th><th>Sector</th><th>Open</th><th>High</th><th>Low</th>
+                <th>Prev Close</th><th>LTP</th><th>Change</th><th>Change%</th><th>Volume</th>
+              </tr>
+            </thead>
+            <tbody id="gainersRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h3 class="gl-col-title gl-down">Top 50 Losers</h3>
+        <div class="table-wrap table-wrap-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>S.No</th><th>Symbol</th><th>Sector</th><th>Open</th><th>High</th><th>Low</th>
+                <th>Prev Close</th><th>LTP</th><th>Change</th><th>Change%</th><th>Volume</th>
+              </tr>
+            </thead>
+            <tbody id="losersRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Sector Heatmap -- redesigned 2026-07-23 evening to
+       match Top 50 Gainers/Losers (PREV-CLOSE based, same style),
+       instead of the old day-open-based bar heatmap ============ -->
+  <div class="panel" style="margin-top:14px;">
+    <div class="panel-head-row">
+      <h2>Sector Heatmap</h2>
+    </div>
+    <div class="empty-note" style="margin-bottom:10px;">
+      Sectors ranked by average % change vs previous day close, from the same data as Top 50
+      Gainers/Losers above. Sectors with fewer than config.SECTOR_GAINERS_LOSERS_MIN_SYMBOLS
+      reporting stocks are left out as too sparse to average meaningfully.
+    </div>
+    <div class="grid-2">
+      <div>
+        <h3 class="gl-col-title gl-up">Top Gaining Sectors</h3>
+        <div class="table-wrap table-wrap-scroll">
+          <table>
+            <thead>
+              <tr><th>S.No</th><th>Sector</th><th>Avg Change%</th><th>Symbols</th></tr>
+            </thead>
+            <tbody id="sectorGainersRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h3 class="gl-col-title gl-down">Top Losing Sectors</h3>
+        <div class="table-wrap table-wrap-scroll">
+          <table>
+            <thead>
+              <tr><th>S.No</th><th>Sector</th><th>Avg Change%</th><th>Symbols</th></tr>
+            </thead>
+            <tbody id="sectorLosersRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Risk Alerts | Sectors ============ -->
+  <div class="layout-2col" style="margin-top:14px;">
+
+    <div class="panel">
+      <h2>Risk Alerts</h2>
+      <h3 style="font-size:11px;color:var(--text-dim);margin:0 0 6px;text-transform:uppercase;">Panic-Flagged Sectors (longs blocked)</h3>
+      <div class="chip-list" id="panicSectors" style="margin-bottom:10px;"></div>
+      <h3 style="font-size:11px;color:var(--text-dim);margin:0 0 6px;text-transform:uppercase;">Blocked Symbols</h3>
+      <div id="blockedSymbols"></div>
+      <h3 style="font-size:11px;color:var(--text-dim);margin:10px 0 6px;text-transform:uppercase;">Frozen-Feed Symbols (no new entries, no trailing-stop ratchet)</h3>
+      <div class="chip-list" id="frozenSymbols"></div>
+      <h3 style="font-size:11px;color:var(--text-dim);margin:10px 0 6px;text-transform:uppercase;">Circuit-Proximity Symbols (no new entries, open positions closed pre-emptively)</h3>
+      <div class="chip-list" id="circuitSymbols"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Sectors</h2>
+      <div class="grid-2">
+        <div>
+          <h3 style="color:var(--green);font-size:11px;margin:0 0 6px;">Green</h3>
+          <div class="chip-list" id="sectorsGreen"></div>
+        </div>
+        <div>
+          <h3 style="color:var(--red);font-size:11px;margin:0 0 6px;">Red</h3>
+          <div class="chip-list" id="sectorsRed"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============ Row 4: News Feed | System Health ============ -->
+  <div class="layout-2col" style="margin-top:14px;">
+
+    <div class="panel">
+      <h2>News Feed — today's HIGH-priority items</h2>
+      <div id="newsFeed"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Feed &amp; System Health</h2>
+      <div class="health-grid" id="healthGrid"></div>
+    </div>
+
+  </div>
+
+  <!-- ============ Bottom: Closed Trades | Performance ============ -->
+  <div class="layout-2col">
+
+    <div class="panel">
+      <h2>Closed Trades</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>S.No</th><th>Symbol</th><th>Direction</th><th>Sector</th>
+              <th>Entry Time</th><th>Entry Price</th><th>Exit Price</th><th>Stop</th><th>Target</th>
+              <th>Reason</th><th>Exit Time</th><th>Exit Reason</th><th>Holding (min)</th><th>PnL</th>
+            </tr>
+          </thead>
+          <tbody id="closedRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Performance</h2>
+      <div class="grid-5" id="perfGrid"></div>
+    </div>
+
+  </div>
+
+</main>
+
+<footer id="footerStats"></footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// Replaced server-side with the real token ONLY when this page was
+// requested with the correct ?token=... (dashboard/server.py). Stays
+// empty for anyone else -- see dashboard/access_token.py for why an
+// empty token here means every write endpoint below will 403.
+window.__OPERATOR_TOKEN__ = "";
+const IS_OPERATOR = window.__OPERATOR_TOKEN__ !== "";
+
+if (!IS_OPERATOR) {
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("viewOnlyBadge").style.display = "inline";
+    document.getElementById("exitAllBtn").style.display = "none";
+  });
+}
+
+const fmtINR = (n) => {
+  if (n === null || n === undefined || isNaN(n)) return "—";
+  return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+};
+const fmtNum = (n) => (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toLocaleString("en-IN");
+const fmtPct = (n) => (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toFixed(2) + "%";
+const fmtRR = (n) => (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toFixed(2) + "R";
+const fmtHoldingMinutes = (secs) => (secs === null || secs === undefined) ? "—" : (Math.round(secs / 6) / 10) + " min";
+const pnlClass = (v) => (v === null || v === undefined) ? "" : (v >= 0 ? "pos" : "neg");
+const escapeHtml = (s) => (s ?? "").toString().replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const dirBadge = (d) => `<span class="badge ${d === 'SHORT' ? 'short' : 'long'}">${escapeHtml(d || 'LONG')}</span>`;
+const glRow = (r) => `<tr>
+  <td>${r.s_no}</td>
+  <td><strong>${escapeHtml(r.symbol)}</strong></td>
+  <td>${escapeHtml(r.sector || "—")}</td>
+  <td>${fmtNum(r.open)}</td>
+  <td>${fmtNum(r.high)}</td>
+  <td>${fmtNum(r.low)}</td>
+  <td>${fmtNum(r.prev_close)}</td>
+  <td><strong>${fmtNum(r.ltp)}</strong></td>
+  <td class="${pnlClass(r.change)}">${fmtNum(r.change)}</td>
+  <td class="${pnlClass(r.change_pct)}">${fmtPct(r.change_pct)}</td>
+  <td>${fmtNum(r.volume)}</td>
+</tr>`;
+const sectorRow = (r) => `<tr>
+  <td>${r.s_no}</td>
+  <td><strong>${escapeHtml(r.sector)}</strong></td>
+  <td class="${pnlClass(r.avg_change_pct)}">${fmtPct(r.avg_change_pct)}</td>
+  <td>${fmtNum(r.symbol_count)}</td>
+</tr>`;
+
+let toastTimer = null;
+function showToast(msg, kind) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "toast show " + (kind || "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+async function postAction(url, successMsg) {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "X-Operator-Token": window.__OPERATOR_TOKEN__ },
+    });
+    if (res.status === 403) {
+      showToast("View-only link — this needs the operator link to act.", "err");
+      return;
+    }
+    const data = await res.json();
+    if (data.success) {
+      showToast(successMsg, "ok");
+    } else {
+      showToast(data.error || "Request failed", "err");
+    }
+  } catch (e) {
+    showToast("Network error — is the bot running?", "err");
+  }
+}
+
+document.getElementById("exitAllBtn").addEventListener("click", () => {
+  if (!confirm("Exit ALL open positions now?")) return;
+  postAction("/api/exit_all", "EXIT ALL requested");
+});
+
+function sell(symbol) {
+  postAction(`/api/sell/${symbol}`, `SELL requested: ${symbol}`);
+}
+
+function render(snap) {
+  if (!snap || !snap.ready) return;
+
+  document.getElementById("updatedAt").textContent = "Updated " + (snap.updated_at || "—");
+
+  const cap = snap.capital || {};
+  const openPnl = (snap.open_positions || []).reduce((sum, r) => sum + (r.pnl || 0), 0);
+
+  // -- top bar quick stats --
+  document.getElementById("topbarStats").innerHTML = [
+    { l: "Live P&L", v: fmtINR((cap.realized_pnl || 0) + openPnl), cls: pnlClass((cap.realized_pnl || 0) + openPnl) },
+    { l: "Buying Power", v: fmtINR(cap.available_buying_power), cls: "" },
+    { l: "Open", v: fmtNum((snap.open_positions || []).length), cls: "" },
+  ].map(s => `<div class="topbar-stat"><span class="tl">${s.l}</span><span class="tv ${s.cls}">${s.v}</span></div>`).join("");
+
+  // -- stat cards --
+  const cards = [
+    { label: "Available Capital", value: fmtINR(cap.available_capital), cls: "" },
+    { label: "Realized PnL", value: fmtINR(cap.realized_pnl), cls: pnlClass(cap.realized_pnl) },
+    { label: "Live Unrealized PnL", value: fmtINR(openPnl), cls: pnlClass(openPnl) },
+    { label: "Open Positions", value: fmtNum((snap.open_positions || []).length), cls: "" },
+    { label: "Buying Power (MIS)", value: fmtINR(cap.buying_power), cls: "" },
+    { label: "Used Margin", value: fmtINR(cap.used_margin), cls: "" },
+    { label: "Available Buying Power", value: fmtINR(cap.available_buying_power), cls: (cap.available_buying_power !== undefined && cap.available_buying_power <= 0) ? "neg" : "" },
+    { label: "Deployed Capital (MTM)", value: fmtINR(cap.deployed_capital), cls: "" },
+  ];
+  document.getElementById("statCards").innerHTML = cards.map(c =>
+    `<div class="card"><div class="label">${c.label}</div><div class="value ${c.cls}">${c.value}</div></div>`
+  ).join("");
+
+  // -- breadth --
+  const total = snap.universe_size || 0;
+  document.getElementById("breadthRow").innerHTML = `
+    <div class="breadth-chip adv">Advances: ${fmtNum(snap.advances)}/${fmtNum(total)}</div>
+    <div class="breadth-chip dec">Declines: ${fmtNum(snap.declines)}/${fmtNum(total)}</div>
+    <div class="breadth-chip unc">Unchanged: ${fmtNum(snap.unchanged)}/${fmtNum(total)}</div>
+  `;
+
+  // -- momentum universe (TOP_N_MOMENTUM_MODE) --
+  const momentum = snap.momentum_universe || { enabled: false, locked: false, long: [], short: [] };
+  const momentumBadge = document.getElementById("momentumStatusBadge");
+  if (!momentum.enabled) {
+    momentumBadge.innerHTML = `<span class="chip">MODE OFF</span>`;
+  } else if (!momentum.locked) {
+    momentumBadge.innerHTML = `<span class="chip">NOT YET LOCKED (locks at 09:30)</span>`;
+  } else {
+    momentumBadge.innerHTML = `<span class="chip green">LOCKED — ${momentum.long.length} long / ${momentum.short.length} short</span>`;
+  }
+  document.getElementById("momentumLong").innerHTML = momentum.long.length
+    ? momentum.long.map(s => `<span class="chip green">${escapeHtml(s)}</span>`).join("")
+    : `<span class="empty-note">${momentum.enabled ? "None yet" : "Mode is off"}</span>`;
+  document.getElementById("momentumShort").innerHTML = momentum.short.length
+    ? momentum.short.map(s => `<span class="chip red">${escapeHtml(s)}</span>`).join("")
+    : `<span class="empty-note">${momentum.enabled ? "None yet" : "Mode is off"}</span>`;
+
+  // -- sectors (green/red chips) --
+  const sectors = snap.sectors || { green: [], red: [] };
+  document.getElementById("sectorsGreen").innerHTML = sectors.green.length
+    ? sectors.green.map(s => `<span class="chip green">${escapeHtml(s)}</span>`).join("")
+    : `<span class="empty-note">None</span>`;
+  document.getElementById("sectorsRed").innerHTML = sectors.red.length
+    ? sectors.red.map(s => `<span class="chip red">${escapeHtml(s)}</span>`).join("")
+    : `<span class="empty-note">None</span>`;
+
+  // -- news feed --
+  const newsFeed = snap.news_feed || [];
+  document.getElementById("newsFeed").innerHTML = newsFeed.length
+    ? newsFeed.map(n => `<div class="news-item">
+        <div class="nh">
+          <span><strong>${escapeHtml(n.symbol)}</strong> <span class="${n.direction === 'bullish' ? 'dir-bull' : 'dir-bear'}">${escapeHtml(n.direction)} (${n.confidence ?? '—'}%)</span></span>
+          <span class="time">${escapeHtml((n.time || '').replace('T', ' '))}</span>
+        </div>
+        <div class="reason">${escapeHtml(n.reason)}</div>
+      </div>`).join("")
+    : `<span class="empty-note">No HIGH-priority news today</span>`;
+
+  // -- Top gainers / losers (replaces the old ORB watchlist, 2026-07-23) --
+  const gl = snap.gainers_losers || { gainers: [], losers: [] };
+  document.getElementById("glUpdatedAt").textContent = gl.built_at ? `As of ${gl.built_at} IST` : "";
+  document.getElementById("gainersRows").innerHTML = (gl.gainers || []).length
+    ? gl.gainers.map(glRow).join("")
+    : `<tr><td colspan="11" class="no-rows">No data yet</td></tr>`;
+  document.getElementById("losersRows").innerHTML = (gl.losers || []).length
+    ? gl.losers.map(glRow).join("")
+    : `<tr><td colspan="11" class="no-rows">No data yet</td></tr>`;
+
+  // -- sector heatmap (Top Gaining/Losing Sectors, redesigned 2026-07-23
+  // evening to match Top 50 Gainers/Losers -- same throttled source,
+  // see dashboard/state.py's _build_gainers_losers() docstring) --
+  document.getElementById("sectorGainersRows").innerHTML = (gl.sector_gainers || []).length
+    ? gl.sector_gainers.map(sectorRow).join("")
+    : `<tr><td colspan="4" class="no-rows">No data yet</td></tr>`;
+  document.getElementById("sectorLosersRows").innerHTML = (gl.sector_losers || []).length
+    ? gl.sector_losers.map(sectorRow).join("")
+    : `<tr><td colspan="4" class="no-rows">No data yet</td></tr>`;
+
+  // -- open positions --
+  // Columns per operator spec (2026-07-23): S.No, Symbol, Direction,
+  // Entry Time, Entry Price, CMP, MTM, Trail SL, Reason. RR is still
+  // computed in the backend (dashboard/state.py) and available on
+  // each row if a future column wants it -- just not shown here.
+  const openRows = snap.open_positions || [];
+  document.getElementById("openRows").innerHTML = openRows.length
+    ? openRows.map((r, i) => `
+        <tr>
+          <td>${i + 1}</td>
+          <td><strong>${escapeHtml(r.symbol)}</strong></td>
+          <td>${dirBadge(r.direction)}</td>
+          <td>${escapeHtml(r.entry_time)}</td>
+          <td>${fmtINR(r.entry_price)}</td>
+          <td>${fmtINR(r.last_price)}</td>
+          <td class="${pnlClass(r.pnl)}">${fmtINR(r.pnl)}</td>
+          <td>${fmtINR(r.stop)}</td>
+          <td>${r.fixed_target != null ? fmtINR(r.fixed_target) : "—"}</td>
+          <td>${escapeHtml(r.entry_reason)}</td>
+          <td>${IS_OPERATOR ? `<button class="btn-sell btn-sm" onclick="sell('${r.symbol}')">EXIT</button>` : ""}</td>
+        </tr>`).join("")
+    : `<tr><td colspan="11" class="no-rows">No open positions</td></tr>`;
+
+  // -- closed positions --
+  // Same columns as Open Positions (S.No, Symbol, Direction, Entry
+  // Time, Entry Price, Reason) plus Sector, Exit Time, Exit Reason,
+  // PnL. "CMP"/"MTM" don't apply once a trade is closed -- Exit
+  // Price and the final PnL are their natural equivalents, so those
+  // replace them rather than showing two redundant PnL-ish columns.
+  // "Stop" shows the stop AS SEEDED at entry (initial_stop) -- the
+  // live ratcheted stop isn't kept once a position closes.
+  const closedRows = snap.closed_positions || [];
+  document.getElementById("closedRows").innerHTML = closedRows.length
+    ? closedRows.map((r, i) => `
+        <tr>
+          <td>${i + 1}</td>
+          <td><strong>${escapeHtml(r.symbol)}</strong></td>
+          <td>${dirBadge(r.direction)}</td>
+          <td>${escapeHtml(r.sector)}</td>
+          <td>${escapeHtml(r.entry_time)}</td>
+          <td>${fmtINR(r.entry_price)}</td>
+          <td>${fmtINR(r.exit_price)}</td>
+          <td>${fmtINR(r.initial_stop)}</td>
+          <td>${r.fixed_target != null ? fmtINR(r.fixed_target) : "—"}</td>
+          <td>${escapeHtml(r.entry_reason)}</td>
+          <td>${escapeHtml(r.exit_time)}</td>
+          <td>${escapeHtml(r.exit_reason)}</td>
+          <td>${fmtHoldingMinutes(r.holding_seconds)}</td>
+          <td class="${pnlClass(r.pnl)}">${fmtINR(r.pnl)}</td>
+        </tr>`).join("")
+    : `<tr><td colspan="14" class="no-rows">No closed positions yet</td></tr>`;
+
+  // -- risk filters --
+  const risk = snap.risk_filters || { panic_sectors: [], blocked_symbols: [], frozen_symbols: [], circuit_flagged_symbols: [] };
+  document.getElementById("panicSectors").innerHTML = risk.panic_sectors.length
+    ? risk.panic_sectors.map(s => `<span class="chip red">${escapeHtml(s)}</span>`).join("")
+    : `<span class="empty-note">None</span>`;
+  document.getElementById("blockedSymbols").innerHTML = risk.blocked_symbols.length
+    ? risk.blocked_symbols.map(b => `
+        <div class="risk-row">
+          <span><strong>${escapeHtml(b.symbol)}</strong> ${dirBadge(b.direction)}</span>
+          <span class="reason">${escapeHtml(b.reason)}</span>
+        </div>`).join("")
+    : `<span class="empty-note">Nothing blocked today</span>`;
+  document.getElementById("frozenSymbols").innerHTML = (risk.frozen_symbols || []).length
+    ? risk.frozen_symbols.map(s => `<span class="chip red">${escapeHtml(s)}</span>`).join("")
+    : `<span class="empty-note">None</span>`;
+  document.getElementById("circuitSymbols").innerHTML = (risk.circuit_flagged_symbols || []).length
+    ? risk.circuit_flagged_symbols.map(c => `<span class="chip red">${escapeHtml(c.symbol)} (${c.side}, ${c.gap_pct}%)</span>`).join("")
+    : `<span class="empty-note">None</span>`;
+
+  // -- performance --
+  const perf = snap.performance || {};
+  const perfCards = [
+    { label: "Win Rate", value: perf.win_rate_pct !== null && perf.win_rate_pct !== undefined ? perf.win_rate_pct + "%" : "—", cls: "" },
+    { label: "Profit Factor", value: perf.profit_factor ?? "—", cls: "" },
+    { label: "Avg Win", value: fmtINR(perf.avg_win), cls: "pos" },
+    { label: "Avg Loss", value: perf.avg_loss !== null && perf.avg_loss !== undefined ? "-" + fmtINR(perf.avg_loss) : "—", cls: "neg" },
+    { label: "Max Drawdown", value: fmtINR(perf.max_drawdown), cls: perf.max_drawdown > 0 ? "neg" : "" },
+    { label: "Net P&L", value: fmtINR(perf.net_pnl), cls: pnlClass(perf.net_pnl) },
+    { label: "Trades (W/L/Flat)", value: `${fmtNum(perf.total_trades)} (${fmtNum(perf.wins)}/${fmtNum(perf.losses)}/${fmtNum(perf.flat)})`, cls: "" },
+  ];
+  document.getElementById("perfGrid").innerHTML = perfCards.map(c =>
+    `<div class="card"><div class="label">${c.label}</div><div class="value ${c.cls}" style="font-size:16px;">${c.value}</div></div>`
+  ).join("");
+
+  // -- system health / footer --
+  const health = snap.system_health || {};
+  const feedLabel = health.feed_alive === true ? "Live" : health.feed_alive === false ? "Down" : "Unknown";
+  const feedCls = health.feed_alive === true ? "pos" : health.feed_alive === false ? "neg" : "";
+  document.getElementById("healthGrid").innerHTML = [
+    { l: "Feed", v: feedLabel, cls: feedCls },
+    { l: "Ticks", v: fmtNum(health.tick_count), cls: "" },
+    { l: "Stale Flagged", v: fmtNum(health.stale_symbols_flagged), cls: health.stale_symbols_flagged > 0 ? "neg" : "" },
+    { l: "Universe", v: fmtNum(health.universe_size), cls: "" },
+    { l: "CPU", v: health.cpu_pct !== null && health.cpu_pct !== undefined ? health.cpu_pct + "%" : "—", cls: "" },
+    { l: "RAM", v: health.ram_mb !== null && health.ram_mb !== undefined ? health.ram_mb + " MB" : "—", cls: "" },
+  ].map(s => `<div class="health-item"><span class="hl">${s.l}</span><strong class="${s.cls}">${s.v}</strong></div>`).join("");
+
+  document.getElementById("footerStats").innerHTML = `
+    <span><strong>${fmtNum(health.universe_size)}</strong> Stock Universe</span>
+    <span>Exchange: <strong>NSE</strong></span>
+    <span>Feed: <strong class="${feedCls}">${feedLabel}</strong></span>
+    <span>Ticks: <strong>${fmtNum(health.tick_count)}</strong></span>
+    <span>Stale: <strong>${fmtNum(health.stale_symbols_flagged)}</strong></span>
+    <span>CPU: <strong>${health.cpu_pct !== null && health.cpu_pct !== undefined ? health.cpu_pct + '%' : '—'}</strong></span>
+    <span>RAM: <strong>${health.ram_mb !== null && health.ram_mb !== undefined ? health.ram_mb + ' MB' : '—'}</strong></span>
+    <span id="footerClock"></span>
+  `;
+}
+
+setInterval(() => {
+  const el = document.getElementById("footerClock");
+  if (el) el.innerHTML = "Local time: <strong>" + new Date().toLocaleTimeString("en-IN") + "</strong>";
+}, 1000);
+
+// -- WebSocket with auto-reconnect --
+let ws = null;
+let reconnectDelay = 1000;
+
+function setStatus(live) {
+  const dot = document.getElementById("statusDot");
+  const text = document.getElementById("statusText");
+  dot.className = "status-dot " + (live ? "live" : "down");
+  text.textContent = live ? "Live" : "Reconnecting…";
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    setStatus(true);
+    reconnectDelay = 1000;
+  };
+  ws.onmessage = (event) => {
+    try { render(JSON.parse(event.data)); } catch (e) { /* ignore malformed frame */ }
+  };
+  ws.onclose = () => {
+    setStatus(false);
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+  };
+  ws.onerror = () => { ws.close(); };
+}
+
+connect();
+</script>
+
+</body>
+</html>

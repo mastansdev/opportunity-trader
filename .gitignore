@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+logs/*.log
+logs/*.csv
+data/*.csv
+data/session_state.json
+data/ai_call_budget.json
+data/news_audit_log.jsonl
+data/news_high_priority.jsonl
+data/dashboard_token.txt
+
+# Databases (regenerated; keep the repo light)
+data/*.db
+*.db-journal

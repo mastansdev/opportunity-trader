@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Opportunity Trader — Live Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #131722;
+    --panel-2: #1a1f2e;
+    --border: #262c3d;
+    --text: #e6e9f0;
+    --text-dim: #8b93a7;
+    --green: #22c55e;
+    --red: #ef4444;
+    --amber: #f59e0b;
+    --blue: #3b82f6;
+    --accent: #6366f1;
+  }
+  html.light {
+    --bg: #eef1f6;
+    --panel: #ffffff;
+    --panel-2: #f2f4f9;
+    --border: #d5dbe6;
+    --text: #1a2233;
+    --text-dim: #5b6577;
+    --green: #16a34a;
+    --red: #dc2626;
+    --amber: #b45309;
+    --blue: #2563eb;
+    --accent: #4f46e5;
+  }
+  .theme-toggle {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; width: 34px; height: 30px; cursor: pointer; font-size: 15px;
+    display: inline-flex; align-items: center; justify-content: center; line-height: 1;
+  }
+  .theme-toggle:hover { border-color: var(--accent); }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 24px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  header h1 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+  }
+  header h1 span { color: var(--text-dim); font-weight: 400; }
+  .topbar-stats { display: flex; align-items: center; gap: 22px; font-size: 12px; flex-wrap: wrap; }
+  .topbar-stat { display: flex; flex-direction: column; gap: 2px; }
+  .topbar-stat .tl { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .topbar-stat .tv { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 13px; }
+  .status-wrap { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--text-dim); }
+  .status-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.down { background: var(--red); box-shadow: 0 0 6px var(--red); }
+
+  main { padding: 16px 20px 40px; max-width: 1800px; margin: 0 auto; }
+
+  .layout-2col { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; align-items: start; margin-top: 14px; }
+  @media (max-width: 1200px) {
+    .layout-2col { grid-template-columns: 1fr; }
+  }
+  .col { display: flex; flex-direction: column; gap: 14px; }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .card .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .card .value { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .value.pos { color: var(--green); }
+  .value.neg { color: var(--red); }
+
+  .breadth-row { display: flex; gap: 8px; margin-top: 8px; }
+  .breadth-chip { flex: 1; text-align: center; padding: 4px 0; border-radius: 6px; font-size: 12px; }
+  .breadth-chip.adv { background: rgba(34,197,94,0.12); color: var(--green); }
+  .breadth-chip.dec { background: rgba(239,68,68,0.12); color: var(--red); }
+  .breadth-chip.unc { background: rgba(139,147,167,0.12); color: var(--text-dim); }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .panel h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-dim);
+    margin: 0 0 10px 0;
+    font-weight: 600;
+  }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .grid-5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+
+  .chip-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 22px; }
+  .chip { padding: 3px 10px; border-radius: 999px; font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); }
+  .chip.green { color: var(--green); border-color: rgba(34,197,94,0.4); }
+  .chip.red { color: var(--red); border-color: rgba(239,68,68,0.4); }
+  .empty-note { color: var(--text-dim); font-size: 12px; font-style: italic; }
+
+  .dir-bull { color: var(--green); }
+  .dir-bear { color: var(--red); }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.3px; }
+  .badge.long { background: rgba(34,197,94,0.15); color: var(--green); }
+  .badge.short { background: rgba(239,68,68,0.15); color: var(--red); }
+
+  .risk-row { display: flex; justify-content: space-between; align-items: flex-start; padding: 7px 8px; border-radius: 6px; background: var(--panel-2); margin-bottom: 6px; font-size: 12px; }
+  .risk-row .reason { color: var(--text-dim); font-size: 11px; max-width: 60%; text-align: right; }
+
+  .news-item { padding: 7px 8px; border-radius: 6px; background: var(--panel-2); margin-bottom: 6px; font-size: 12px; }
+  .news-item.blocking { border-left: 3px solid var(--red); }
+  .news-item .nh { display: flex; justify-content: space-between; margin-bottom: 2px; align-items: center; }
+  .news-item .nh-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .news-item .reason { color: var(--text-dim); font-size: 11px; }
+  .news-item .time { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+  .news-badge { font-size: 9px; font-weight: 700; letter-spacing: .3px; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; }
+  .nb-high { background: rgba(239,68,68,.16); color: var(--red); }
+  .nb-mid { background: var(--panel); color: var(--text-dim); border: 1px solid var(--border); }
+  .nb-block { background: var(--red); color: #fff; }
+  .nb-keyword { background: rgba(245,158,11,.16); color: var(--amber, #f59e0b); }
+  .nb-haiku { background: rgba(59,130,246,.16); color: var(--blue, #3b82f6); }
+  .news-counts { display: flex; gap: 10px; font-size: 10px; color: var(--text-dim); margin-bottom: 8px; flex-wrap: wrap; }
+  .news-counts b { color: var(--text); }
+
+  .health-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 12px; }
+  .health-item { display: flex; justify-content: space-between; padding: 6px 8px; background: var(--panel-2); border-radius: 6px; }
+  .health-item .hl { color: var(--text-dim); }
+
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    transition: opacity 0.15s;
+  }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sell { background: var(--red); color: #2b0808; }
+  .btn-exit-all { background: var(--amber); color: #2b1c02; }
+  .btn-buy { background: var(--green); color: #06210f; }
+  .btn-short { background: var(--red); color: #2b0808; }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--text-dim); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 7px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 8px 6px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.pos { color: var(--green); }
+  td.neg { color: var(--red); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .table-wrap { overflow-x: auto; }
+  .table-wrap-scroll { max-height: 480px; overflow-y: auto; }
+  .table-wrap-scroll th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .no-rows { text-align: center; color: var(--text-dim); padding: 18px; font-style: italic; }
+  .gl-col-title { font-size: 12px; font-weight: 600; margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .gl-up { color: var(--green); }
+  .gl-down { color: var(--red); }
+
+  .panel-head-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .panel-head-row h2 { margin: 0; }
+
+  footer {
+    max-width: 1800px; margin: 0 auto; padding: 10px 20px 30px;
+    display: flex; flex-wrap: wrap; gap: 18px; font-size: 11px; color: var(--text-dim);
+    border-top: 1px solid var(--border); margin-top: 10px; padding-top: 14px;
+  }
+  footer strong { color: var(--text); }
+
+  .toast {
+    position: fixed; bottom: 20px; right: 20px; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px;
+    font-size: 13px; opacity: 0; transform: translateY(8px);
+    transition: opacity 0.25s, transform 0.25s; z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.err { border-color: var(--red); color: var(--red); }
+  .toast.ok { border-color: var(--green); color: var(--green); }
+
+  /* EXIT ALL popup -- 2026-07-24, operator's own request: "a popup
+     or box showing Stop new entries button & exit all and only
+     exit all, new entries will resume after all open positions will
+     exit." */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 200; align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 22px; max-width: 420px; width: 90%;
+  }
+  .modal-box h3 { margin: 0 0 6px; font-size: 15px; }
+  .modal-box p { margin: 0 0 18px; font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+  .modal-actions { display: flex; flex-direction: column; gap: 8px; }
+  .modal-actions button { width: 100%; padding: 10px 14px; font-size: 12px; }
+  .btn-modal-primary { background: var(--amber); color: #2b1c02; }
+  .btn-modal-secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .btn-modal-cancel { background: transparent; color: var(--text-dim); }
+  .modal-actions button small { display: block; font-weight: 400; opacity: 0.8; margin-top: 2px; }
+
+  .paused-banner {
+    display: none; background: rgba(245,158,11,0.12); border: 1px solid var(--amber);
+    color: var(--amber); border-radius: 8px; padding: 8px 14px; font-size: 12px;
+    font-weight: 600; margin-bottom: 14px; text-align: center;
+  }
+  .paused-banner.show { display: block; }
+
+  /* -- 2026-07-24 dashboard revamp -- */
+  .pos-count { font-size: 12px; font-weight: 600; color: var(--text-dim); margin-left: 8px; letter-spacing: 0.3px; }
+  .gl-head-right { display: flex; align-items: center; gap: 12px; }
+  .gl-refresh-note { font-size: 10.5px; color: var(--text-dim); text-transform: none; letter-spacing: normal; font-weight: 400; }
+  .btn-refresh { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+  .btn-refresh:hover { border-color: var(--accent, #4c8bf5); color: #fff; }
+  .btn-refresh.spinning { opacity: 0.6; pointer-events: none; }
+
+  /* NSE-style sector heatmap: colored tiles */
+  .heatmap-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .heatmap-col h3 { margin-bottom: 10px; }
+  .heatmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .heat-tile {
+    border-radius: 7px; padding: 10px 11px; min-height: 58px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    border: 1px solid rgba(255,255,255,0.06); color: #f4f6fb;
+    transition: transform 0.08s ease; overflow: hidden;
+  }
+  .heat-tile:hover { transform: translateY(-2px); }
+  .heat-tile .ht-name { font-size: 11.5px; font-weight: 700; line-height: 1.2; letter-spacing: 0.2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .heat-tile .ht-foot { display: flex; justify-content: space-between; align-items: baseline; margin-top: 6px; }
+  .heat-tile .ht-pct { font-size: 15px; font-weight: 800; }
+  .heat-tile .ht-cnt { font-size: 10px; opacity: 0.8; }
+  .heatmap-empty { color: var(--text-dim); font-style: italic; font-size: 12px; padding: 10px 2px; grid-column: 1 / -1; }
+
+  /* Market Intelligence */
+  .mkt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .mkt-cell { background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 10px 12px; }
+  .mkt-cell .mc-label { font-size: 10.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; }
+  .mkt-cell .mc-value { font-size: 17px; font-weight: 700; margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .mkt-cell .mc-sub { font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }
+  .mkt-cell.na { opacity: 0.6; }
+  .mc-bull { color: var(--green); } .mc-bear { color: var(--red); } .mc-flat { color: var(--amber); }
+  .daily-goal-wrap { margin-top: 16px; }
+  .daily-goal-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .daily-goal-val { font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .daily-goal-bar { position: relative; height: 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .daily-goal-fill { position: absolute; top: 0; bottom: 0; border-radius: 0; transition: width 0.3s ease, left 0.3s ease; }
+  .daily-goal-zero { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-dim); left: 50%; }
+  .daily-goal-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim); margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Opportunity Trader <span>· NSE Equity ORB · PAPER MODE</span></h1>
+  <div class="topbar-stats" id="topbarStats"></div>
+  <button class="theme-toggle" id="themeToggle" title="Toggle light / dark" aria-label="Toggle theme">☾</button>
+  <div class="status-wrap">
+    <span id="viewOnlyBadge" style="display:none;color:var(--amber);font-weight:600;">VIEW ONLY</span>
+    <span id="squareoffCountdown" title="Time to auto square-off (15:15)"></span>
+    <span id="updatedAt">—</span>
+    <span><span class="status-dot down" id="statusDot"></span><span id="statusText">Connecting…</span></span>
+  </div>
+</header>
+
+<main>
+
+  <div class="paused-banner" id="pausedBanner">
+    <span>New entries are PAUSED — the bot will not open any positions until you resume.</span>
+    <button class="btn-modal-primary" id="resumeEntriesBtn" style="margin-left:12px;padding:4px 14px;">Resume New Entries</button>
+  </div>
+
+  <div class="cards" id="statCards"></div>
+
+  <!-- ============ Market Intelligence + Daily Guardrail ============ -->
+  <div class="panel" style="margin-bottom:14px;">
+    <div class="panel-head-row">
+      <h2>Market Intelligence</h2>
+      <span class="gl-refresh-note" id="mktRegimeBadge"></span>
+    </div>
+    <div class="mkt-grid" id="mktGrid"></div>
+    <div class="daily-goal-wrap">
+      <div class="daily-goal-head">
+        <span>Daily realized P&amp;L (net of costs)</span>
+        <span id="dailyPnlVal" class="daily-goal-val">—</span>
+      </div>
+      <div class="daily-goal-bar"><div class="daily-goal-fill" id="dailyGoalFill"></div>
+        <div class="daily-goal-zero" id="dailyGoalZero"></div></div>
+      <div class="daily-goal-scale">
+        <span id="dailyLossLabel" class="neg">loss halt</span>
+        <span>0</span>
+        <span id="dailyGoalLabel" class="pos">goal</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:14px;">
+    <h2>Market Breadth</h2>
+    <div class="breadth-row" id="breadthRow"></div>
+  </div>
+
+  <!-- ============ POSITIONS (full width) ============ -->
+  <div class="panel">
+    <div class="panel-head-row">
+      <h2>POSITIONS <span id="positionsCount" class="pos-count"></span></h2>
+      <button class="btn-exit-all btn-sm" id="exitAllBtn">EXIT ALL</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>S.No</th><th>Symbol</th><th>Direction</th><th>Qty</th><th>Entry Time</th>
+            <th>Entry Price</th><th>CMP</th><th>MTM</th><th>Stop</th><th>Target</th>
+            <th>Reason</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="openRows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============ Top Gainers / Top Losers -- right below Open Positions ============ -->
+  <div class="panel" style="margin-top:14px;">
+    <div class="panel-head-row">
+      <h2>Top 50 Gainers &amp; Losers</h2>
+      <div class="gl-head-right">
+        <span class="empty-note" id="glUpdatedAt"></span>
+        <span class="gl-refresh-note">refreshes every 30 secs</span>
+        <button class="btn-refresh btn-sm" id="glRefreshBtn" title="Refresh now">⟳ Refresh</button>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div>
+        <h3 class="gl-col-title gl-up">Top 50 Gainers</h3>
+        <div class="table-wrap table-wrap-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>S.No</th><th>Symbol</th><th>Sector</th><th>Open</th><th>High</th><th>Low</th>
+                <th>Prev Close</th><th>LTP</th><th>Change</th><th>Change%</th><th>Volume</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="gainersRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h3 class="gl-col-title gl-down">Top 50 Losers</h3>
+        <div class="table-wrap table-wrap-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>S.No</th><th>Symbol</th><th>Sector</th><th>Open</th><th>High</th><th>Low</th>
+                <th>Prev Close</th><th>LTP</th><th>Change</th><th>Change%</th><th>Volume</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="losersRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Sector Heatmap -- NSE-style colored-tile grid,
+       2026-07-24. Top 10 gaining + top 10 losing momentum sectors
+       only (config.SECTOR_HEATMAP_TOP_N). ============ -->
+  <div class="panel" style="margin-top:14px;">
+    <div class="panel-head-row">
+      <h2>Sector Heatmap <span class="gl-refresh-note">top 10 momentum sectors each side</span></h2>
+      <span class="empty-note" id="sectorUpdatedAt"></span>
+    </div>
+    <div class="heatmap-wrap">
+      <div class="heatmap-col">
+        <h3 class="gl-col-title gl-up">Top Gaining Sectors</h3>
+        <div class="heatmap-grid" id="sectorHeatGainers"></div>
+      </div>
+      <div class="heatmap-col">
+        <h3 class="gl-col-title gl-down">Top Losing Sectors</h3>
+        <div class="heatmap-grid" id="sectorHeatLosers"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Risk Alerts | Sectors ============ -->
+  <div class="layout-2col" style="margin-top:14px;">
+
+    <div class="panel">
+      <h2>Risk Alerts</h2>
+      <h3 style="font-size:11px;color:var(--text-dim);margin:0 0 6px;text-transform:uppercase;">Panic-Flagged Sectors (longs blocked)</h3>
+      <div class="chip-list" id="panicSectors" style="margin-bottom:10px;"></div>
+      <h3 style="font-size:11px;color:var(--text-dim);margin:0 0 6px;text-transform:uppercase;">Blocked Symbols</h3>
+      <div id="blockedSymbols"></div>
+      <h3 style="font-size:11px;color:var(--text-dim);margin:10px 0 6px;text-transform:uppercase;">Frozen-Feed Symbols (no new entries, no trailing-stop ratchet)</h3>
+      <div class="chip-list" id="frozenSymbols"></div>
+      <h3 style="font-size:11px;color:var(--text-dim);margin:10px 0 6px;text-transform:uppercase;">Circuit-Proximity Symbols (no new entries, open positions closed pre-emptively)</h3>
+      <div class="chip-list" id="circuitSymbols"></div>
+    </div>
+
+    <div class="panel">
+      <h2>My Book <span id="longShortScore" class="gl-refresh-note"></span></h2>
+      <h3 style="font-size:11px;color:var(--text-dim);margin:2px 0 6px;text-transform:uppercase;">Open exposure by sector</h3>
+      <div id="bookExposure"></div>
+      <h3 style="font-size:11px;color:var(--text-dim);margin:12px 0 6px;text-transform:uppercase;">Today's net P&amp;L by sector (after costs)</h3>
+      <div id="bookSectorPnl"></div>
+    </div>
+
+  </div>
+
+  <!-- ============ Row 4: News Feed | System Health ============ -->
+  <div class="layout-2col" style="margin-top:14px;">
+
+    <div class="panel">
+      <h2>News Impact — today's HIGH &amp; MID items</h2>
+      <div id="newsCounts" class="news-counts"></div>
+      <div id="newsFeed"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Feed &amp; System Health</h2>
+      <div class="health-grid" id="healthGrid"></div>
+    </div>
+
+  </div>
+
+  <!-- ============ Bottom: Closed Trades | Performance ============ -->
+  <div class="layout-2col">
+
+    <div class="panel">
+      <h2>Closed Trades</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>S.No</th><th>Symbol</th><th>Direction</th><th>Qty</th><th>Sector</th>
+              <th>Entry Time</th><th>Entry Price</th><th>Exit Price</th><th>Stop</th><th>Target</th>
+              <th>Reason</th><th>Exit Time</th><th>Exit Reason</th><th>Holding (min)</th>
+              <th>Gross PnL</th><th>Charges</th><th>Net PnL</th>
+            </tr>
+          </thead>
+          <tbody id="closedRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Performance</h2>
+      <div class="grid-5" id="perfGrid"></div>
+    </div>
+
+  </div>
+
+</main>
+
+<footer id="footerStats"></footer>
+
+<div class="toast" id="toast"></div>
+
+<!-- EXIT ALL popup -- 2026-07-24, two distinct choices instead of a
+     single click. See dashboard/server.py's /api/exit_all?pause=
+     and trading/trade_controller.py's request_pause_new_entries(). -->
+<div class="modal-overlay" id="exitAllModal">
+  <div class="modal-box">
+    <h3>Exit All Open Positions</h3>
+    <p>Choose whether the bot should keep taking new automated entries while positions are being flattened.</p>
+    <div class="modal-actions">
+      <button class="btn-modal-primary" id="exitAllPauseBtn">
+        Stop New Entries + Exit All
+        <small>Automated entries pause until the book is flat, then resume on their own.</small>
+      </button>
+      <button class="btn-modal-secondary" id="exitAllOnlyBtn">
+        Exit All Only
+        <small>Flattens positions now -- the bot keeps trading normally throughout.</small>
+      </button>
+      <button class="btn-modal-cancel" id="exitAllCancelBtn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Replaced server-side with the real token ONLY when this page was
+// requested with the correct ?token=... (dashboard/server.py). Stays
+// empty for anyone else -- see dashboard/access_token.py for why an
+// empty token here means every write endpoint below will 403.
+window.__OPERATOR_TOKEN__ = "";
+const IS_OPERATOR = window.__OPERATOR_TOKEN__ !== "";
+
+if (!IS_OPERATOR) {
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("viewOnlyBadge").style.display = "inline";
+    document.getElementById("exitAllBtn").style.display = "none";
+  });
+}
+
+const fmtINR = (n) => {
+  if (n === null || n === undefined || isNaN(n)) return "—";
+  return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+};
+const fmtNum = (n) => (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toLocaleString("en-IN");
+const fmtPct = (n) => (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toFixed(2) + "%";
+const fmtRR = (n) => (n === null || n === undefined || isNaN(n)) ? "—" : Number(n).toFixed(2) + "R";
+const fmtHoldingMinutes = (secs) => (secs === null || secs === undefined) ? "—" : (Math.round(secs / 6) / 10) + " min";
+const pnlClass = (v) => (v === null || v === undefined) ? "" : (v >= 0 ? "pos" : "neg");
+const escapeHtml = (s) => (s ?? "").toString().replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const dirBadge = (d) => `<span class="badge ${d === 'SHORT' ? 'short' : 'long'}">${escapeHtml(d || 'LONG')}</span>`;
+// side: "gainer" -> BUY (open a LONG), "loser" -> SHORT (open a SHORT).
+// PAPER mode only -- see trading/trade_controller.py's docstring.
+const glRow = (r, side) => `<tr>
+  <td>${r.s_no}</td>
+  <td><strong>${escapeHtml(r.symbol)}</strong></td>
+  <td>${escapeHtml(r.sector || "—")}</td>
+  <td>${fmtNum(r.open)}</td>
+  <td>${fmtNum(r.high)}</td>
+  <td>${fmtNum(r.low)}</td>
+  <td>${fmtNum(r.prev_close)}</td>
+  <td><strong>${fmtNum(r.ltp)}</strong></td>
+  <td class="${pnlClass(r.change)}">${fmtNum(r.change)}</td>
+  <td class="${pnlClass(r.change_pct)}">${fmtPct(r.change_pct)}</td>
+  <td>${fmtNum(r.volume)}</td>
+  <td>${IS_OPERATOR ? (side === "gainer"
+        ? `<button class="btn-buy btn-sm" onclick="manualBuy('${r.symbol}')">BUY</button>`
+        : `<button class="btn-short btn-sm" onclick="manualShort('${r.symbol}')">SHORT</button>`)
+      : ""}</td>
+</tr>`;
+// NSE-style heatmap tile -- background intensity scales with the
+// magnitude of the move (deeper green up / deeper red down), so the
+// eye lands on the strongest momentum sectors first.
+function heatColor(pct) {
+  const mag = Math.min(Math.abs(pct), 4) / 4;        // 0..1, saturates at 4%
+  const alpha = (0.18 + mag * 0.62).toFixed(2);       // 0.18 .. 0.80
+  return pct >= 0
+    ? `rgba(22,163,74,${alpha})`                       // green
+    : `rgba(220,38,38,${alpha})`;                      // red
+}
+const heatTile = (r) => `
+  <div class="heat-tile" style="background:${heatColor(r.avg_change_pct)}" title="${escapeHtml(r.sector)} — ${r.symbol_count} stocks">
+    <div class="ht-name">${escapeHtml(r.sector)}</div>
+    <div class="ht-foot">
+      <span class="ht-pct">${fmtPct(r.avg_change_pct)}</span>
+      <span class="ht-cnt">${fmtNum(r.symbol_count)} stk</span>
+    </div>
+  </div>`;
+
+let toastTimer = null;
+function showToast(msg, kind) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "toast show " + (kind || "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+async function postAction(url, successMsg) {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "X-Operator-Token": window.__OPERATOR_TOKEN__ },
+    });
+    if (res.status === 403) {
+      showToast("View-only link — this needs the operator link to act.", "err");
+      return;
+    }
+    const data = await res.json();
+    if (data.success) {
+      showToast(successMsg, "ok");
+    } else {
+      showToast(data.error || "Request failed", "err");
+    }
+  } catch (e) {
+    showToast("Network error — is the bot running?", "err");
+  }
+}
+
+const exitAllModal = document.getElementById("exitAllModal");
+
+document.getElementById("exitAllBtn").addEventListener("click", () => {
+  exitAllModal.classList.add("show");
+});
+document.getElementById("exitAllCancelBtn").addEventListener("click", () => {
+  exitAllModal.classList.remove("show");
+});
+exitAllModal.addEventListener("click", (e) => {
+  if (e.target === exitAllModal) exitAllModal.classList.remove("show");
+});
+document.getElementById("exitAllPauseBtn").addEventListener("click", () => {
+  exitAllModal.classList.remove("show");
+  postAction("/api/exit_all?pause=true", "Stopping new entries and exiting all positions");
+});
+document.getElementById("exitAllOnlyBtn").addEventListener("click", () => {
+  exitAllModal.classList.remove("show");
+  postAction("/api/exit_all", "EXIT ALL requested");
+});
+document.getElementById("resumeEntriesBtn").addEventListener("click", () => {
+  postAction("/api/resume_entries", "Resuming new entries");
+});
+
+// -- Theme toggle (sun = light, moon = dark). Persists across
+// reloads via localStorage (real browser, not an artifact). --
+(function initTheme() {
+  const saved = localStorage.getItem("ot-theme") || "dark";
+  applyTheme(saved);
+  document.getElementById("themeToggle").addEventListener("click", () => {
+    const next = document.documentElement.classList.contains("light") ? "dark" : "light";
+    applyTheme(next);
+    localStorage.setItem("ot-theme", next);
+  });
+})();
+function applyTheme(mode) {
+  const root = document.documentElement;
+  const btn = document.getElementById("themeToggle");
+  if (mode === "light") { root.classList.add("light"); btn.textContent = "☀"; btn.title = "Switch to dark"; }
+  else { root.classList.remove("light"); btn.textContent = "☾"; btn.title = "Switch to light"; }
+}
+
+// -- Square-off countdown to 15:15 IST (auto-flatten) --
+setInterval(function updateSquareoff() {
+  const now = new Date();
+  // IST = UTC + 5:30
+  const ist = new Date(now.getTime() + (now.getTimezoneOffset() + 330) * 60000);
+  const sq = new Date(ist); sq.setHours(15, 15, 0, 0);
+  const el = document.getElementById("squareoffCountdown");
+  let diff = Math.floor((sq - ist) / 1000);
+  if (diff <= 0 || ist.getHours() >= 16) { el.textContent = ""; return; }
+  const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60);
+  el.textContent = `⏱ square-off in ${h > 0 ? h + "h " : ""}${m}m`;
+  el.style.color = diff < 900 ? "var(--red)" : "var(--text-dim)";
+}, 1000);
+
+// Manual "Refresh now" for the Top 50 Gainers/Losers + Sector Heatmap
+// -- forces the server to rebuild those (server-throttled) tables
+// immediately instead of waiting for the 30s cadence. No operator
+// token needed (read-only refresh), works on view-only links too.
+document.getElementById("glRefreshBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("glRefreshBtn");
+  btn.classList.add("spinning");
+  try {
+    await fetch("/api/refresh_gainers_losers", { method: "POST" });
+    showToast("Refreshing gainers/losers & sectors…", "ok");
+  } catch (e) {
+    showToast("Network error — is the bot running?", "err");
+  }
+  setTimeout(() => btn.classList.remove("spinning"), 1200);
+});
+
+// Per-row BUY (Top 50 Gainers) / SHORT (Top 50 Losers) buttons --
+// PAPER mode, same simulated execution path as automated trades.
+function manualBuy(symbol) {
+  postAction(`/api/buy/${symbol}`, `BUY requested: ${symbol}`);
+}
+function manualShort(symbol) {
+  postAction(`/api/short/${symbol}`, `SHORT requested: ${symbol}`);
+}
+
+function sell(symbol) {
+  postAction(`/api/sell/${symbol}`, `SELL requested: ${symbol}`);
+}
+
+function mktCell(label, value, cls, sub, na) {
+  return `<div class="mkt-cell${na ? " na" : ""}">
+    <div class="mc-label">${label}</div>
+    <div class="mc-value ${cls || ""}">${value}</div>
+    ${sub ? `<div class="mc-sub">${sub}</div>` : ""}
+  </div>`;
+}
+function trendCell(label, pct, sub) {
+  if (pct === null || pct === undefined) return mktCell(label, "—", "", sub || "needs data feed", true);
+  const cls = pct > 0.05 ? "mc-bull" : (pct < -0.05 ? "mc-bear" : "mc-flat");
+  const arrow = pct > 0.05 ? "▲" : (pct < -0.05 ? "▼" : "▬");
+  return mktCell(label, `${arrow} ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`, cls, sub);
+}
+function renderMarketIntelligence(mi) {
+  const trendClsMap = { bull: "mc-bull", bear: "mc-bear", flat: "mc-flat" };
+  const cells = [
+    mktCell("Market Trend", mi.market_trend || "—", trendClsMap[mi.market_trend_cls] || "",
+            `breadth ${mi.breadth_pct != null ? mi.breadth_pct + "%" : "—"} adv`),
+    mktCell("Overall Score", mi.overall_score != null ? mi.overall_score + " / 100" : "—",
+            (mi.overall_score >= 60 ? "mc-bull" : (mi.overall_score <= 40 ? "mc-bear" : "mc-flat")),
+            "0 = weak, 100 = strong"),
+    mktCell("Trade Bias", mi.regime || "—",
+            (mi.regime === "LONG ONLY" ? "mc-bull" : (mi.regime === "SHORT ONLY" ? "mc-bear" : "mc-flat")),
+            "what the bot will trade"),
+    trendCell("Nifty Trend", mi.nifty && mi.nifty.available ? mi.nifty.pct : null,
+              mi.nifty && mi.nifty.available && mi.nifty.ltp ? "at " + fmtNum(mi.nifty.ltp) : "needs index feed"),
+    trendCell("BankNifty Trend", mi.banknifty && mi.banknifty.available ? mi.banknifty.pct : null,
+              mi.banknifty && mi.banknifty.proxy ? "sector-avg proxy" : (mi.banknifty && mi.banknifty.ltp ? "at " + fmtNum(mi.banknifty.ltp) : "needs index feed")),
+    trendCell("Midcap Trend", mi.midcap && mi.midcap.available ? mi.midcap.pct : null),
+    (mi.vix && mi.vix.available
+      ? mktCell("India VIX", fmtNum(mi.vix.ltp), (mi.vix.pct > 3 ? "mc-bear" : "mc-flat"),
+                (mi.vix.pct != null ? (mi.vix.pct >= 0 ? "+" : "") + mi.vix.pct + "% vs prev" : ""))
+      : mktCell("India VIX", "—", "", "needs India VIX feed", true)),
+    (mi.institutional && mi.institutional.available
+      ? mktCell("FII / DII (₹ cr)",
+                `${mi.institutional.fii_cr != null ? mi.institutional.fii_cr : "—"} / ${mi.institutional.dii_cr != null ? mi.institutional.dii_cr : "—"}`,
+                (mi.institutional.fii_cr > 0 ? "mc-bull" : (mi.institutional.fii_cr < 0 ? "mc-bear" : "")),
+                "FII / DII net (EOD)")
+      : mktCell("FII / DII", "—", "", "set in config (EOD)", true)),
+  ];
+  document.getElementById("mktGrid").innerHTML = cells.join("");
+  document.getElementById("mktRegimeBadge").textContent =
+    mi.regime ? `bias: ${mi.regime}` : "";
+
+  const net = mi.realized_net_pnl || 0;
+  const goal = mi.daily_goal_rs || 50000;
+  const loss = mi.daily_loss_rs || 20000;
+  document.getElementById("dailyPnlVal").textContent = fmtINR(net);
+  document.getElementById("dailyPnlVal").className = "daily-goal-val " + pnlClass(net);
+  document.getElementById("dailyLossLabel").textContent = "-" + fmtINR(loss) + " halt";
+  document.getElementById("dailyGoalLabel").textContent = fmtINR(goal) + " goal";
+  const fill = document.getElementById("dailyGoalFill");
+  if (net >= 0) {
+    const w = Math.min(net / goal, 1) * 50;
+    fill.style.left = "50%"; fill.style.width = w + "%";
+    fill.style.background = "var(--green)";
+  } else {
+    const w = Math.min(Math.abs(net) / loss, 1) * 50;
+    fill.style.left = (50 - w) + "%"; fill.style.width = w + "%";
+    fill.style.background = "var(--red)";
+  }
+}
+
+function render(snap) {
+  if (!snap || !snap.ready) return;
+
+  document.getElementById("updatedAt").textContent = "Updated " + (snap.updated_at || "—");
+
+  document.getElementById("pausedBanner").classList.toggle("show", !!snap.entries_paused);
+
+  const cap = snap.capital || {};
+  const openPnl = (snap.open_positions || []).reduce((sum, r) => sum + (r.pnl || 0), 0);
+
+  // -- top bar quick stats --
+  document.getElementById("topbarStats").innerHTML = [
+    { l: "Live P&L", v: fmtINR((cap.realized_pnl || 0) + openPnl), cls: pnlClass((cap.realized_pnl || 0) + openPnl) },
+    { l: "Free Margin", v: fmtINR(cap.available_margin), cls: (cap.available_margin !== undefined && cap.available_margin <= 0) ? "neg" : "" },
+    { l: "Open", v: fmtNum((snap.open_positions || []).length), cls: "" },
+  ].map(s => `<div class="topbar-stat"><span class="tl">${s.l}</span><span class="tv ${s.cls}">${s.v}</span></div>`).join("");
+
+  // -- stat cards -- real MIS margin model (2026-07-24): capital is
+  // real cash; a position blocks notional x its margin% (default 20%
+  // = 5x). "Used Margin" is the real cash blocked, not notional.
+  const cards = [
+    { label: "Capital (real cash)", value: fmtINR(cap.starting_capital), cls: "" },
+    { label: "Realized PnL", value: fmtINR(cap.realized_pnl), cls: pnlClass(cap.realized_pnl) },
+    { label: "Live Unrealized PnL", value: fmtINR(openPnl), cls: pnlClass(openPnl) },
+    { label: "Open Positions", value: fmtNum((snap.open_positions || []).length), cls: "" },
+    { label: "Margin Used", value: fmtINR(cap.used_margin), cls: "" },
+    { label: "Free Margin", value: fmtINR(cap.available_margin), cls: (cap.available_margin !== undefined && cap.available_margin <= 0) ? "neg" : "" },
+    { label: "Margin Used %", value: (cap.margin_utilization_pct != null ? cap.margin_utilization_pct + "%" : "—"), cls: (cap.margin_utilization_pct > 90 ? "neg" : "") },
+    { label: "Deployed Notional (MTM)", value: fmtINR(cap.deployed_capital), cls: "" },
+    { label: "Buying Power (5x notional)", value: fmtINR(cap.buying_power), cls: "" },
+  ];
+  document.getElementById("statCards").innerHTML = cards.map(c =>
+    `<div class="card"><div class="label">${c.label}</div><div class="value ${c.cls}">${c.value}</div></div>`
+  ).join("");
+
+  // -- breadth --
+  const total = snap.universe_size || 0;
+  document.getElementById("breadthRow").innerHTML = `
+    <div class="breadth-chip adv">Advances: ${fmtNum(snap.advances)}/${fmtNum(total)}</div>
+    <div class="breadth-chip dec">Declines: ${fmtNum(snap.declines)}/${fmtNum(total)}</div>
+    <div class="breadth-chip unc">Unchanged: ${fmtNum(snap.unchanged)}/${fmtNum(total)}</div>
+  `;
+
+  // -- Market Intelligence --
+  renderMarketIntelligence(snap.market_intelligence || {});
+
+  // -- My Book: exposure by sector + sector P&L + long/short score --
+  const book = snap.book_analytics || { exposure: [], sector_pnl: [], long_open: 0, short_open: 0, long_realized_net: 0, short_realized_net: 0 };
+  document.getElementById("longShortScore").innerHTML =
+    `${book.long_open}L / ${book.short_open}S open · ` +
+    `long <span class="${pnlClass(book.long_realized_net)}">${fmtINR(book.long_realized_net)}</span> · ` +
+    `short <span class="${pnlClass(book.short_realized_net)}">${fmtINR(book.short_realized_net)}</span>`;
+  document.getElementById("bookExposure").innerHTML = book.exposure.length
+    ? book.exposure.map(e => `<div class="risk-row">
+        <span><strong>${escapeHtml(e.sector)}</strong> <span style="color:var(--text-dim)">${e.long}L / ${e.short}S</span></span>
+        <span>${fmtINR(e.notional)}</span></div>`).join("")
+    : `<span class="empty-note">No open positions</span>`;
+  document.getElementById("bookSectorPnl").innerHTML = book.sector_pnl.length
+    ? book.sector_pnl.map(s => `<div class="risk-row">
+        <span><strong>${escapeHtml(s.sector)}</strong></span>
+        <span class="${pnlClass(s.net_pnl)}"><strong>${fmtINR(s.net_pnl)}</strong></span></div>`).join("")
+    : `<span class="empty-note">No closed trades yet</span>`;
+
+  // -- news impact feed (HIGH + MID, with classifier + blocking status) --
+  const news = snap.news_feed || { items: [], counts: {} };
+  const newsItems = news.items || [];
+  const nc = news.counts || {};
+  document.getElementById("newsCounts").innerHTML = newsItems.length
+    ? `<span><b>${nc.total ?? 0}</b> today</span>
+       <span><b>${nc.high ?? 0}</b> HIGH</span>
+       <span><b>${nc.mid ?? 0}</b> MID</span>
+       <span><b>${nc.blocking ?? 0}</b> blocking a trade</span>
+       ${(nc.keyword ?? 0) > 0 ? `<span><b>${nc.keyword}</b> free/keyword (display-only)</span>` : ""}`
+    : "";
+  document.getElementById("newsFeed").innerHTML = newsItems.length
+    ? newsItems.map(n => {
+        const dirClass = n.direction === 'bullish' ? 'dir-bull'
+                        : n.direction === 'bearish' ? 'dir-bear' : '';
+        const prBadge = n.priority === 'HIGH'
+          ? `<span class="news-badge nb-high">High</span>`
+          : `<span class="news-badge nb-mid">Mid</span>`;
+        const clBadge = n.classifier === 'keyword'
+          ? `<span class="news-badge nb-keyword" title="Free keyword classifier — display only">Keyword</span>`
+          : `<span class="news-badge nb-haiku" title="Paid Haiku classifier">AI</span>`;
+        const blockBadge = n.blocks
+          ? `<span class="news-badge nb-block" title="Vetoes a contradicting trade in this symbol today">Blocks</span>`
+          : "";
+        return `<div class="news-item ${n.blocks ? 'blocking' : ''}">
+          <div class="nh">
+            <span class="nh-left">
+              <strong>${escapeHtml(n.symbol)}</strong>
+              <span class="${dirClass}">${escapeHtml(n.direction || '—')} (${n.confidence ?? '—'}%)</span>
+              ${prBadge}${clBadge}${blockBadge}
+            </span>
+            <span class="time">${escapeHtml((n.time || '').replace('T', ' '))}</span>
+          </div>
+          <div class="reason">${escapeHtml(n.title || n.reason || '')}</div>
+        </div>`;
+      }).join("")
+    : `<span class="empty-note">No news matched today</span>`;
+
+  // -- Top gainers / losers (replaces the old ORB watchlist, 2026-07-23) --
+  const gl = snap.gainers_losers || { gainers: [], losers: [] };
+  document.getElementById("glUpdatedAt").textContent = gl.built_at ? `As of ${gl.built_at} IST` : "";
+  document.getElementById("gainersRows").innerHTML = (gl.gainers || []).length
+    ? gl.gainers.map(r => glRow(r, "gainer")).join("")
+    : `<tr><td colspan="12" class="no-rows">No data yet</td></tr>`;
+  document.getElementById("losersRows").innerHTML = (gl.losers || []).length
+    ? gl.losers.map(r => glRow(r, "loser")).join("")
+    : `<tr><td colspan="12" class="no-rows">No data yet</td></tr>`;
+
+  // -- NSE-style sector heatmap (colored tiles), top 10 each side --
+  document.getElementById("sectorHeatGainers").innerHTML = (gl.sector_gainers || []).length
+    ? gl.sector_gainers.map(heatTile).join("")
+    : `<div class="heatmap-empty">No gaining sectors yet</div>`;
+  document.getElementById("sectorHeatLosers").innerHTML = (gl.sector_losers || []).length
+    ? gl.sector_losers.map(heatTile).join("")
+    : `<div class="heatmap-empty">No losing sectors yet</div>`;
+  document.getElementById("sectorUpdatedAt").textContent =
+    gl.sector_built_at ? `As of ${gl.sector_built_at} IST` : "";
+
+  // -- open positions --
+  // Columns per operator spec (2026-07-23): S.No, Symbol, Direction,
+  // Entry Time, Entry Price, CMP, MTM, Trail SL, Reason. RR is still
+  // computed in the backend (dashboard/state.py) and available on
+  // each row if a future column wants it -- just not shown here.
+  // Qty added 2026-07-24 -- the 2026-07-24 ATR redesign made qty
+  // DYNAMIC per stock/trade (ATR-based sizing, plus partial-exit
+  // trims), no longer the same flat LAYER1_FIXED_QTY for everyone,
+  // so it's now meaningful information rather than a constant.
+  const openRows = snap.open_positions || [];
+  const closedCount = (snap.closed_positions || []).length;
+  // POSITIONS header count: x / y  (x = open, y = closed)
+  document.getElementById("positionsCount").textContent =
+    `${openRows.length} / ${closedCount}`;
+  document.getElementById("openRows").innerHTML = openRows.length
+    ? openRows.map((r, i) => `
+        <tr>
+          <td>${i + 1}</td>
+          <td><strong>${escapeHtml(r.symbol)}</strong></td>
+          <td>${dirBadge(r.direction)}</td>
+          <td>${fmtNum(r.qty)}</td>
+          <td>${escapeHtml(r.entry_time)}</td>
+          <td>${fmtINR(r.entry_price)}</td>
+          <td>${fmtINR(r.last_price)}</td>
+          <td class="${pnlClass(r.pnl)}">${fmtINR(r.pnl)}</td>
+          <td>${fmtINR(r.stop)}</td>
+          <td>${r.fixed_target != null ? fmtINR(r.fixed_target) : "—"}</td>
+          <td>${escapeHtml(r.entry_reason)}</td>
+          <td>${IS_OPERATOR ? `<button class="btn-sell btn-sm" onclick="sell('${r.symbol}')">EXIT</button>` : ""}</td>
+        </tr>`).join("")
+    : `<tr><td colspan="12" class="no-rows">No open positions</td></tr>`;
+
+  // -- closed positions --
+  // Same columns as Open Positions (S.No, Symbol, Direction, Entry
+  // Time, Entry Price, Reason) plus Sector, Exit Time, Exit Reason,
+  // PnL. "CMP"/"MTM" don't apply once a trade is closed -- Exit
+  // Price and the final PnL are their natural equivalents, so those
+  // replace them rather than showing two redundant PnL-ish columns.
+  // "Stop" shows the stop AS SEEDED at entry (initial_stop) -- the
+  // live ratcheted stop isn't kept once a position closes.
+  const closedRows = snap.closed_positions || [];
+  document.getElementById("closedRows").innerHTML = closedRows.length
+    ? closedRows.map((r, i) => `
+        <tr>
+          <td>${i + 1}</td>
+          <td><strong>${escapeHtml(r.symbol)}</strong></td>
+          <td>${dirBadge(r.direction)}</td>
+          <td>${fmtNum(r.qty)}</td>
+          <td>${escapeHtml(r.sector)}</td>
+          <td>${escapeHtml(r.entry_time)}</td>
+          <td>${fmtINR(r.entry_price)}</td>
+          <td>${fmtINR(r.exit_price)}</td>
+          <td>${fmtINR(r.initial_stop)}</td>
+          <td>${r.fixed_target != null ? fmtINR(r.fixed_target) : "—"}</td>
+          <td>${escapeHtml(r.entry_reason)}</td>
+          <td>${escapeHtml(r.exit_time)}</td>
+          <td>${escapeHtml(r.exit_reason)}</td>
+          <td>${fmtHoldingMinutes(r.holding_seconds)}</td>
+          <td class="${pnlClass(r.pnl)}">${fmtINR(r.pnl)}</td>
+          <td style="color:var(--text-dim)">${fmtINR(r.charges)}</td>
+          <td class="${pnlClass(r.net_pnl)}"><strong>${fmtINR(r.net_pnl)}</strong></td>
+        </tr>`).join("")
+    : `<tr><td colspan="17" class="no-rows">No closed positions yet</td></tr>`;
+
+  // -- risk filters --
+  const risk = snap.risk_filters || { panic_sectors: [], blocked_symbols: [], frozen_symbols: [], circuit_flagged_symbols: [] };
+  document.getElementById("panicSectors").innerHTML = risk.panic_sectors.length
+    ? risk.panic_sectors.map(s => `<span class="chip red">${escapeHtml(s)}</span>`).join("")
+    : `<span class="empty-note">None</span>`;
+  document.getElementById("blockedSymbols").innerHTML = risk.blocked_symbols.length
+    ? risk.blocked_symbols.map(b => `
+        <div class="risk-row">
+          <span><strong>${escapeHtml(b.symbol)}</strong> ${dirBadge(b.direction)}</span>
+          <span class="reason">${escapeHtml(b.reason)}</span>
+        </div>`).join("")
+    : `<span class="empty-note">Nothing blocked today</span>`;
+  document.getElementById("frozenSymbols").innerHTML = (risk.frozen_symbols || []).length
+    ? risk.frozen_symbols.map(s => `<span class="chip red">${escapeHtml(s)}</span>`).join("")
+    : `<span class="empty-note">None</span>`;
+  document.getElementById("circuitSymbols").innerHTML = (risk.circuit_flagged_symbols || []).length
+    ? risk.circuit_flagged_symbols.map(c => `<span class="chip red">${escapeHtml(c.symbol)} (${c.side}, ${c.gap_pct}%)</span>`).join("")
+    : `<span class="empty-note">None</span>`;
+
+  // -- performance --
+  const perf = snap.performance || {};
+  const perfCards = [
+    { label: "Win Rate", value: perf.win_rate_pct !== null && perf.win_rate_pct !== undefined ? perf.win_rate_pct + "%" : "—", cls: "" },
+    { label: "Trades (W/L/Flat)", value: `${fmtNum(perf.total_trades)} (${fmtNum(perf.wins)}/${fmtNum(perf.losses)}/${fmtNum(perf.flat)})`, cls: "" },
+    { label: "Avg Win", value: fmtINR(perf.avg_win), cls: "pos" },
+    { label: "Avg Loss", value: perf.avg_loss !== null && perf.avg_loss !== undefined ? "-" + fmtINR(perf.avg_loss) : "—", cls: "neg" },
+    { label: "Expectancy / Trade", value: fmtINR(perf.expectancy_per_trade), cls: pnlClass(perf.expectancy_per_trade) },
+    { label: "Profit Factor", value: perf.profit_factor ?? "—", cls: "" },
+    { label: "Gross P&L", value: fmtINR(perf.net_pnl), cls: pnlClass(perf.net_pnl) },
+    { label: "Total Charges", value: fmtINR(perf.total_charges), cls: "neg" },
+    { label: "Net P&L (after costs)", value: fmtINR(perf.net_pnl_after_charges), cls: pnlClass(perf.net_pnl_after_charges) },
+    { label: "Max Drawdown", value: fmtINR(perf.max_drawdown), cls: perf.max_drawdown > 0 ? "neg" : "" },
+  ];
+  document.getElementById("perfGrid").innerHTML = perfCards.map(c =>
+    `<div class="card"><div class="label">${c.label}</div><div class="value ${c.cls}" style="font-size:16px;">${c.value}</div></div>`
+  ).join("");
+
+  // -- system health / footer --
+  const health = snap.system_health || {};
+  const feedLabel = health.feed_alive === true ? "Live" : health.feed_alive === false ? "Down" : "Unknown";
+  const feedCls = health.feed_alive === true ? "pos" : health.feed_alive === false ? "neg" : "";
+  document.getElementById("healthGrid").innerHTML = [
+    { l: "Feed", v: feedLabel, cls: feedCls },
+    { l: "Ticks", v: fmtNum(health.tick_count), cls: "" },
+    { l: "Stale Flagged", v: fmtNum(health.stale_symbols_flagged), cls: health.stale_symbols_flagged > 0 ? "neg" : "" },
+    { l: "Universe", v: fmtNum(health.universe_size), cls: "" },
+    { l: "CPU", v: health.cpu_pct !== null && health.cpu_pct !== undefined ? health.cpu_pct + "%" : "—", cls: "" },
+    { l: "RAM", v: health.ram_mb !== null && health.ram_mb !== undefined ? health.ram_mb + " MB" : "—", cls: "" },
+  ].map(s => `<div class="health-item"><span class="hl">${s.l}</span><strong class="${s.cls}">${s.v}</strong></div>`).join("");
+
+  document.getElementById("footerStats").innerHTML = `
+    <span><strong>${fmtNum(health.universe_size)}</strong> Stock Universe</span>
+    <span>Exchange: <strong>NSE</strong></span>
+    <span>Feed: <strong class="${feedCls}">${feedLabel}</strong></span>
+    <span>Ticks: <strong>${fmtNum(health.tick_count)}</strong></span>
+    <span>Stale: <strong>${fmtNum(health.stale_symbols_flagged)}</strong></span>
+    <span>CPU: <strong>${health.cpu_pct !== null && health.cpu_pct !== undefined ? health.cpu_pct + '%' : '—'}</strong></span>
+    <span>RAM: <strong>${health.ram_mb !== null && health.ram_mb !== undefined ? health.ram_mb + ' MB' : '—'}</strong></span>
+    <span id="footerClock"></span>
+  `;
+}
+
+setInterval(() => {
+  const el = document.getElementById("footerClock");
+  if (el) el.innerHTML = "Local time: <strong>" + new Date().toLocaleTimeString("en-IN") + "</strong>";
+}, 1000);
+
+// -- WebSocket with auto-reconnect --
+let ws = null;
+let reconnectDelay = 1000;
+
+function setStatus(live) {
+  const dot = document.getElementById("statusDot");
+  const text = document.getElementById("statusText");
+  dot.className = "status-dot " + (live ? "live" : "down");
+  text.textContent = live ? "Live" : "Reconnecting…";
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    setStatus(true);
+    reconnectDelay = 1000;
+  };
+  ws.onmessage = (event) => {
+    try { render(JSON.parse(event.data)); } catch (e) { /* ignore malformed frame */ }
+  };
+  ws.onclose = () => {
+    setStatus(false);
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+  };
+  ws.onerror = () => { ws.close(); };
+}
+
+connect();
+</script>
+
+</body>
+</html>
