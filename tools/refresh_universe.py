@@ -27,7 +27,7 @@ from core.logger import decision, warn
 from core.master_loader import MasterLoader
 from core.universe_builder import (
     MAX_PRICE, MIN_PRICE, MIN_TURNOVER_RS,
-    classify, fetch_bhavcopy, summarise, write_review,
+    classify, fetch_bhavcopy, fetch_excluded_symbols, summarise, write_review,
 )
 
 
@@ -58,7 +58,12 @@ def main(date=None):
              "was changed.")
         return 1
 
-    result = classify(rows, current)
+    excluded = fetch_excluded_symbols()
+    if excluded:
+        decision(f"[UNIVERSE] Excluding {len(excluded)} ETF/SGB/SME symbols "
+                 f"listed by NSE (we trade company equity only).")
+
+    result = classify(rows, current, excluded=excluded)
     summarise(result)
     path = write_review(result)
     decision(f"\n  Proposal written to: {path}")

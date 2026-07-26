@@ -139,6 +139,33 @@ def test_udiff_column_names_are_handled():
     assert [r["symbol"] for r in res["keep"]] == ["UDIFFSTK"]
 
 
+def test_etfs_are_excluded_via_the_nse_list():
+    """ETFs trade in the EQ series too, so the series check alone lets
+    them through -- the first live run proposed SILVERBEES/LIQUIDBEES as
+    additions. NSE's own list is the primary defence."""
+    rows = [_row("SILVERBEES"), _row("RELIANCE")]
+    res = classify(rows, set(), excluded={"SILVERBEES"})
+    assert [r["symbol"] for r in res["keep"]] == ["RELIANCE"]
+    assert "not company equity" in _reasons(res)["SILVERBEES"]
+
+
+def test_etf_name_fallback_catches_the_obvious_ones():
+    rows = [_row("NIFTYBEES"), _row("GOLDBEES"), _row("SOMEETF")]
+    res = classify(rows, set())          # no NSE list available
+    assert res["keep"] == []
+
+
+def test_etf_fallback_does_not_eat_real_companies():
+    """GOLDIAM is a jewellery manufacturer; SILVERLINE is a company. A
+    false positive here silently deletes a tradeable stock, which is far
+    worse than an ETF surviving into a proposal a human reviews."""
+    rows = [_row("GOLDIAM"), _row("SILVERLINE"), _row("LIQUIDCO"),
+            _row("NIFTYFOODS")]
+    res = classify(rows, set())
+    assert {r["symbol"] for r in res["keep"]} == {
+        "GOLDIAM", "SILVERLINE", "LIQUIDCO", "NIFTYFOODS"}
+
+
 def test_junk_rows_never_crash_it():
     rows = [{}, {"SYMBOL": ""}, _row("OK"), {"SYMBOL": "NOPRICE",
             "SERIES": "EQ", "CLOSE": "abc", "TOTTRDVAL": "x"}]

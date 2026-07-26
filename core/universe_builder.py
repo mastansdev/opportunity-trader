@@ -63,6 +63,67 @@ MAX_PRICE = 10_000.0         # sizing quantisation + declining movement
 MIN_TURNOVER_RS = 50_000_000   # Rs 5cr/day -- real liquidity, not a print
 TRADEABLE_SERIES = {"EQ"}      # BE/BZ = trade-to-trade, NO intraday
 
+# ETFs, SGBs and SME scrips trade in the EQ series too, so the series
+# check alone lets them through -- the first live run proposed
+# SILVERBEES, LIQUIDBEES and SBIFUNDS as "additions" (operator caught
+# it, 2026-07-25). We trade COMPANY EQUITY only: an ETF has no sector,
+# no earnings, no corporate actions and no relative strength versus its
+# peers, so every selection rule in this bot is meaningless for one.
+#
+# Primary defence is NSE's own ETF/SGB/SME lists (fetched live). The
+# name patterns below are a FALLBACK for when that fetch fails -- crude
+# but effective, since Indian ETFs are named with remarkable
+# consistency.
+#
+# TIGHTENED 2026-07-25: the first draft matched bare substrings
+# ("GOLD", "SILVER", "LIQUID", "NIFTY") and would have wrongly dropped
+# GOLDIAM (a jewellery manufacturer) and SILVERLINE -- real companies.
+# Because this tool only writes a PROPOSAL a human reviews, a false
+# NEGATIVE (an ETF slips into the list for review) costs almost nothing,
+# while a false POSITIVE silently deletes a tradeable company. So the
+# fallback now fires only on markers no operating company uses.
+_ETF_SUFFIXES = ("BEES",)                    # NIFTYBEES, GOLDBEES, LIQUIDBEES
+_ETF_TOKENS = ("ETF", "GSEC", "SDL", "SGB")  # unambiguous fund markers
+
+
+def looks_like_a_fund(symbol):
+    """Fallback ETF/SGB detector for when NSE's own list is unavailable.
+    Deliberately narrow -- NSE's live list is the primary defence; this
+    only catches the names no real company would carry."""
+    s = (symbol or "").upper()
+    if s.endswith(_ETF_SUFFIXES):
+        return True
+    return any(t in s for t in _ETF_TOKENS)
+
+
+def fetch_excluded_symbols(folder="data"):
+    """
+    Every symbol NSE itself classifies as an ETF, sovereign gold bond, or
+    SME scrip. Returns a set (empty on any failure -- the caller then
+    falls back to looks_like_a_fund()).
+    """
+    out = set()
+    try:
+        from nse import NSE
+        with NSE(download_folder=folder) as n:
+            for getter in ("listEtf", "listSgb", "listSme"):
+                try:
+                    payload = getattr(n, getter)() or {}
+                except Exception:
+                    continue
+                rows = payload.get("data") or payload.get("value") or []
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    sym = (row.get("symbol") or row.get("Symbol")
+                           or row.get("SYMBOL"))
+                    if sym:
+                        out.add(str(sym).strip().upper())
+    except Exception as exc:
+        warn(f"[UNIVERSE] Could not fetch NSE ETF/SGB/SME lists ({exc}); "
+             f"falling back to name patterns.")
+    return out
+
 # Bhavcopy column names differ between the legacy and UDIFF formats.
 _COL = {
     "symbol": ("SYMBOL", "TckrSymb"),
@@ -113,7 +174,7 @@ def fetch_bhavcopy(date=None, folder="data"):
     return rows
 
 
-def classify(rows, current_symbols):
+def classify(rows, current_symbols, excluded=None):
     """
     Split every bhavcopy row into keep / reject buckets, and find the
     symbols we're missing entirely. Pure function -- easy to test, no I/O.
@@ -122,6 +183,7 @@ def classify(rows, current_symbols):
     """
     keep, rejected = [], []
     seen = set()
+    excluded = excluded or set()
 
     for row in rows:
         symbol = _pick(row, "symbol")
@@ -147,6 +209,12 @@ def classify(rows, current_symbols):
 
         if series not in TRADEABLE_SERIES:
             rec["reason"] = f"series {series or '?'} -- NO INTRADAY (T2T)"
+            rejected.append(rec); continue
+        # ETFs / SGBs / SME trade in EQ too -- but they are not company
+        # equity, and every selection rule here (sector, relative
+        # strength, corporate actions, news) is meaningless for a fund.
+        if symbol in excluded or looks_like_a_fund(symbol):
+            rec["reason"] = "ETF / fund / SGB -- not company equity"
             rejected.append(rec); continue
         if close is None or close <= 0:
             rec["reason"] = "no usable close"
