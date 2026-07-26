@@ -128,6 +128,41 @@ than the long side (9).
 
 ---
 
+## 🟤 G. Decide the block-deal question with evidence (2026-07-26)
+
+`core/deal_flow.py` + `tools/deals_report.py` were deleted, then
+restored on the operator's call. They currently do NOTHING — no
+decision, no display. They are on probation.
+
+**The one part worth testing:** NSE's block-deal window runs
+**08:45–09:00, before the market opens**. A large block crossed at a
+discount to yesterday's close very often precedes a gap down. Unlike
+RSS and unlike bulk-deal/short-selling data (both of which land after
+the close), this arrives BEFORE you need it.
+
+**The test, Monday 09:05:**
+
+```
+py tools/deals_report.py
+```
+
+Look at the "TODAY's block window" section, then check what those names
+actually did at the open.
+
+**Decide on the evidence:**
+
+- Nothing in the window, or names that went nowhere -> delete both files
+  for good. Two sessions of this is enough to tell.
+- Real names that gapped -> it earns its place, and the next step is
+  wiring it into the morning run rather than a manual command.
+
+Recording this because the same trap caught us three times today: news
+fan-out, keyword blocking, and the events strip all *sounded* useful and
+all failed on contact with real output. This one gets measured before it
+gets defended.
+
+---
+
 ## 🟣 F. Does the bot use the FULL session? (asked 2026-07-25)
 
 Short answer: **now yes on time, but no on trade count.**

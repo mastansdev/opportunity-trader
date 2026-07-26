@@ -1,6 +1,6 @@
 """
 Decision-correctness tests for dashboard/state.py. Uses fakes
-for every input (engine, market_data, master_loader, news_gate,
+for every input (engine, market_data, master_loader,
 portfolio) so this stays fast and focused on the ASSEMBLY logic,
 not re-testing what each real component already proves on its
 own.
@@ -118,21 +118,6 @@ class _FakeMasterLoader:
 
     def get_by_symbol(self, symbol):
         return self.records.get(symbol)
-
-
-class _FakeNewsGate:
-    def __init__(self, news=None, recent=None):
-        self.news = news or {}
-        # recent: list of full MID+HIGH records (newest-first is the
-        # gate's job in production; the fake just returns as given so
-        # a test can assert the state layer preserves order).
-        self.recent = recent if recent is not None else []
-
-    def all_news_stocks(self):
-        return self.news
-
-    def recent_feed(self, limit=None):
-        return self.recent[:limit] if limit is not None else list(self.recent)
 
 
 class _FakePortfolio:

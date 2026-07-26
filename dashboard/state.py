@@ -6,7 +6,7 @@ Dashboard State
 Builds the single JSON-able snapshot the dashboard reads --
 capital, advances/declines, sector colour, gainers/losers, open
 and closed positions. Pure data assembly: engine, market_data,
-master_loader, news_gate, portfolio are read-only inputs, this
+master_loader and portfolio are read-only inputs, this
 module never mutates any of them.
 
 Advances/declines/sector-colour used to be measured off each
@@ -201,17 +201,12 @@ def _rr(direction, entry_price, exit_or_last_price, initial_stop):
 
 class DashboardState:
 
-    def __init__(self, engine, market_data, master_loader, news_gate=None,
+    def __init__(self, engine, market_data, master_loader,
                  portfolio=None, sector_monitor=None, get_feed_alive=None,
                  index_monitor=None):
         self.engine = engine
         self.market_data = market_data
         self.master_loader = master_loader
-        # Kept on the object but NO LONGER DISPLAYED. The major-events
-        # strip was removed 2026-07-26 -- see the note on the operator's
-        # decision in dashboard/static/index.html. main.py still passes
-        # it, and re-adding a panel later needs no wiring change.
-        self.news_gate = news_gate
         self.portfolio = portfolio
         self.sector_monitor = sector_monitor
         # Nifty/BankNifty/Midcap/VIX (core/index_monitor.py). None =
