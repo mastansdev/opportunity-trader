@@ -38,6 +38,7 @@ Author : H&M Opportunity Trader
 import re
 
 from core.master_loader import MasterLoader
+from news_bot.config import NEWS_ENABLE_BROAD_TIER
 from news_bot.models import MatchedNews, MatchResult
 
 _CORP_SUFFIXES = {
@@ -110,6 +111,63 @@ def is_company_story(text):
     if _QUARTER_RESULT_RE.search(upper):
         return True
     return any(marker in upper for marker in _COMPANY_STORY_MARKERS)
+
+
+# MARKET COMMENTARY -- 2026-07-26, second operator report. The live feed
+# showed this, identical text on three unrelated stocks:
+#
+#   UPL / TIMETECHNO / GESHIP   bullish 55% MID
+#   "US stock market today: S&P 500, Nasdaq futures edge higher as oil
+#    retreats; Intel jumps 4%"      keyword match: gains, jumps, higher
+#
+# Intel's move says nothing about UPL. The headline matched on a
+# commodity keyword, and the classifier then read the generic price
+# verbs ("jumps", "higher") as a bullish signal for each.
+#
+# Every one of the 18 commonest headlines in the store was this shape:
+# index wraps, global markets, commodity price reports, IPO coverage,
+# and stories about a single unnamed share. All sprayed across 20-114
+# symbols. None is a per-stock signal.
+# Two strengths, because they need different treatment.
+#
+# HARD -- the headline IS commentary, whoever it mentions. "Market wrap:
+# HCLTech, Bajaj Finance, Eternal among top gainers" names three of our
+# stocks and is still just a gainers list. Dropped before any matching.
+_HARD_COMMENTARY = (
+    "STOCK MARKET TODAY", "MARKET TODAY", "MARKETS TODAY", "MARKET WRAP",
+    "STOCKS TODAY", "WALL STREET", "CLOSING BELL", "OPENING BELL",
+    "STOCKS TO WATCH", "TOP GAINERS", "TOP LOSERS",
+    "PENNY STOCK", "MULTIBAGGER", "SHOULD YOU BUY", "SHOULD YOU INVEST",
+    "SHARES TO BUY", "STOCKS THAT",
+    # primary market -- not listed, not tradeable by us
+    "IPO", "GMP", "LISTING GAINS", "ISSUE BOOKED", "SUBSCRIBED",
+    # commodity / macro price reports
+    "PRICES TODAY", "GOLD, SILVER",
+)
+
+# SOFT -- an index or macro reference that is often incidental.
+# "Reliance shares jump 5% as Sensex rallies" IS about Reliance, so this
+# set only applies when the headline named nobody we track.
+_SOFT_COMMENTARY = (
+    "SENSEX", "NIFTY", "S&P 500", "S&AMP;P 500", "NASDAQ", "DOW JONES",
+    "ASIAN MARKETS", "GLOBAL MARKETS", "GLOBAL CUES",
+    "PRE-MARKET", "PREMARKET", "MARKET OUTLOOK",
+    "BULL MARKET", "BEAR MARKET", "SELL-OFF", "SELLOFF",
+    "CRUDE OIL PRICES", "BOND YIELD", "RUPEE VS", "FOREX",
+)
+
+
+def is_hard_commentary(text):
+    """Commentary whoever it names -- index wraps, gainers lists, IPOs."""
+    upper = str(text or "").upper()
+    return any(marker in upper for marker in _HARD_COMMENTARY)
+
+
+def is_market_commentary(text):
+    """Any commentary, hard or soft. Used once nothing has been named."""
+    upper = str(text or "").upper()
+    return (is_hard_commentary(upper)
+            or any(marker in upper for marker in _SOFT_COMMENTARY))
 
 
 def is_routine_filing(text):
@@ -248,7 +306,7 @@ class NewsMatcher:
         # "Schedule of analyst call", "Disclosure under Regulation 30".
         # None of those move a price. Dropped before matching, so they
         # cannot fan out either.
-        if is_routine_filing(text):
+        if is_routine_filing(text) or is_hard_commentary(text):
             return MatchedNews(item=item, matches=[])
 
         results = []
@@ -301,6 +359,16 @@ class NewsMatcher:
         # across the sector is how "V-Mart Retail Q1 Results" ended up
         # flagged bullish on RELIANCE.
         if is_company_story(text):
+            return MatchedNews(item=item, matches=[])
+
+        # Market/index/commodity/IPO commentary -> say nothing. This is
+        # what put a US market wrap on UPL, TIMETECHNO and GESHIP.
+        if is_market_commentary(text):
+            return MatchedNews(item=item, matches=[])
+
+        # Sector matching is OFF by default -- see config's
+        # NEWS_ENABLE_BROAD_TIER for the measurements behind that.
+        if not NEWS_ENABLE_BROAD_TIER:
             return MatchedNews(item=item, matches=[])
 
         for field, patterns in self._broad_patterns.items():

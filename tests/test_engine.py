@@ -72,6 +72,12 @@ def _engine(**kwargs):
     # the corrupt-tick guard would (correctly) call impossible. Off by
     # default; its own tests below switch it on.
     kwargs.setdefault("enable_tick_sanity", False)
+    # News blocking ships OFF (config.ENABLE_NEWS_BLOCKING, 2026-07-26 --
+    # the free keyword classifier is not reliable enough to silently veto
+    # a trade). This helper turns it ON so the dedicated news-gate tests
+    # below still exercise the behaviour; production uses the config
+    # value, which is False.
+    kwargs.setdefault("enable_news_blocking", True)
     return Engine(**kwargs)
 
 

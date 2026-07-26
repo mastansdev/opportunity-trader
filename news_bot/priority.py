@@ -73,11 +73,37 @@ def tier_for(match_result, classification_result):
     # Sector news is still recorded and still shown -- it is context,
     # and context should never veto an individual trade. Only a headline
     # that NAMES the stock (COMPANY tier) can reach HIGH.
+    classifier = classification_result.get("classifier", "haiku")
+
+    # THE KEYWORD CLASSIFIER CAN NEVER REACH HIGH -- 2026-07-26.
+    #
+    # Operator, unambiguously: "i do not want a hardcoded keyword /
+    # matchmaker decides & tell the brain bot to buy/sell or any
+    # decisions".
+    #
+    # He is right, and the examples were not edge cases:
+    #
+    #   "Ujjivan Small Finance BANK ... financial results"
+    #        -> 'ban' matched inside 'Bank'  -> bearish 80% HIGH
+    #   "Intimation of Tax Deduction on Dividend"
+    #        -> 'dividend' matched            -> bullish 80% HIGH
+    #
+    # The first is fixed (word boundaries). The second is not fixable by
+    # any word list, because the WORD is genuinely there and the meaning
+    # is the opposite of what a lexicon can see. A bag of words cannot
+    # read "tax deduction ON dividend" as routine admin.
+    #
+    # HIGH is the level that blocks a trade. So HIGH now requires a
+    # classifier that actually reads the sentence. The keyword lexicon
+    # still runs, still labels, still shows on the dashboard -- it just
+    # cannot veto anything. When the paid classifier is bought, its
+    # output reaches HIGH with no further change.
     is_high = (
         confidence >= HIGH_CONFIDENCE_THRESHOLD
         and materiality == "material"
         and direction != "neutral"
         and match_result.tier == "COMPANY"
+        and classifier != "keyword"
     )
 
     return PriorityResult(

@@ -14,6 +14,26 @@ whose SECTOR / THEMES / COMMODITY_EXPOSURE mentions steel.
 
 import pytest
 
+def broad_tier_on(fn):
+    """BROAD (sector) matching is OFF by default -- see
+    news_bot/config.py's NEWS_ENABLE_BROAD_TIER for the measurements.
+    These tests are about what sector matching DOES when enabled, so
+    they switch it on for their own duration."""
+    import functools
+
+    import news_bot.matching as _m
+
+    @functools.wraps(fn)
+    def wrapper(*a, **kw):
+        old = _m.NEWS_ENABLE_BROAD_TIER
+        _m.NEWS_ENABLE_BROAD_TIER = True
+        try:
+            return fn(*a, **kw)
+        finally:
+            _m.NEWS_ENABLE_BROAD_TIER = old
+    return wrapper
+
+
 from news_bot.matching import is_routine_filing
 
 
@@ -137,6 +157,7 @@ def test_company_name_in_the_text_also_stops_the_fan_out(matcher):
     assert {m.symbol for m in result.matches} == {"TATASTEEL"}
 
 
+@broad_tier_on
 def test_sector_news_naming_NOBODY_still_fans_out(matcher):
     """This is what BROAD is for. 'Steel prices surge' names no company,
     and there the whole sector genuinely is the story."""
@@ -248,6 +269,7 @@ def test_is_company_story_recognises_the_real_shapes():
         assert is_company_story(text) is False, text
 
 
+@broad_tier_on
 def test_genuine_sector_news_is_still_kept_however_wide(matcher):
     """An earlier fix capped stories at 25 symbols and DELETED wider
     ones. Wrong -- real sector news is genuinely wide (crude oil hits 67
@@ -288,3 +310,117 @@ def test_a_COMPANY_match_still_needs_confidence_and_direction():
     m = MatchResult("RELIANCE", "COMPANY_NAME", "RELIANCE", "COMPANY")
     assert tier_for(m, _classification(confidence=40)).priority == "MID"
     assert tier_for(m, _classification(direction="neutral")).priority == "MID"
+
+
+# ---------------------------------------------------------------
+# News does not veto a trade (2026-07-26 operator call)
+# ---------------------------------------------------------------
+
+def test_news_blocking_is_OFF_by_default():
+    """
+    Operator: "URBAN = BAN ? keyword matching .. i guess we need to stop
+    relying on news & trading for now until API i buy."
+
+    That specific row was stale -- classified before the word-boundary
+    fix -- but the judgement stands: a wrong bearish HIGH does not add
+    noise, it REFUSES a trade, and a silent veto on a good setup costs
+    more than the bad trade it prevents.
+    """
+    from config import ENABLE_NEWS_BLOCKING
+    assert ENABLE_NEWS_BLOCKING is False
+
+
+def test_the_engine_honours_the_flag():
+    from core.engine import Engine
+    assert Engine().enable_news_blocking is False
+    assert Engine(enable_news_blocking=True).enable_news_blocking is True
+
+
+def test_urban_no_longer_matches_ban():
+    """The regression itself. 'ban' inside 'URBAN' produced a bearish
+    80% HIGH on TVSMOTOR."""
+    from news_bot.keyword_classifier import classify
+
+    class _Item:
+        def __init__(self, title):
+            self.title = title
+            self.summary = ""
+
+    out = classify(_Item(
+        "TVS MOTOR COMPANY LAUNCHES TVS ORBITER IN NEPAL A SMART, "
+        "SUSTAINABLE, URBAN EV COMMUTE SOLUTION"))
+    assert out["direction"] == "neutral"
+
+    # ...and a real ban still registers
+    out = classify(_Item("Government imposes export ban on the product"))
+    assert out["direction"] == "bearish"
+
+
+# ---------------------------------------------------------------
+# A word list may never decide a trade
+# ---------------------------------------------------------------
+# Operator, 2026-07-26: "i do not want a hardcoded keyword/matchmaker
+# decides & tell the brain bot to buy/sell or any decisions".
+
+def _kw(direction="bullish", confidence=80, classifier="keyword"):
+    return dict(direction=direction, confidence=confidence,
+                materiality="material", reason="keyword match: dividend",
+                classifier=classifier)
+
+
+def _company():
+    from news_bot.models import MatchResult
+    return MatchResult("SHYAMMETL", "EXCHANGE_FILING", "SHYAMMETL",
+                       "COMPANY")
+
+
+def test_the_keyword_classifier_can_never_reach_HIGH():
+    """HIGH is the level that blocks a trade."""
+    from news_bot.priority import tier_for
+    assert tier_for(_company(), _kw()).priority == "MID"
+
+
+def test_the_paid_classifier_still_reaches_HIGH():
+    from news_bot.priority import tier_for
+    assert tier_for(_company(), _kw(classifier="haiku")).priority == "HIGH"
+
+
+def test_a_missing_classifier_field_is_treated_as_paid():
+    """Older rows and the AI path itself omit the field."""
+    from news_bot.priority import tier_for
+    payload = _kw()
+    payload.pop("classifier")
+    assert tier_for(_company(), payload).priority == "HIGH"
+
+
+def test_the_two_headlines_the_operator_caught():
+    """
+    Neither is fixable by tuning a word list:
+
+      "Ujjivan Small Finance BANK ... financial results"
+           'ban' inside 'Bank'   -> bearish 80% HIGH
+      "Intimation of Tax Deduction on Dividend"
+           'dividend' is really there, the meaning is routine admin
+    """
+    from news_bot.keyword_classifier import classify
+    from news_bot.priority import tier_for
+
+    class _Item:
+        def __init__(self, title):
+            self.title = title
+            self.summary = ""
+
+    # 1. the boundary bug -- fixed at the lexicon
+    bank = classify(_Item(
+        "Ujjivan Small Finance Bank Limited has submitted to the "
+        "Exchange, the financial results for the period ended Jun 30"))
+    assert bank["direction"] == "neutral"
+
+    # 2. NOT fixable by any word list -- the word is genuinely present.
+    #    It must be stopped at priority instead.
+    div = classify(_Item(
+        "Shyam Metalics And Energy Limited has informed the Exchange "
+        "about General Updates regarding Intimation of Tax Deduction "
+        "on Dividend"))
+    assert div["direction"] == "bullish"        # the lexicon still says so
+    assert tier_for(_company(), div).priority == "MID"   # ...and it cannot act

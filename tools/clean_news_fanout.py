@@ -53,7 +53,8 @@ from sqlalchemy import delete, func, select  # noqa: E402
 
 from core.logger import decision, warn  # noqa: E402
 from news_bot.matching import (  # noqa: E402
-    is_company_story, is_routine_filing,
+    is_company_story, is_hard_commentary, is_market_commentary,
+    is_routine_filing,
 )
 from news_bot.news_store import NewsStore  # noqa: E402
 
@@ -74,7 +75,10 @@ def plan(store):
     routine_titles, fanout_titles = set(), set()
 
     for title, group in by_title.items():
-        if is_routine_filing(str(title or "")):
+        text = str(title or "")
+        # Routine compliance, or commentary that is commentary whoever it
+        # names (index wraps, gainers lists, IPOs).
+        if is_routine_filing(text) or is_hard_commentary(text):
             routine_ids.extend(r.id for r in group)
             routine_titles.add(title)
             continue
@@ -90,7 +94,7 @@ def plan(store):
         if not broad:
             continue
         if any(r.tier == "COMPANY" for r in group) \
-                or is_company_story(str(title or "")):
+                or is_company_story(text) or is_market_commentary(text):
             fanout_ids.extend(r.id for r in broad)
             fanout_titles.add(title)
 
@@ -117,7 +121,7 @@ def main():
     decision(f"  Distinct headlines  : {p['titles']:,}"
              f"   ({p['total'] / max(p['titles'], 1):.1f} rows each)")
     decision("-" * 62)
-    decision(f"  Routine filings     : {len(p['routine_ids']):,} rows "
+    decision(f"  Routine + commentary: {len(p['routine_ids']):,} rows "
              f"from {len(p['routine_titles'])} headlines")
     decision(f"  Sector fan-out      : {len(p['fanout_ids']):,} rows "
              f"from {len(p['fanout_titles'])} headlines")

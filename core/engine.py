@@ -88,6 +88,7 @@ from config import (
     ENABLE_NO_PROGRESS_EXIT, NO_PROGRESS_MINUTES, NO_PROGRESS_R,
     ENABLE_ORB_EXCHANGE_RECONCILE,
     ENABLE_TICK_SANITY, MAX_TICK_JUMP_PCT,
+    ENABLE_NEWS_BLOCKING,
     ENABLE_LIQUIDITY_FLOOR, MIN_TURNOVER_RS,
     ENABLE_STOCK_MEMORY, MEMORY_ACTION_WINDOW_DAYS,
     ENABLE_SECTOR_STRENGTH_GATE, SECTOR_STRENGTH_TOP_N,
@@ -211,7 +212,8 @@ class Engine:
                  candle_recorder=None,
                  enable_rs_band=None, enable_staged_entry=None,
                  one_trade_per_symbol=None, enable_no_progress=None,
-                 enable_tick_sanity=None, stock_memory=None,
+                 enable_tick_sanity=None, enable_news_blocking=None,
+                 stock_memory=None,
                  trade_memory=None):
         # config.py's real value by default -- injectable purely so
         # tests can construct an Engine without it (this whole
@@ -387,6 +389,11 @@ class Engine:
         self.enable_tick_sanity = (
             ENABLE_TICK_SANITY if enable_tick_sanity is None
             else enable_tick_sanity)
+        # Injectable like the gates above, so the news-blocking tests
+        # can exercise the behaviour even though it ships OFF.
+        self.enable_news_blocking = (
+            ENABLE_NEWS_BLOCKING if enable_news_blocking is None
+            else enable_news_blocking)
 
         # Edge-triggered logging for regime changes -- log the
         # regime ONCE when it changes, not on every skipped entry.
@@ -1717,7 +1724,14 @@ class Engine:
         if ENABLE_VOLUME_FILTER and not self._breakout_has_volume(symbol, closed_candle):
             return
 
-        contradiction = self._news_contradiction(symbol, direction)
+        # ENABLE_NEWS_BLOCKING is OFF (config). News is collected and
+        # shown, but does not veto a trade -- the free keyword
+        # classifier is not reliable enough to silently refuse a good
+        # setup, and a wrong veto costs more than the bad trade it
+        # prevents. Same "observe, do not vote" stance as trend
+        # structure and trade memory.
+        contradiction = (self._news_contradiction(symbol, direction)
+                         if self.enable_news_blocking else None)
         if contradiction is not None:
             self._block_entry(
                 symbol, direction,

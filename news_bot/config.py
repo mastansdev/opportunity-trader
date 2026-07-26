@@ -119,3 +119,31 @@ NEWS_STORE_NEUTRAL = False
 #      billed at most once, ever. Combined with MAX_AI_CALLS_PER_DAY,
 #      spend is bounded and predictable.
 NEWS_AI_ONLY_COMPANY_TIER = True
+
+# 2026-07-26 -- BROAD (sector/theme/commodity) matching is OFF.
+#
+# Not a taste call. Measured on the live store after four rounds of
+# filtering out routine filings, untracked-company sprays, and market
+# commentary:
+#
+#     COMPANY   520 rows / 466 headlines  =  1.1 per headline   <- right
+#     BROAD     244 rows /  14 headlines  = 17.4 per headline   <- noise
+#
+# Every one of those 14 surviving BROAD headlines was commentary:
+# "Chris Wood warns of massive capital destruction", "US investors
+# rethink bonds' role", "Quote of the day by John Neff". None of them
+# says anything about an individual Indian stock, yet each was stamped
+# onto 20-50 of them with a single direction.
+#
+# The pattern is structural, not fixable with more keywords: general
+# financial RSS is overwhelmingly market commentary, and a headline that
+# does not NAME a company cannot tell you which company to trade. Worse,
+# one direction applied to a whole sector is actively wrong for half of
+# it -- a crude-oil spike is good for a producer and bad for a refiner.
+#
+# What remains is genuinely useful and needs no filtering: exchange
+# announcements for our own stocks, and headlines that name them. Order
+# wins, strikes, credit ratings, stake purchases -- one story, one stock.
+#
+# Set True to restore sector matching (the noise comes back with it).
+NEWS_ENABLE_BROAD_TIER = False
