@@ -3133,6 +3133,58 @@ def _rs_engine(monkeypatch, pct):
                    enable_rs_band=True)
 
 
+class _GapMarketData:
+    """market_data stand-in with a controllable day-open and last price."""
+    def __init__(self, day_open, last):
+        self._open, self._last = day_open, last
+
+    def get_day_open(self, symbol):
+        return self._open
+
+    def get_latest_price(self, symbol):
+        return self._last
+
+    def is_orb_window_unreliable(self, symbol):
+        return False
+
+
+def test_gap_up_stock_is_NOT_treated_as_exhausted(monkeypatch):
+    """THE FIX. Closed 100, gapped to 106 on real news, now 109.
+    Measured from yesterday's close that reads +9% -> the old code
+    blocked it all day. Measured from the OPEN it is +2.8% -- barely
+    started -- and it must be allowed to trade."""
+    import core.engine as em
+    monkeypatch.setattr(em, "MAX_ABS_MOVE_PCT", 0.05)
+    engine = _engine(market_data=_GapMarketData(day_open=106.0, last=109.0))
+    assert engine._is_exhausted("X") is False        # +2.8% intraday
+
+
+def test_a_genuinely_spent_intraday_move_is_still_blocked(monkeypatch):
+    """The ceiling still works -- opened 100, now 107 = +7% intraday,
+    with no gap involved. That IS exhaustion."""
+    import core.engine as em
+    monkeypatch.setattr(em, "MAX_ABS_MOVE_PCT", 0.05)
+    engine = _engine(market_data=_GapMarketData(day_open=100.0, last=107.0))
+    assert engine._is_exhausted("X") is True
+
+
+def test_gap_down_stock_is_also_judged_on_intraday_only(monkeypatch):
+    """Mirror case for shorts: gapped down hard, then drifted slightly."""
+    import core.engine as em
+    monkeypatch.setattr(em, "MAX_ABS_MOVE_PCT", 0.05)
+    engine = _engine(market_data=_GapMarketData(day_open=92.0, last=90.0))
+    assert engine._is_exhausted("X") is False        # -2.2% intraday
+
+
+def test_exhaustion_fails_open_without_a_day_open():
+    """No day-open known (no tick yet, or market_data not wired) means we
+    cannot judge -- so it must not block."""
+    engine = _engine()                                # no market_data
+    assert engine._is_exhausted("X") is False
+    engine2 = _engine(market_data=_GapMarketData(day_open=0, last=100.0))
+    assert engine2._is_exhausted("X") is False
+
+
 def test_rs_band_blocks_a_breakout_below_the_band(monkeypatch):
     """+0.2% vs market is noise, not outperformance -- no trade."""
     engine = _rs_engine(monkeypatch, 0.002)

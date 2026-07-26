@@ -347,6 +347,10 @@ class Engine:
         # Symbols whose EARLY range has been exchange-reconciled.
         self._early_orb_reconciled = set()
 
+        # Symbols whose overnight gap has been logged once
+        # (observation only -- see _note_gap).
+        self._gap_noted = set()
+
         # Sector leaderboard cache (strong, weak, ranked, computed_at)
         self._sector_cache = None
 
@@ -1104,11 +1108,79 @@ class Engine:
             return True                      # no data -> don't block
         if not (RS_BAND_MIN <= rel <= RS_BAND_MAX):
             return False
-        pct_map, _, _, _ = self._trend_snapshot()
-        own = pct_map.get(symbol)
-        if own is not None and abs(own) > MAX_ABS_MOVE_PCT:
-            return False                     # parabolic / spent
+        return not self._is_exhausted(symbol)
+
+    def _is_exhausted(self, symbol):
+        """
+        Has TODAY'S move already been spent?
+
+        CORRECTED 2026-07-25 (operator-found). This used to measure the
+        move against YESTERDAY'S CLOSE -- which silently included the
+        overnight gap, a move that happened while the market was shut.
+
+        The failure that exposed it: a stock closes at 100, gaps to 106
+        on real news, and by 10am trades 109. Measured from yesterday's
+        close that is +9% -> over the ceiling -> BLOCKED ALL DAY. But
+        during actual trading hours it has moved (109-106)/106 = +2.8%
+        and has barely started. The bot was refusing exactly the
+        gap-and-go names it most wants -- and the ORIGINAL research
+        (the inverted-U quintile study) measured from the DAY'S OPEN,
+        so the code had drifted from its own evidence.
+
+        A gap is REPRICING, not exhaustion. The day's story starts at
+        09:15. So exhaustion is measured from the open; the gap itself
+        is a separate question (volatility/violence -- the APAR spike
+        case), logged below for study but deliberately NOT gating yet.
+
+        Fail-OPEN: no day-open known (market_data not wired, or no tick
+        yet) means we cannot judge, so the trade is allowed.
+        """
+        day_open = None
+        if self.market_data is not None:
+            try:
+                day_open = self.market_data.get_day_open(symbol)
+            except Exception:
+                day_open = None
+        if not day_open or day_open <= 0:
+            return False                     # can't judge -> don't block
+
+        last = None
+        if self.market_data is not None:
+            last = self.market_data.get_latest_price(symbol)
+        if not last or last <= 0:
+            return False
+
+        intraday_move = (last - day_open) / day_open
+        if abs(intraday_move) <= MAX_ABS_MOVE_PCT:
+            # Not spent. Note a large overnight gap once per symbol --
+            # observation only, so we can study whether gap size should
+            # eventually influence SIZE (it is not a gate today).
+            self._note_gap(symbol, day_open)
+            return False
         return True
+
+    def _note_gap(self, symbol, day_open):
+        """Log a large overnight gap once per symbol. Observation only --
+        gap size does not gate or size anything yet. Recorded so Monday's
+        data can answer whether it should."""
+        if symbol in self._gap_noted:
+            return
+        pct_map, _, _, _ = self._trend_snapshot()
+        total = pct_map.get(symbol)
+        if total is None:
+            return
+        last = self.market_data.get_latest_price(symbol) if self.market_data else None
+        if not last or last <= 0:
+            return
+        intraday = (last - day_open) / day_open
+        gap = total - intraday               # the overnight portion
+        if abs(gap) >= 0.03:
+            self._gap_noted.add(symbol)
+            diagnostic(
+                f"[GAP] {symbol} opened {gap:+.1%} vs yesterday's close; "
+                f"intraday move since 09:15 is {intraday:+.1%}. Exhaustion "
+                f"is judged on the intraday part only."
+            )
 
     def _staged_position_cap(self, effective_time):
         """

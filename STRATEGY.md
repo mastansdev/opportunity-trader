@@ -45,7 +45,7 @@ Two memories, both consulted before any decision:
 | 1 | Fresh ORB cross (transition, not state) | — | stops standing-signal refills |
 | 2 | In top-20 gainers (long) / losers (short) | `TREND_RANK_TOP_N` | clock-order was the original sin |
 | 3 | **Relative strength in band 0.4%–5.0%** | `RS_BAND_MIN/MAX` | **the one predictive feature** (widened 2026-07-25 — the old band was fitted to corrupted data) |
-| 4 | Absolute move ≤ 5% | `MAX_ABS_MOVE_PCT` | inverted-U / exhaustion |
+| 4 | **Intraday move since 09:15 ≤ 5%** | `MAX_ABS_MOVE_PCT` | inverted-U / exhaustion. **Measured from the DAY'S OPEN, not yesterday's close** (fixed 2026-07-25) — a gap is repricing, not exhaustion, and the old reference blocked every gap-and-go all day |
 | 5 | Breakout clears margin | `BREAKOUT_MIN_MARGIN_PCT` | grazes = range noise |
 | 6 | Volume ≥ 1.5× average (fail-open) | `VOLUME_SURGE_MULT` | conviction |
 | 7 | Regime allows the direction | `REGIME_*` | don't fight the tape |
