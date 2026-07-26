@@ -212,15 +212,56 @@ def test_split_report_is_silent_when_data_looks_adjusted(monkeypatch):
     assert warned == []
 
 
+class _StubMemory:
+    """Stands in for core/stock_memory.py so the split test does not
+    depend on what the LIVE stock_memory.db happens to contain.
+
+    2026-07-26: this test used a real symbol (JLHL) and asserted
+    UNEXPLAINED. It passed until tools/morning_universe.py refreshed
+    stock memory, which pulled in JLHL's actual split -- so the
+    cross-check correctly reported [known SPLIT] and the test broke.
+    The production code was right and the test was reading a moving
+    database. Both paths are now pinned explicitly with a stub."""
+
+    def __init__(self, actions=None):
+        self._actions = actions or {}
+
+    def history_for(self, symbol):
+        return self._actions.get(symbol, [])
+
+
+def _use_memory(monkeypatch, memory):
+    import core.stock_memory as sm
+    monkeypatch.setattr(sm, "StockMemory", lambda *a, **k: memory)
+
+
 def test_split_report_warns_on_an_unexplained_jump(monkeypatch):
     warned = []
     monkeypatch.setattr(fetch_history, "warn", warned.append)
+    _use_memory(monkeypatch, _StubMemory())          # knows nothing
     fetch_history._report_splits([
         dict(symbol="JLHL", date="2026-07-22", close=500.0),
         dict(symbol="JLHL", date="2026-07-23", close=100.0),
     ])
     text = " ".join(warned)
     assert "JLHL" in text and "UNEXPLAINED" in text
+
+
+def test_split_report_marks_a_jump_explained_by_a_known_action(monkeypatch):
+    # The other half: when stock memory DOES hold the corporate action,
+    # the jump must be attributed, not flagged as unexplained.
+    warned = []
+    monkeypatch.setattr(fetch_history, "warn", warned.append)
+    _use_memory(monkeypatch, _StubMemory({
+        "JLHL": [{"ex_date": "2026-07-23", "action_type": "SPLIT"}],
+    }))
+    fetch_history._report_splits([
+        dict(symbol="JLHL", date="2026-07-22", close=500.0),
+        dict(symbol="JLHL", date="2026-07-23", close=100.0),
+    ])
+    text = " ".join(warned)
+    assert "known SPLIT" in text
+    assert "UNEXPLAINED" not in text
 
 
 def test_split_report_handles_no_rows(monkeypatch):

@@ -27,6 +27,37 @@ REQUIRED_COLUMNS = [
     "COMMODITY_EXPOSURE", "ECONOMIC_SENSITIVITY", "KEYWORDS", "THEMES",
 ]
 
+# Which of the above must actually be FILLED IN, and on which rows.
+#
+# 2026-07-26. tools/morning_universe.py queues every newly listed NSE
+# scrip into the master with only its identity resolved -- SECURITY ID,
+# SYMBOL, COMPANY NAME -- and SUBSCRIBE=NO, reason "new listing --
+# awaiting sector classification". That is the CORRECT behaviour: the
+# stock is recorded but deliberately not tradeable until a human
+# classifies it.
+#
+# But load() used to demand all twelve columns on EVERY row, so the
+# morning run adding 186 new listings made the master unloadable, and
+# main.py:127 calls load() before anything else. The bot would not have
+# STARTED on Monday -- killed by rows it had itself decided not to
+# trade.
+#
+# So the rule is now scoped to what each column is FOR:
+#   IDENTITY       -- needed to subscribe to a feed and map a tick back
+#                     to a row. Mandatory on every row, no exceptions:
+#                     a blank here is genuine corruption.
+#   CLASSIFICATION -- needed to make a DECISION about a stock (sector
+#                     strength gate, news keyword matching). Mandatory
+#                     only where the bot can actually act, i.e. rows
+#                     that are not SUBSCRIBE=NO.
+#
+# A blocked row with no sector is a to-do item. A TRADEABLE row with no
+# sector is a bug that would silently break the top-8 sector gate, and
+# that still refuses to start.
+IDENTITY_COLUMNS = ["SECURITY ID", "SYMBOL", "COMPANY NAME"]
+CLASSIFICATION_COLUMNS = [c for c in REQUIRED_COLUMNS
+                          if c not in IDENTITY_COLUMNS]
+
 # Written by tools/morning_universe.py before the open -- see
 # core/subscribe_list.py for what makes a stock NO (T2T, ETF, price
 # band, illiquid, ex-date, unclassified). OPTIONAL on purpose: a file
@@ -70,11 +101,37 @@ class MasterLoader:
                 f"Master database missing required columns: {missing_cols}"
             )
 
-        empty_cells = df[REQUIRED_COLUMNS].isna().sum().sum()
-        if empty_cells:
+        # Identity must be complete on every row -- see the
+        # IDENTITY_COLUMNS comment above.
+        blank_identity = df[IDENTITY_COLUMNS].isna().any(axis=1)
+        if blank_identity.any():
+            rows = df.loc[blank_identity, "SYMBOL"].fillna("<no symbol>")
             raise RuntimeError(
-                f"Master database has {empty_cells} empty cell(s). "
-                f"Fix the source file before trading."
+                f"Master database has {int(blank_identity.sum())} row(s) "
+                f"with missing identity "
+                f"({', '.join(IDENTITY_COLUMNS)}): "
+                f"{list(rows)[:10]}. Fix the source file before trading."
+            )
+
+        # Classification only has to be filled in where the bot can act
+        # on it. Rows the morning tool has already marked NO are allowed
+        # to be unclassified -- that is exactly what "new listing --
+        # awaiting sector classification" means.
+        if SUBSCRIBE_COLUMN in df.columns:
+            tradeable = (df[SUBSCRIBE_COLUMN].astype(str).str.strip()
+                         .str.upper() != "NO")
+        else:
+            tradeable = df.index == df.index      # no column -> all rows
+
+        unclassified = tradeable & df[CLASSIFICATION_COLUMNS].isna().any(axis=1)
+        if unclassified.any():
+            rows = df.loc[unclassified, "SYMBOL"]
+            raise RuntimeError(
+                f"Master database has {int(unclassified.sum())} TRADEABLE "
+                f"row(s) with missing classification: {list(rows)[:10]}. "
+                f"Either classify them or mark them SUBSCRIBE=NO -- a "
+                f"tradeable stock with no SECTOR silently breaks the "
+                f"sector-strength gate."
             )
 
         dup_symbols = df["SYMBOL"].duplicated()
