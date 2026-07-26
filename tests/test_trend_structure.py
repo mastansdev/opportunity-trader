@@ -106,6 +106,65 @@ def test_downtrend_breaking_upward_is_flagged_too():
     assert result["structure"] == RANGE
 
 
+def test_a_tie_is_not_a_trend_so_there_is_nothing_to_break():
+    """
+    PARAS, real data 2026-07-24. Legs oldest->newest:
+        DOWN DOWN UP UP UP DOWN DOWN
+    The window before the last bar is 3 UP and 3 DOWN -- a tie. The
+    first version of the break test accepted that as "was an uptrend"
+    and reported PARAS as "making lower highs and lower lows (UPTREND
+    JUST BROKE)". Both at once, which is nonsense.
+    """
+    bars = [bar(120, 110, 112)]
+    for high, low, close in [(118, 108, 110), (116, 106, 108),   # DOWN DOWN
+                             (122, 112, 120), (126, 116, 124),   # UP UP
+                             (130, 120, 128),                    # UP
+                             (128, 118, 120), (126, 114, 116)]:  # DOWN DOWN
+        bars.append(bar(high, low, close))
+
+    result = analyse(bars)
+    assert result["legs"] == [DOWN_LEG, DOWN_LEG, UP_LEG, UP_LEG,
+                              UP_LEG, DOWN_LEG, DOWN_LEG]
+    assert result["broke_structure"] is None
+    assert result["structure"] == DOWNTREND
+    # and the description must not contradict itself
+    assert "JUST BROKE" not in describe(result)
+
+
+def test_a_real_break_still_fires_when_the_uptrend_was_clear():
+    """
+    KALYANKJIL, real data 2026-07-24: UP UP INSIDE OUTSIDE UP UP DOWN.
+    Four UP legs and no DOWN legs before the last bar -- an unambiguous
+    uptrend -- then a lower high and a broken low. This is the operator's
+    case and it MUST still be flagged after tightening the test above.
+    """
+    bars = [bar(100, 90, 98)]
+    for high, low, close in [(110, 95, 108), (120, 105, 118),
+                             (118, 108, 112),                    # INSIDE
+                             (125, 104, 120),                    # OUTSIDE
+                             (130, 112, 128), (138, 120, 136),   # UP UP
+                             (134, 118, 122)]:                   # DOWN
+        bars.append(bar(high, low, close))
+
+    result = analyse(bars)
+    assert result["legs"] == [UP_LEG, UP_LEG, INSIDE, OUTSIDE,
+                              UP_LEG, UP_LEG, DOWN_LEG]
+    assert result["broke_structure"] == "UP"
+    assert result["structure"] == RANGE
+    assert "JUST BROKE" in describe(result)
+
+
+def test_describe_never_reports_a_trend_and_its_own_break_together():
+    """Whenever a break is flagged, the label must already have been
+    downgraded -- so no output can ever claim a direction and a break of
+    the OPPOSITE direction in the same line."""
+    for bars in (staircase_up(n=6) + [bar(148, 128, 130)],
+                 staircase_down(n=6) + [bar(160, 152, 158)]):
+        result = analyse(bars)
+        if result["broke_structure"]:
+            assert result["structure"] == RANGE
+
+
 def test_choppy_bars_are_RANGE():
     bars = [bar(100, 90), bar(105, 85), bar(98, 88),
             bar(103, 87), bar(99, 91)]

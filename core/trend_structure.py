@@ -133,8 +133,16 @@ def analyse(bars):
         earlier = legs[:-1]
         last = bars[-1]
         prior = bars[-2]
-        was_up = earlier.count(UP_LEG) >= max(2, len(earlier) // 2)
-        was_down = earlier.count(DOWN_LEG) >= max(2, len(earlier) // 2)
+        earlier_up = earlier.count(UP_LEG)
+        earlier_down = earlier.count(DOWN_LEG)
+        # STRICT MAJORITY, not just "enough". The first version used
+        # >= max(2, len//2), which called a 3-UP / 3-DOWN window an
+        # uptrend -- so PARAS (legs DOWN DOWN UP UP UP DOWN DOWN, real
+        # data 2026-07-24) was reported as "making lower highs and lower
+        # lows (UPTREND JUST BROKE)". Both at once, which is nonsense.
+        # A tie is not a trend, so there is nothing to break.
+        was_up = earlier_up > earlier_down and earlier_up >= 2
+        was_down = earlier_down > earlier_up and earlier_down >= 2
         failed_high = last["high"] <= prior["high"]
         failed_low = last["low"] >= prior["low"]
         if was_up and failed_high and last["low"] < prior["low"]:
