@@ -319,13 +319,23 @@ def test_first_ever_run_always_refreshes(results):
     assert results.needs_refresh(date(2026, 9, 15)) is True
 
 
+def _seed_a_timing(results):
+    """The cadence rules only apply once the pulse has worked at least
+    once -- zero timings always forces a refresh (see
+    test_zero_timings_always_forces_a_refresh)."""
+    results.remember("SEED", date(2025, 1, 10),
+                     broadcast_at=datetime(2025, 1, 10, 16, 0))
+
+
 def test_in_season_refreshes_daily(results):
+    _seed_a_timing(results)
     results.mark_refreshed(date(2026, 7, 26))
     assert results.needs_refresh(date(2026, 7, 26)) is False
     assert results.needs_refresh(date(2026, 7, 27)) is True
 
 
 def test_off_season_refreshes_weekly(results):
+    _seed_a_timing(results)
     results.mark_refreshed(date(2026, 9, 1))          # September
     assert results.needs_refresh(date(2026, 9, 5)) is False
     assert results.needs_refresh(date(2026, 9, 7)) is False
@@ -346,9 +356,24 @@ def test_refresh_skips_when_nothing_is_due(results, monkeypatch):
     monkeypatch.setattr(rc, "fetch_filed_results",
                         lambda *a, **k: calls.append("fr") or 0)
 
+    _seed_a_timing(results)
     results.mark_refreshed(date(2026, 9, 1))
     rc.refresh(calendar=results, today=date(2026, 9, 3))
     assert calls == []                       # off-season, only 2 days on
 
     rc.refresh(calendar=results, today=date(2026, 9, 3), force=True)
     assert calls == ["bm", "fr"]
+
+
+def test_zero_timings_always_forces_a_refresh(results):
+    """A throttle must never throttle something that has never worked.
+    On 2026-07-26 this gate skipped the run carrying the fix for the
+    empty pulse, because it had 'already refreshed today'."""
+    results.mark_refreshed(date(2026, 7, 26))
+    assert results.stats()["with_time"] == 0
+    assert results.needs_refresh(date(2026, 7, 26)) is True
+
+    # Once a single timing exists, the normal cadence applies again.
+    results.remember("TCS", date(2026, 7, 20),
+                     broadcast_at=datetime(2026, 7, 20, 16, 0))
+    assert results.needs_refresh(date(2026, 7, 26)) is False

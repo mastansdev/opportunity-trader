@@ -316,8 +316,16 @@ class ResultsCalendar:
         """
         Daily in results season, weekly outside it. See
         RESULTS_SEASON_MONTHS for the reasoning.
+
+        One override: if we hold NO broadcast timings at all, always
+        refresh. Zero timings means the pulse has never once worked, so
+        throttling is throttling a thing that has never succeeded --
+        exactly what happened on 2026-07-26, when this gate skipped the
+        run that carried the fix for it.
         """
         day = _as_date(day) or datetime.now().date()
+        if self.stats()["with_time"] == 0:
+            return True
         last = self.last_refreshed()
         if last is None:
             return True

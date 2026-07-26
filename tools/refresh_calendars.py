@@ -80,7 +80,14 @@ def main():
     # ---- 2. Results + earnings pulse ----------------------------
     try:
         from core.results_calendar import refresh as refresh_results
-        results = refresh_results(known_symbols=known).stats()["events"]
+        # force=True: this command is TYPED BY A HUMAN, so it means "do
+        # it now". The daily/weekly seasonal throttle exists to stop the
+        # automatic morning run from polling NSE pointlessly in
+        # September -- it has no business overriding an explicit request,
+        # and on 2026-07-26 it silently skipped the very run that
+        # carried a fix.
+        results = refresh_results(known_symbols=known,
+                                  force=True).stats()["events"]
     except Exception as exc:
         warn(f"  Results calendar failed: {exc}")
 
