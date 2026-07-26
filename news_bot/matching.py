@@ -48,6 +48,40 @@ _CORP_SUFFIXES = {
 _MIN_SYMBOL_LEN = 3          # guard against short/generic symbol false-hits
 _MIN_COMPANY_TERM_LEN = 3    # guard against 1-2 char normalized names
 
+# Routine exchange housekeeping. Real compliance obligations, zero
+# trading information. Checked against the UPPERCASED headline+summary.
+_ROUTINE_FILING_MARKERS = (
+    "TRADING WINDOW",
+    "APPOINTMENT OF", "RESIGNATION OF", "CESSATION OF", "RE-APPOINTMENT",
+    "CHANGE IN DIRECTOR", "CHANGE IN MANAGEMENT", "COMPANY SECRETARY",
+    "COMPLIANCE CERTIFICATE", "CERTIFICATE UNDER",
+    "DISCLOSURE UNDER REGULATION", "DISCLOSURE UNDER SEBI",
+    "SCHEDULE OF", "INVESTOR PRESENTATION", "ANALYST MEET",
+    "EARNINGS CALL", "CONFERENCE CALL", "AUDIO RECORDING",
+    "TRANSCRIPT", "NEWSPAPER PUBLICATION", "NEWSPAPER ADVERTISEMENT",
+    "LOSS OF SHARE CERTIFICATE", "DUPLICATE SHARE CERTIFICATE",
+    "TRANSFER OF SHARES", "SHARE TRANSFER", "REGISTRAR AND",
+    "ANNUAL REPORT", "ANNUAL GENERAL MEETING", "POSTAL BALLOT",
+    "RECORD DATE", "BOOK CLOSURE", "SHAREHOLDING PATTERN",
+    "INVESTOR COMPLAINT", "GRIEVANCE REDRESSAL",
+    "RELATED PARTY", "SECRETARIAL",
+)
+
+
+def is_routine_filing(text):
+    """
+    True for exchange housekeeping that carries no trading signal.
+
+    A results filing is NOT routine and must survive -- check that
+    first, because "Financial Results" often appears alongside
+    "Newspaper Publication" in the same subject line.
+    """
+    upper = str(text or "").upper()
+    if "RESULT" in upper and "NEWSPAPER" not in upper \
+            and "PUBLICATION" not in upper:
+        return False
+    return any(marker in upper for marker in _ROUTINE_FILING_MARKERS)
+
 
 def _normalize_company_name(raw_name):
     """Strip trailing corporate-entity suffix tokens (LIMITED,
@@ -98,6 +132,16 @@ class NewsMatcher:
 
         # COMPANY tier
         self._company_patterns = []   # list[(compiled_regex, term, symbol)]
+        # Matched CASE-SENSITIVELY against the ORIGINAL headline, not the
+        # uppercased copy. Found 2026-07-26: "Crude oil prices surge on
+        # Middle East supply concerns" matched the symbol OIL (Oil India),
+        # which then suppressed the entire genuine sector story. Same
+        # family as "ban" inside "Bank".
+        #
+        # Real tickers appear in headlines in CAPS ("OIL reports Q1");
+        # the ordinary English word does not. Company NAMES are matched
+        # separately and case-insensitively, so "Oil India Limited" is
+        # still caught properly.
         self._symbol_patterns = []    # list[(compiled_regex, symbol)]
 
         # BROAD tier: field_name -> list[(compiled_regex, term, symbol)]
@@ -122,8 +166,11 @@ class NewsMatcher:
             record = self.loader.get_by_symbol(symbol)
 
             if len(symbol) >= _MIN_SYMBOL_LEN:
+                # CASE-SENSITIVE, deliberately -- see the note on
+                # _symbol_patterns below.
                 self._symbol_patterns.append(
-                    (_word_boundary_pattern(symbol.upper()), symbol)
+                    (re.compile(r"(?<![A-Za-z0-9])" + re.escape(symbol.upper())
+                                + r"(?![A-Za-z0-9])"), symbol)
                 )
 
             norm_name = _normalize_company_name(record["COMPANY NAME"])
@@ -150,6 +197,16 @@ class NewsMatcher:
 
     def match(self, item):
         text = f"{item.title} {item.summary}".upper()
+
+        # ROUTINE COMPLIANCE FILINGS -- 2026-07-26.
+        # The store held 12,831 rows from 1,034 real headlines, and the
+        # commonest were "Trading Window closure", "Appointment of Mr X",
+        # "Schedule of analyst call", "Disclosure under Regulation 30".
+        # None of those move a price. Dropped before matching, so they
+        # cannot fan out either.
+        if is_routine_filing(text):
+            return MatchedNews(item=item, matches=[])
+
         results = []
         seen = set()
 
@@ -174,9 +231,27 @@ class NewsMatcher:
             if pattern.search(text):
                 add(symbol, "COMPANY_NAME", term, "COMPANY")
 
+        raw = f"{item.title} {item.summary}"
         for pattern, symbol in self._symbol_patterns:
-            if pattern.search(text):
+            if pattern.search(raw):          # raw, NOT the uppercased text
                 add(symbol, "SYMBOL", symbol, "COMPANY")
+
+        # THE FAN-OUT FIX -- 2026-07-26, operator report.
+        #
+        # A single Vedanta trading-window notice was stored against 264
+        # symbols: ABB, AMBER, ASHOKLEY, BAJAJ-AUTO and every other name
+        # whose SECTOR / THEMES / COMMODITY_EXPOSURE mentions steel. It
+        # told you nothing whatsoever about ABB.
+        #
+        # If a headline NAMES a company, it is about that company. Full
+        # stop. Broad sector matching exists for the other case -- "steel
+        # prices surge on import duty" names nobody, and there the whole
+        # sector genuinely is the story.
+        #
+        # Measured: 93% of stored rows were BROAD, 12.4 copies of every
+        # headline. This one condition removes almost all of it.
+        if results:
+            return MatchedNews(item=item, matches=results)
 
         for field, patterns in self._broad_patterns.items():
             for pattern, term, symbol in patterns:
