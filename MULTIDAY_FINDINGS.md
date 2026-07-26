@@ -105,6 +105,58 @@ fades, Q4 is best) and the band was built on it. Over 61 sessions
 **there is no inverted U in this range — stronger is better**, and the
 lower half of the live band (0.4%–2.5%) is a net negative.
 
+## 5. What KIND of stock is it trading? (answers §E item 1)
+
+`core/trend_structure.py` was built to describe each stock's multi-day
+shape and deliberately given no vote, until someone could measure
+whether STRONG_UP trades beat RANGE trades. That measurement is now
+possible. Structure is computed from the 7 daily bars BEFORE the trade
+date, so it is knowable before the open.
+
+| Daily structure | n | Share | Gross/trade |
+|---|---|---|---|
+| STRONG_UP | 215 | 11% | **−32** |
+| UPTREND | 481 | 25% | +60 |
+| **RANGE** | **674** | **34%** | +64 |
+| DOWNTREND | 346 | 18% | +87 |
+| STRONG_DOWN | 152 | 8% | **−150** |
+
+**The bot mostly trades range-bound stocks** — a third of the book —
+and it loses money at both extremes. A stock that has stepped up for a
+week (STRONG_UP) and a stock that has collapsed for a week
+(STRONG_DOWN) are the two worst things it can touch.
+
+Split by direction, one cell stands out from all ten:
+
+| Structure | Direction | n | Gross/trade | NET |
+|---|---|---|---|---|
+| **DOWNTREND** | **LONG** | **178** | **+245** | **+22,843** |
+| UPTREND | LONG | 207 | +102 | −2,983 |
+| RANGE | SHORT | 336 | +81 | −12,082 |
+| RANGE | LONG | 338 | +46 | −23,830 |
+| STRONG_UP | LONG | 82 | +31 | −7,029 |
+| UPTREND | SHORT | 274 | +28 | −24,487 |
+| STRONG_UP | SHORT | 133 | −71 | −25,072 |
+| DOWNTREND | SHORT | 168 | −81 | −33,323 |
+| STRONG_DOWN | SHORT | 79 | −132 | −19,685 |
+| STRONG_DOWN | LONG | 73 | −170 | −20,985 |
+
+**DOWNTREND + LONG is the only net-positive cell in the entire
+matrix**, at +Rs 245 gross per trade against a system average of Rs 35.
+
+The story it tells is coherent: the bot makes money **buying an
+intraday breakout in a stock that has been falling for several days**,
+and loses money **chasing a stock already extended in the direction it
+is already going**. Daily-timeframe mean reversion, intraday-timeframe
+momentum. That is close to the opposite of the "still trending" rule
+currently in the entry path.
+
+**Caveat, and it is a serious one:** this is one cell out of ten. Slice
+any dataset ten ways and one slice will look excellent by luck. n=178
+is a reasonable sample but this needs out-of-sample confirmation before
+it becomes a rule. It is the most interesting hypothesis on this page,
+not a finding to ship.
+
 ---
 
 ## What this means
