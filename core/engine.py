@@ -35,15 +35,6 @@ still be turned away, in exactly two cases -- both because
 taking the trade would mean fighting a market that's already
 telling you something, not because "no confirmation exists":
 
-  1. NEWS CONTRADICTION (single stock): the exact symbol has a
-     same-day HIGH-priority news item (core/news_gate.py) whose
-     direction is the OPPOSITE of this signal. Blocks only that
-     one direction, for that one symbol, for the rest of the
-     day -- a genuine bearish breakdown on that SAME symbol
-     later (which would agree with the bad news) is still fully
-     tradeable. Operator-approved 2026-07-23: "NO TRADE" rather
-     than "flag only, still trade" -- no fighting the market on
-     a name with real, material, contradicting news against it.
 
   2. SECTOR PANIC (breadth-wide): core/sector_monitor.py flags a
      whole sector as broadly, sharply declining -- not one bad
@@ -88,7 +79,6 @@ from config import (
     ENABLE_NO_PROGRESS_EXIT, NO_PROGRESS_MINUTES, NO_PROGRESS_R,
     ENABLE_ORB_EXCHANGE_RECONCILE,
     ENABLE_TICK_SANITY, MAX_TICK_JUMP_PCT,
-    ENABLE_NEWS_BLOCKING,
     ENABLE_LIQUIDITY_FLOOR, MIN_TURNOVER_RS,
     ENABLE_STOCK_MEMORY, MEMORY_ACTION_WINDOW_DAYS,
     ENABLE_SECTOR_STRENGTH_GATE, SECTOR_STRENGTH_TOP_N,
@@ -98,7 +88,6 @@ from config import (
     ENABLE_VOLUME_FILTER, VOLUME_SURGE_MULT, VOLUME_AVG_CANDLES,
     MIN_VOLUME_CANDLES,
 )
-from news_bot.config import NEWS_KEYWORD_CAN_BLOCK
 from core.atr import compute_atr
 from core.orb_engine import OrbEngine, EARLY_ORB_END_T, ORB_WINDOW_END_T
 from core.candle_engine import CandleEngine
@@ -196,24 +185,17 @@ EXIT_REASON_NO_PROGRESS = "NO_PROGRESS"
 # _maybe_partial_exit()'s own bookkeeping.
 EXIT_REASON_PARTIAL_PROFIT = "PARTIAL_PROFIT_ATR"
 
-# Structural direction -> the news direction that would AGREE
-# with it. Anything else in the HIGH-priority item is a
-# contradiction (HIGH tier already excludes "neutral" by
-# construction -- see news_bot/priority.py).
-_AGREEING_NEWS_DIRECTION = {LONG: "bullish", SHORT: "bearish"}
-
 
 class Engine:
 
-    def __init__(self, news_gate=None, portfolio=None, sector_monitor=None,
+    def __init__(self, portfolio=None, sector_monitor=None,
                  momentum_universe=None, circuit_monitor=None, market_data=None,
                  min_tradable_price=MIN_TRADABLE_PRICE_RS,
                  earnings_calendar=None,
                  candle_recorder=None,
                  enable_rs_band=None, enable_staged_entry=None,
                  one_trade_per_symbol=None, enable_no_progress=None,
-                 enable_tick_sanity=None, enable_news_blocking=None,
-                 stock_memory=None,
+                 enable_tick_sanity=None, stock_memory=None,
                  trade_memory=None):
         # config.py's real value by default -- injectable purely so
         # tests can construct an Engine without it (this whole
@@ -237,12 +219,6 @@ class Engine:
         self.trailing_stop = TrailingStopEngine()
         self.execution = Execution()
         self.trade_controller = TradeController()
-
-        # Advisory reader only -- see module docstring above and
-        # core/news_gate.py. None is the default and fully
-        # supported: every existing decision path works
-        # identically with no news_gate at all.
-        self.news_gate = news_gate
 
         # Display/tracking ledger only -- see
         # trading/portfolio.py's own docstring. None is fully
@@ -389,11 +365,6 @@ class Engine:
         self.enable_tick_sanity = (
             ENABLE_TICK_SANITY if enable_tick_sanity is None
             else enable_tick_sanity)
-        # Injectable like the gates above, so the news-blocking tests
-        # can exercise the behaviour even though it ships OFF.
-        self.enable_news_blocking = (
-            ENABLE_NEWS_BLOCKING if enable_news_blocking is None
-            else enable_news_blocking)
 
         # Edge-triggered logging for regime changes -- log the
         # regime ONCE when it changes, not on every skipped entry.
@@ -1724,21 +1695,6 @@ class Engine:
         if ENABLE_VOLUME_FILTER and not self._breakout_has_volume(symbol, closed_candle):
             return
 
-        # ENABLE_NEWS_BLOCKING is OFF (config). News is collected and
-        # shown, but does not veto a trade -- the free keyword
-        # classifier is not reliable enough to silently refuse a good
-        # setup, and a wrong veto costs more than the bad trade it
-        # prevents. Same "observe, do not vote" stance as trend
-        # structure and trade memory.
-        contradiction = (self._news_contradiction(symbol, direction)
-                         if self.enable_news_blocking else None)
-        if contradiction is not None:
-            self._block_entry(
-                symbol, direction,
-                f"contradicting news -- {contradiction}",
-            )
-            return
-
         if direction == LONG and self.sector_monitor is not None \
                 and self.sector_monitor.is_symbol_in_panicking_sector(symbol):
             sector = self.sector_monitor.sector_of(symbol)
@@ -2015,40 +1971,6 @@ class Engine:
             if streak[1] >= FROZEN_PRICE_STREAK_CANDLES
         )
 
-    def _news_contradiction(self, symbol, direction):
-        """
-        Returns a short description if today's latest HIGH-priority
-        news for `symbol` points the OPPOSITE way from `direction`,
-        else None. HIGH tier already guarantees confidence >= the
-        configured threshold, materiality == "material", and a
-        real direction (never neutral) -- see
-        news_bot/priority.py's tier_for().
-        """
-        if self.news_gate is None:
-            return None
-
-        item = self.news_gate.latest_high_priority(symbol)
-        if item is None:
-            return None
-
-        # 2026-07-24 -- the FREE keyword classifier
-        # (news_bot/keyword_classifier.py) is too crude to VETO a
-        # real-money trade ("profit falls less than feared" reads
-        # bearish on "profit falls"). So keyword-classified news is
-        # DISPLAY-ONLY unless the operator explicitly turns on
-        # NEWS_KEYWORD_CAN_BLOCK. Only the paid Haiku classifier gets
-        # to block by default. Items from before this field existed
-        # have no "classifier" key -- treat those as Haiku (trusted),
-        # matching the pre-2026-07-24 behaviour exactly.
-        classifier = item.get("classifier", "haiku")
-        if classifier == "keyword" and not NEWS_KEYWORD_CAN_BLOCK:
-            return None
-
-        if item["direction"] == _AGREEING_NEWS_DIRECTION[direction]:
-            return None
-
-        return f"{item['direction']} ({item['confidence']}%) -- {item['reason']}"
-
     def _block_entry(self, symbol, direction, reason):
         self.entry_blocked.setdefault(symbol, {})[direction] = reason
         warn(
@@ -2107,12 +2029,6 @@ class Engine:
             )
             return
 
-        news_line = ""
-        if self.news_gate is not None:
-            note = self.news_gate.describe(symbol)
-            if note is not None:
-                news_line = f"\nHIGH news today: {note}"
-
         bracket_line = (
             f"\nFixed stop     : {stop_seed:.2f}\nFixed target   : {target:.2f}"
             if target is not None else ""
@@ -2126,8 +2042,7 @@ class Engine:
                 f"ORB Low        : {orb_range['low']:.2f}\n"
                 f"Breakout Close : {price:.2f}"
                 f"{bracket_line}"
-                f"{news_line}"
-            )
+                            )
         elif entry_reason == ENTRY_REASON_STRUCTURAL_SHORT:
             orb_range = self.orb_engine.get_range(symbol)
             decision(
@@ -2136,20 +2051,17 @@ class Engine:
                 f"ORB Low        : {orb_range['low']:.2f}\n"
                 f"Breakdown Close: {price:.2f}"
                 f"{bracket_line}"
-                f"{news_line}"
-            )
+                            )
         elif entry_reason == ENTRY_REASON_MANUAL_SHORT_DASHBOARD:
             decision(
                 f"\nMANUAL SHORT (dashboard): {symbol}\n"
                 f"Price                    : {price:.2f}"
-                f"{news_line}"
-            )
+                            )
         else:
             decision(
                 f"\nMANUAL BUY (dashboard): {symbol}\n"
                 f"Price                  : {price:.2f}"
-                f"{news_line}"
-            )
+                            )
 
         if direction == LONG:
             result = self.execution.buy(

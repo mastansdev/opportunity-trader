@@ -116,34 +116,17 @@ Largely superseded by the SUBSCRIBE column.
 
 ---
 
-## 4. News — separate processes
-
-### `py run_news_engine.py`
-The 24/7 news engine. Own process, no broker, no market hours. Fetches
-RSS + NSE/BSE announcements forever and writes to the shared store.
-Run it locally in its own window, or deploy to Railway.
-
-**Nothing from it is displayed anywhere.** The news dashboard (port
-8050) and the major-events strip were both removed 2026-07-26 — RSS
-arrives already delayed, so none of it was usable for intraday
-decisions. The engine keeps collecting so the data exists when the paid
-classifier is bought.
-
----
-
-## 5. Diagnostics — only when something looks wrong
+## 4. Diagnostics — only when something looks wrong
 
 | Command | Use it when |
 |---|---|
-| `py tools/diagnose_news.py` | news feed looks repetitive or wrong |
 | `py tools/inspect_results_feed.py` | earnings pulse is empty — shows NSE's raw fields |
 | `py tools/verify_master_database.py` | check every security ID against the live broker |
 | `py tools/dashboard_preview.py` | open the dashboard outside market hours (weekends, after 15:30) |
-| `py tools/clean_news.py` | one-time purge of old neutral news rows (already done) |
 
 ---
 
-## 6. Backtest — replay a recorded session
+## 5. Backtest — replay a recorded session
 
 | Command | Does |
 |---|---|
@@ -157,13 +140,13 @@ automatically.
 
 ---
 
-## 7. Tests
+## 6. Tests
 
 ```
 py -m pytest -q
 ```
 
-700 tests. Run after any code change — if this isn't green, don't trade.
+548 tests. Run after any code change — if this isn't green, don't trade.
 
 ---
 

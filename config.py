@@ -1280,29 +1280,3 @@ MEMORY_ACTION_WINDOW_DAYS = 1     # +/- days around the ex-date to avoid
 # it is one -- it earns a vote after enough real sessions, not before.
 ENABLE_TRADE_MEMORY = True
 
-# ==========================================================
-# NEWS: does it block trades?
-# ==========================================================
-# OFF, on the operator's call, 2026-07-26:
-#
-#     "URBAN = BAN ? keyword matching .. i guess we need to stop
-#      relying on news & trading for now until API i buy."
-#
-# The specific example was a stale row -- that filing was classified
-# on 2026-07-24, before the word-boundary fix, and the same headline
-# now returns neutral. But the judgement is right, and the reason is
-# not that one bug:
-#
-#   - the FREE keyword classifier reads sentiment from isolated words.
-#     "ban"/"cut"/"gains" have repeatedly meant something other than
-#     what the lexicon assumed.
-#   - a wrong bearish HIGH does not merely add noise, it REFUSES a
-#     trade. A silent veto on a good setup costs more than the
-#     occasional bad trade it prevents.
-#   - the paid classifier, which would actually read the sentence, is
-#     not bought yet.
-#
-# So news is COLLECTED and DISPLAYED but has no vote, exactly like
-# trend structure, deal flow and trade memory. Set True to restore the
-# veto -- ideally only once the paid classifier is running.
-ENABLE_NEWS_BLOCKING = False

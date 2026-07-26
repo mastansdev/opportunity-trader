@@ -59,7 +59,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import IntegrityError
 
-from news_bot.news_store import resolve_database_url
+from core.db import resolve_database_url
 
 # Action types that MOVE THE PRICE MECHANICALLY -- the reference price
 # changes, so a % move computed against yesterday's close is a lie.
@@ -136,7 +136,7 @@ class StockMemory:
     """Per-symbol facts. Construct once and share."""
 
     def __init__(self, url=None):
-        self.url = resolve_database_url(url)
+        self.url = resolve_database_url(url, default="sqlite:///data/stock_memory.db")
         connect_args = {}
         if self.url.startswith("sqlite"):
             connect_args["check_same_thread"] = False

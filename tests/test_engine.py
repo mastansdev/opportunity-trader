@@ -72,12 +72,6 @@ def _engine(**kwargs):
     # the corrupt-tick guard would (correctly) call impossible. Off by
     # default; its own tests below switch it on.
     kwargs.setdefault("enable_tick_sanity", False)
-    # News blocking ships OFF (config.ENABLE_NEWS_BLOCKING, 2026-07-26 --
-    # the free keyword classifier is not reliable enough to silently veto
-    # a trade). This helper turns it ON so the dedicated news-gate tests
-    # below still exercise the behaviour; production uses the config
-    # value, which is False.
-    kwargs.setdefault("enable_news_blocking", True)
     return Engine(**kwargs)
 
 
@@ -624,20 +618,6 @@ def test_no_pyramiding_on_a_second_breakout_while_already_open():
     assert engine.open_positions["TCS"]["qty"] == LAYER1_FIXED_QTY
 
 
-class _FakeNewsGate:
-    def __init__(self, note=None, high_item=None):
-        self.note = note
-        self.high_item = high_item
-        self.asked_symbols = []
-
-    def describe(self, symbol):
-        self.asked_symbols.append(symbol)
-        return self.note
-
-    def latest_high_priority(self, symbol):
-        return self.high_item
-
-
 class _FakeSectorMonitor:
     def __init__(self, panicking=None, sector="PHARMA"):
         self.panicking = panicking or set()
@@ -650,184 +630,12 @@ class _FakeSectorMonitor:
         return self.sector
 
 
-def test_news_gate_describe_is_still_read_for_the_decision_log():
-    """describe() (the formatted advisory string) is used for the
-    console log regardless of whether the news agrees or blocks --
-    it never itself decides anything, see core/news_gate.py."""
-    gate = _FakeNewsGate(
-        note="bullish (90%) -- Good news.",
-        high_item={"direction": "bullish", "confidence": 90, "reason": "Good news."},
-    )
-    engine = _engine(news_gate=gate)
-    _feed_orb_range(engine, high=110.0)
-
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-
-    assert "TCS" in engine.open_positions
-    assert gate.asked_symbols == ["TCS"]
-
-
-def test_agreeing_high_news_does_not_block_the_breakout():
-    gate = _FakeNewsGate(
-        high_item={"direction": "bullish", "confidence": 90, "reason": "Good news."}
-    )
-    engine = _engine(news_gate=gate)
-    _feed_orb_range(engine, high=110.0)
-
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-
-    assert "TCS" in engine.open_positions
-
-
-def test_contradicting_high_news_blocks_the_breakout_no_trade():
-    """
-    Operator-approved 2026-07-23: a bullish structural breakout
-    with fresh, material, HIGH-confidence BEARISH news on that
-    exact stock is a real conflict -- no trade, not just a flag.
-    """
-    gate = _FakeNewsGate(
-        high_item={"direction": "bearish", "confidence": 90, "reason": "Bad news."}
-    )
-    engine = _engine(news_gate=gate)
-    _feed_orb_range(engine, high=110.0)
-
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-
-    assert "TCS" not in engine.open_positions
-    assert engine.entry_blocked["TCS"] == {
-        "LONG": "contradicting news -- bearish (90%) -- Bad news."
-    }
-
-
-def test_keyword_classified_high_news_does_not_block_by_default():
-    """
-    2026-07-24: the FREE keyword classifier is too crude to VETO a
-    real-money trade, so keyword-classified HIGH news is DISPLAY-ONLY
-    unless the operator turns on NEWS_KEYWORD_CAN_BLOCK. A
-    contradicting keyword item must let the breakout through.
-    """
-    gate = _FakeNewsGate(
-        high_item={
-            "direction": "bearish", "confidence": 80, "reason": "keyword: probe",
-            "classifier": "keyword",
-        }
-    )
-    engine = _engine(news_gate=gate)  # NEWS_KEYWORD_CAN_BLOCK defaults False
-    _feed_orb_range(engine, high=110.0)
-
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-
-    assert "TCS" in engine.open_positions          # not blocked
-    assert "TCS" not in engine.entry_blocked
-
-
-def test_keyword_high_news_blocks_when_operator_allows_it(monkeypatch):
-    """With NEWS_KEYWORD_CAN_BLOCK turned on, keyword news blocks a
-    contradicting breakout exactly like Haiku news does."""
-    import core.engine as engine_module
-    monkeypatch.setattr(engine_module, "NEWS_KEYWORD_CAN_BLOCK", True)
-
-    gate = _FakeNewsGate(
-        high_item={
-            "direction": "bearish", "confidence": 80, "reason": "keyword: probe",
-            "classifier": "keyword",
-        }
-    )
-    engine = _engine(news_gate=gate)
-    _feed_orb_range(engine, high=110.0)
-
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-
-    assert "TCS" not in engine.open_positions
-    assert "LONG" in engine.entry_blocked.get("TCS", {})
-
-
-def test_high_news_without_a_classifier_field_still_blocks_as_haiku():
-    """Backward compatibility: items written before the 'classifier'
-    field existed have no such key -- they must be treated as trusted
-    (Haiku) and keep blocking, exactly as before 2026-07-24."""
-    gate = _FakeNewsGate(
-        high_item={"direction": "bearish", "confidence": 90, "reason": "Bad news."}
-    )
-    engine = _engine(news_gate=gate)
-    _feed_orb_range(engine, high=110.0)
-
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-
-    assert "TCS" not in engine.open_positions
-    assert "LONG" in engine.entry_blocked.get("TCS", {})
-
-
-def test_news_block_does_not_re_trigger_or_change_on_repeated_candle_closes():
-    gate = _FakeNewsGate(
-        high_item={"direction": "bearish", "confidence": 90, "reason": "Bad news."}
-    )
-    engine = _engine(news_gate=gate)
-    _feed_orb_range(engine, high=110.0)
-
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-    assert "TCS" not in engine.open_positions
-    first_reason = engine.entry_blocked["TCS"]["LONG"]
-
-    # Breakout keeps "firing" on subsequent candles while price
-    # stays above the high -- must stay blocked, not retry/crash/
-    # change its recorded reason.
-    engine.process_tick("TCS", "1", 113.0, _t(9, 33, 0))
-    engine.process_tick("TCS", "1", 114.0, _t(9, 34, 0))
-
-    assert "TCS" not in engine.open_positions
-    assert engine.entry_blocked["TCS"]["LONG"] == first_reason
-
-
-def test_news_block_is_scoped_to_the_contradicted_direction_only():
-    """
-    A LONG blocked by contradicting bearish news must NOT stop a
-    later genuine SHORT on the same symbol -- that short would
-    AGREE with the news, not fight it (operator's own words: "we
-    can buy or sell the affected stocks... no need to fight with
-    markets").
-    """
-    gate = _FakeNewsGate(
-        high_item={"direction": "bearish", "confidence": 90, "reason": "Bad news."}
-    )
-    engine = _engine(news_gate=gate)
-    _feed_orb_range(engine, low=100.0, high=110.0)
-
-    # Bullish breakout attempt -- blocked.
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-    assert "TCS" not in engine.open_positions
-
-    # Price reverses hard and later closes below the ORB low --
-    # a genuine SHORT signal, which AGREES with the bearish news.
-    engine.process_tick("TCS", "1", 99.0, _t(9, 40, 0))
-    engine.process_tick("TCS", "1", 95.0, _t(9, 40, 30))
-    engine.process_tick("TCS", "1", 96.0, _t(9, 41, 0))
-
-    assert "TCS" in engine.open_positions
-    assert engine.open_positions["TCS"]["direction"] == "SHORT"
-
-
 def test_export_entry_blocks_then_load_entry_blocks_round_trips():
-    gate = _FakeNewsGate(
-        high_item={"direction": "bearish", "confidence": 90, "reason": "Bad news."}
-    )
-    engine = _engine(news_gate=gate)
+    """Uses the SECTOR-PANIC block -- the news block was deleted with the
+    news subsystem on 2026-07-26, and sector panic is now the only thing
+    that writes an entry_blocked reason."""
+    monitor = _FakeSectorMonitor(panicking={"TCS"}, sector="IT")
+    engine = _engine(sector_monitor=monitor)
     _feed_orb_range(engine, high=110.0)
     engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
     engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
@@ -1108,17 +916,6 @@ def test_margin_frees_up_after_a_position_closes_not_a_permanent_block():
 def test_no_margin_check_when_no_portfolio_wired_in():
     engine = _engine()  # portfolio defaults to None
     _feed_orb_range(engine, high=110.0)
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-
-    assert "TCS" in engine.open_positions
-
-
-def test_engine_with_no_news_gate_behaves_identically_to_before():
-    engine = _engine()  # news_gate defaults to None
-    _feed_orb_range(engine, high=110.0)
-
     engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
     engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
     engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))

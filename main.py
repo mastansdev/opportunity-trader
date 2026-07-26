@@ -52,12 +52,6 @@ from config import ENABLE_STOCK_MEMORY, ENABLE_TRADE_MEMORY
 from config import EARNINGS_CALENDAR
 from core.logger import decision, diagnostic, warn
 from core import state_store
-from core.news_gate import NewsGate
-from news_bot import pipeline as news_pipeline
-from news_bot.call_budget import CallBudget
-from news_bot.config import POLL_INTERVAL_SECONDS as NEWS_POLL_INTERVAL_SECONDS
-from news_bot.config import NEWS_ENGINE_EXTERNAL
-from news_bot.matching import NewsMatcher
 from trading.portfolio import Portfolio
 from core.sector_monitor import SectorMonitor
 from dashboard.state import DashboardState
@@ -107,44 +101,6 @@ def _command_reader(engine, stop_event):
             decision(f"Unknown command: {line!r}")
 
 
-def _news_loop(stop_event, matcher, budget, news_gate):
-    """
-    Keeps the brain bot's in-memory news view fresh every
-    POLL_INTERVAL_SECONDS, on its own thread, independent of the
-    tick feed. A failure in any one cycle is caught and logged here
-    -- News Bot is advisory-only (core/news_gate.py); it must never
-    be able to take the main trading loop down with it.
-
-    Two modes (config.NEWS_ENGINE_EXTERNAL):
-
-      EXTERNAL (default, 2026-07-24) -- the 24/7 news engine runs as
-          its OWN process (run_news_engine.py, e.g. on Railway) and
-          is the only writer to the store. Here we do NOT run the
-          pipeline (that would double-write); we only refresh() the
-          gate, pulling whatever that engine has already stored.
-
-      IN-PROCESS -- no separate engine; this thread runs the full
-          pipeline itself AND refreshes, the original behaviour.
-          Fine for pure-local dev with no worker running.
-    """
-    if NEWS_ENGINE_EXTERNAL:
-        decision(
-            "[NEWS_BOT] External engine mode -- reading the shared store "
-            "(run_news_engine.py / Railway is the writer). Not polling "
-            "sources in-process."
-        )
-
-    while not stop_event.is_set():
-        try:
-            if not NEWS_ENGINE_EXTERNAL:
-                news_pipeline.run_once(matcher=matcher, budget=budget)
-            news_gate.refresh()
-        except Exception as e:
-            warn(f"[NEWS_BOT] News refresh cycle failed, will retry: {e}")
-
-        stop_event.wait(NEWS_POLL_INTERVAL_SECONDS)
-
-
 def main():
     if not DHAN_CLIENT_ID or not DHAN_ACCESS_TOKEN:
         warn(
@@ -181,7 +137,7 @@ def main():
     # on the feed still consumes a subscription slot and still lands in
     # the gainers/losers table, and a stock whose price scale changed
     # overnight would poison sector strength and the breadth regime read
-    # with a fake -80%. They stay in master_loader for sector and news
+    # with a fake -80%. They stay in master_loader for sector
     # lookups; they just never tick.
     blocked = master_loader.blocked_symbols()
     resolved = {
@@ -212,19 +168,11 @@ def main():
     # source of truth for the mapping, not two copies drifting apart.
     security_id_to_symbol = {v: k for k, v in resolved.items()}
 
-    # News Bot setup -- reuses the already-loaded master_loader
-    # (NewsMatcher only reloads if it's handed an empty one), so
-    # this doesn't repeat the 750-row CSV read. Advisory-only via
-    # news_gate; see core/news_gate.py's docstring for why.
-    news_matcher = NewsMatcher(loader=master_loader)
-    news_budget = CallBudget()
-    news_gate = NewsGate()
-
     market_data = MarketData()
     portfolio = Portfolio()
     sector_monitor = SectorMonitor(market_data, master_loader)
     # TOP_N_MOMENTUM_MODE (config.py) -- wired in unconditionally,
-    # same pattern as sector_monitor/news_gate above: the object
+    # same pattern as sector_monitor above: the object
     # always exists, the config flag decides whether Engine actually
     # consults it (core/engine.py's _try_structural_entry()).
     momentum_universe = MomentumUniverse(market_data, master_loader)
@@ -327,7 +275,7 @@ def main():
              f"back to config.EARNINGS_CALENDAR only.")
 
     engine = Engine(
-        news_gate=news_gate, portfolio=portfolio, sector_monitor=sector_monitor,
+        portfolio=portfolio, sector_monitor=sector_monitor,
         momentum_universe=momentum_universe, circuit_monitor=circuit_monitor,
         market_data=market_data, candle_recorder=candle_recorder,
         stock_memory=stock_memory, trade_memory=trade_memory,
@@ -406,7 +354,7 @@ def main():
 
     dashboard_state = DashboardState(
         engine, market_data, master_loader,
-        news_gate=news_gate, portfolio=portfolio, sector_monitor=sector_monitor,
+        portfolio=portfolio, sector_monitor=sector_monitor,
         index_monitor=index_monitor,
         get_feed_alive=lambda: (
             feed_state["thread"].is_alive() if feed_state["thread"] else None
@@ -598,12 +546,6 @@ def main():
     )
     reader_thread.start()
 
-    news_thread = threading.Thread(
-        target=_news_loop,
-        args=(stop_event, news_matcher, news_budget, news_gate),
-        daemon=True,
-    )
-    news_thread.start()
 
     # Own poll thread, independent of the tick feed -- see
     # core/circuit_monitor.py's docstring. Started with the full
