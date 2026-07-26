@@ -3148,6 +3148,58 @@ class _GapMarketData:
         return False
 
 
+def _range_circuit(high, low, last):
+    return _FakeOHLCCircuit({"X": {"high": high, "low": low,
+                                   "last_price": last, "prev_close": 100.0}})
+
+
+def test_a_big_mover_still_at_its_high_IS_tradeable(monkeypatch):
+    """The operator's objection: the day's BEST trend is by definition
+    the stock that moved most. Up 7% and still making highs is the trend
+    of the day -- it must be tradeable."""
+    import core.engine as em
+    monkeypatch.setattr(em, "STILL_TRENDING_MIN_POSITION", 0.65)
+    engine = _engine(market_data=_GapMarketData(100.0, 107.0),
+                     circuit_monitor=_range_circuit(high=107.0, low=100.0,
+                                                    last=107.0))
+    assert engine._is_still_trending("X", "LONG") is True
+
+
+def test_the_same_big_mover_ROLLED_OVER_is_refused(monkeypatch):
+    """Peaked at 109, back to 103 -- same 'percent up today', but the
+    move is spent. The old flat ceiling could not tell these apart."""
+    import core.engine as em
+    monkeypatch.setattr(em, "STILL_TRENDING_MIN_POSITION", 0.65)
+    engine = _engine(market_data=_GapMarketData(100.0, 103.0),
+                     circuit_monitor=_range_circuit(high=109.0, low=100.0,
+                                                    last=103.0))
+    assert engine._is_still_trending("X", "LONG") is False
+
+
+def test_short_side_is_mirrored(monkeypatch):
+    """A short needs price near the day's LOW."""
+    import core.engine as em
+    monkeypatch.setattr(em, "STILL_TRENDING_MIN_POSITION", 0.65)
+    engine = _engine(market_data=_GapMarketData(100.0, 93.0),
+                     circuit_monitor=_range_circuit(high=100.0, low=93.0,
+                                                    last=93.0))
+    assert engine._is_still_trending("X", "SHORT") is True
+    # bounced back up off the low -> no longer trending down
+    engine2 = _engine(market_data=_GapMarketData(100.0, 98.0),
+                      circuit_monitor=_range_circuit(high=100.0, low=91.0,
+                                                     last=98.0))
+    assert engine2._is_still_trending("X", "SHORT") is False
+
+
+def test_still_trending_fails_open_without_a_usable_range():
+    engine = _engine(market_data=_GapMarketData(100.0, 105.0))  # no monitor
+    assert engine._is_still_trending("X", "LONG") is True
+    flat = _engine(market_data=_GapMarketData(100.0, 100.0),
+                   circuit_monitor=_range_circuit(high=100.0, low=100.0,
+                                                  last=100.0))
+    assert flat._is_still_trending("X", "LONG") is True
+
+
 def test_gap_up_stock_is_NOT_treated_as_exhausted(monkeypatch):
     """THE FIX. Closed 100, gapped to 106 on real news, now 109.
     Measured from yesterday's close that reads +9% -> the old code

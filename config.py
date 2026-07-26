@@ -694,7 +694,28 @@ ENABLE_RS_BAND = True
 RS_BAND_MIN = 0.004      # >= +0.4% vs the market median move
 RS_BAND_MAX = 0.050      # <= +5.0% (beyond this = exhausted)
 # Absolute-move ceiling regardless of RS (the APAR/parabolic guard).
-MAX_ABS_MOVE_PCT = 0.05
+# REPLACED 2026-07-25 (operator challenge). A flat "% moved today"
+# ceiling is the wrong test: it blocks the day's BEST trending stock,
+# because the best trend is by definition the one that moved most.
+#
+# The right question is not "how far has it moved" but "is it STILL
+# moving, or has it rolled over?" Two stocks both up 7%:
+#   A is at 428 and 428 IS the day's high -> still making highs, this
+#     is the trend of the day.
+#   B peaked at 432 and is back to 428 -> fading, the move is spent.
+# The old rule blocked both identically.
+#
+# So: a long must be trading in the TOP part of today's range, a short
+# in the BOTTOM part. Position 1.0 = at the day's high, 0.0 = at the low.
+# Generous by design (0.65) -- this is a "not rolling over" check, not a
+# "must be at the exact high" check.
+ENABLE_STILL_TRENDING = True
+STILL_TRENDING_MIN_POSITION = 0.65
+
+# The flat ceiling stays ONLY as a blow-off guard, raised well clear of
+# normal trending (APAR-class parabolic moves). It no longer does the
+# day-to-day filtering.
+MAX_ABS_MOVE_PCT = 0.12
 
 # --- Staged deployment ------------------------------------
 # Never fill all 10 seats in the opening minute (2026-07-24: 11 of

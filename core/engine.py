@@ -82,6 +82,7 @@ from config import (
     ENABLE_TREND_RANK_ENTRY, TREND_RANK_TOP_N, TREND_RANK_REFRESH_SECONDS,
     ENABLE_SLOT_ROTATION, ROTATION_MIN_STRENGTH_EDGE,
     ENABLE_RS_BAND, RS_BAND_MIN, RS_BAND_MAX, MAX_ABS_MOVE_PCT,
+    ENABLE_STILL_TRENDING, STILL_TRENDING_MIN_POSITION,
     ENABLE_STAGED_ENTRY, STAGED_POSITION_LIMITS, STAGED_NO_ENTRY_AFTER,
     ONE_TRADE_PER_SYMBOL_PER_DAY,
     ENABLE_NO_PROGRESS_EXIT, NO_PROGRESS_MINUTES, NO_PROGRESS_R,
@@ -1110,6 +1111,49 @@ class Engine:
             return False
         return not self._is_exhausted(symbol)
 
+    def _is_still_trending(self, symbol, direction):
+        """
+        Is this stock STILL making progress, or has it rolled over?
+
+        Replaces the flat "% moved today" ceiling (2026-07-25, operator
+        challenge). That ceiling blocked the day's BEST trending stock,
+        because the best trend is by definition the one that moved most.
+
+        The right question is not how far it has moved but whether it is
+        still moving. Two stocks both up 7%:
+            A trades at 428 and 428 IS the day's high  -> still trending
+            B peaked at 432 and is back at 428         -> fading
+        The old rule blocked both identically.
+
+        So we ask where price sits inside TODAY'S range. 1.0 = at the
+        day's high, 0.0 = at the day's low. A long needs to be in the
+        upper part; a short in the lower part. Deliberately generous
+        (0.65) -- this is a "not rolling over" check, not "must be at
+        the exact high".
+
+        Fail-OPEN: no usable day range (no ticks yet, flat range,
+        market_data not wired) means we cannot judge, so allow.
+        """
+        if not ENABLE_STILL_TRENDING or self.market_data is None:
+            return True
+        info = (self.circuit_monitor.get_snapshot() or {}).get(symbol) \
+            if self.circuit_monitor is not None else None
+        if not info:
+            return True
+        try:
+            high = float(info.get("high") or 0)
+            low = float(info.get("low") or 0)
+            last = float(info.get("last_price") or 0)
+        except (TypeError, ValueError):
+            return True
+        if high <= low or last <= 0:
+            return True                       # no usable range -> allow
+
+        position = (last - low) / (high - low)      # 1.0 = at the high
+        if direction == LONG:
+            return position >= STILL_TRENDING_MIN_POSITION
+        return position <= (1.0 - STILL_TRENDING_MIN_POSITION)
+
     def _is_exhausted(self, symbol):
         """
         Has TODAY'S move already been spent?
@@ -1559,6 +1603,13 @@ class Engine:
         # Outperforming the market is what separated winners; being
         # the MOST extended is what killed them. Band, not top-N.
         if not self._passes_rs_band(symbol, direction):
+            return
+
+        # STILL TRENDING (2026-07-25) -- is it holding near today's high
+        # (long) / low (short), or has it rolled over? Replaces the flat
+        # "% moved" ceiling, which blocked the day's best trend by
+        # construction. See _is_still_trending().
+        if not self._is_still_trending(symbol, direction):
             return
 
         # SECTOR / THEME STRENGTH (2026-07-25). Ride what the market is
