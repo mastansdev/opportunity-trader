@@ -191,7 +191,7 @@ automatically.
 py -m pytest -q
 ```
 
-666 tests. Run after any code change — if this isn't green, don't trade.
+734 tests. Run after any code change — if this isn't green, don't trade.
 
 ---
 

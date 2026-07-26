@@ -87,10 +87,12 @@ from config import (
     EARLY_ENTRY_MAX_POSITIONS,
     ENABLE_VOLUME_FILTER, VOLUME_SURGE_MULT, VOLUME_AVG_CANDLES,
     MIN_VOLUME_CANDLES,
+    ENABLE_GATE_LOG,
 )
 from core.atr import compute_atr
 from core.orb_engine import OrbEngine, EARLY_ORB_END_T, ORB_WINDOW_END_T
 from core.candle_engine import CandleEngine
+from core.gate_log import GateLog, NullGateLog
 from core.strategy import Strategy
 from core.trailing_stop import TrailingStopEngine, LONG, SHORT
 from core.logger import decision, diagnostic, warn
@@ -112,6 +114,22 @@ from trading.trade_controller import TradeController
 def _parse_hhmm(value):
     hour, minute = value.split(":")
     return dtime(int(hour), int(minute))
+
+
+def _margin_detail(near, far):
+    """
+    How far a close fell SHORT of the required breakout margin, as a
+    human string for the gate log. SONACOMS on 2026-07-24 cleared a
+    Rs 734 high by Rs 1.50 -- 0.2% -- which is what
+    BREAKOUT_MIN_MARGIN_PCT exists to reject; being able to read that
+    number back is how you would notice the threshold is wrong.
+    Diagnostic only, so it swallows bad input rather than raise.
+    """
+    try:
+        return (f"cleared by {(near - far) / far * 100:+.2f}%, "
+                f"needs {BREAKOUT_MIN_MARGIN_PCT * 100:.2f}%")
+    except (TypeError, ZeroDivisionError):
+        return None
 
 
 # Same parsing pattern as core/orb_engine.py's MARKET_OPEN_T/
@@ -196,7 +214,7 @@ class Engine:
                  enable_rs_band=None, enable_staged_entry=None,
                  one_trade_per_symbol=None, enable_no_progress=None,
                  enable_tick_sanity=None, stock_memory=None,
-                 trade_memory=None):
+                 trade_memory=None, gate_log=None):
         # config.py's real value by default -- injectable purely so
         # tests can construct an Engine without it (this whole
         # suite's pre-existing price convention uses toy values like
@@ -251,6 +269,21 @@ class Engine:
         # None in tests and any setup that doesn't want recording --
         # the candle-close path simply skips it.
         self.candle_recorder = candle_recorder
+
+        # WHY A TRADE DID NOT HAPPEN (core/gate_log.py, 2026-07-26).
+        # Seventeen gates decline candidates in _try_structural_entry()
+        # and until now not one decline was recorded anywhere, which
+        # made eight admittedly-guessed thresholds (POST_MONDAY_TODO H3)
+        # impossible to review: a band set too tight shows up ONLY as
+        # trades that never happened.
+        #
+        # A NullGateLog when logging is off, so the entry path has no
+        # `if self.gate_log is not None:` branches -- the calls are
+        # simply free. It has no vote and nothing reads it to decide.
+        self.gate_log = (
+            gate_log if gate_log is not None
+            else (GateLog() if ENABLE_GATE_LOG else NullGateLog())
+        )
 
         # Per-stock facts (core/stock_memory.py) -- corporate actions
         # that change the PRICE SCALE. Consulted before every entry so
@@ -1228,6 +1261,54 @@ class Engine:
                 return min(cap, MAX_OPEN_POSITIONS)
         return MAX_OPEN_POSITIONS
 
+    # ----------------------------------------------------------
+    # GATE LOGGING (2026-07-26) -- pure observation, zero authority
+    # ----------------------------------------------------------
+    # Operator: "we can judge our bot trading descison on this i guess
+    # and improve the gates which are used by bot".
+    #
+    # These two methods are the ONLY thing the entry path gained. Every
+    # existing `return` is untouched: a _gate() call was inserted ABOVE
+    # it, never in place of it, and nothing in this file ever branches
+    # on what the log contains. If the log were deleted the bot would
+    # trade identically -- there is a test pinning exactly that
+    # (test_logging_does_not_change_a_single_decision).
+    #
+    # Both swallow every exception. A diagnostic must never be able to
+    # kill a tick: that is the same lesson as core/candle_recorder.py,
+    # which fails open for the same reason.
+
+    def _gate(self, symbol, direction, gate, detail=None, at=None):
+        """Record that this candidate was declined at `gate`."""
+        try:
+            self.gate_log.reject(
+                symbol, direction, gate, detail=detail,
+                at=at.strftime("%H:%M:%S") if hasattr(at, "strftime")
+                else at,
+            )
+        except Exception:               # noqa: BLE001 -- never break a tick
+            pass
+
+    def _gate_accept(self, symbol, direction):
+        try:
+            self.gate_log.accept(symbol, direction)
+        except Exception:               # noqa: BLE001
+            pass
+
+    def _gate_day(self, when):
+        try:
+            self.gate_log.start_day(when.date().isoformat())
+        except Exception:               # noqa: BLE001
+            pass
+
+    def get_gate_log(self):
+        """Read-only passthrough for dashboard/state.py, matching
+        get_circuit_snapshot() / get_frozen_symbols()."""
+        try:
+            return self.gate_log.snapshot()
+        except Exception:               # noqa: BLE001
+            return None
+
     def _already_attempted(self, symbol, direction):
         """One attempt per (symbol, direction) per day -- kills the
         re-entry whipsaw (CHENNPETRO traded 9x, CORONA 6x in a single
@@ -1455,7 +1536,14 @@ class Engine:
         effective_time = tick_time or (
             closed_candle.get("time") if closed_candle else None
         )
+        # Roll the gate log onto today BEFORE the first gate can fire,
+        # so a session's funnel is never mixed with yesterday's. Keyed
+        # on the date, so a mid-session restart resumes rather than
+        # wipes -- restarts happen more often than anyone likes.
+        if effective_time is not None:
+            self._gate_day(effective_time)
         if effective_time is not None and effective_time.time() >= SQUARE_OFF_T:
+            self._gate(symbol, direction, "SQUARE_OFF")
             return
 
         # 2026-07-24 (evening) -- the 14:30 fresh-entry cutoff was
@@ -1496,6 +1584,7 @@ class Engine:
         if candle_date is not None \
                 and symbol in self.earnings_calendar.get(
                     candle_date.isoformat(), ()):
+            self._gate(symbol, direction, "BLOCKED", "reports results today")
             return
 
         # STOCK MEMORY (2026-07-25) -- the bot's own knowledge of what is
@@ -1512,6 +1601,7 @@ class Engine:
                     f"corporate action today -- {memory_reason}. Price is "
                     f"not comparable to yesterday's close"
                 )
+            self._gate(symbol, direction, "BLOCKED", memory_reason)
             return
 
         # Frozen price (see FROZEN_PRICE_STREAK_CANDLES) -- a circuit
@@ -1523,6 +1613,7 @@ class Engine:
         # console otherwise; _is_frozen() itself already logs once
         # per freeze episode.
         if self._is_frozen(symbol):
+            self._gate(symbol, direction, "FROZEN")
             return
 
         # ORB-window feed staleness, 2026-07-24 -- the SONACOMS
@@ -1536,6 +1627,7 @@ class Engine:
         # up (e.g. most tests). Silent skip, same convention as the
         # frozen-price check above.
         if self.market_data is not None and self.market_data.is_orb_window_unreliable(symbol):
+            self._gate(symbol, direction, "ORB_UNRELIABLE")
             return
 
         # Proactive circuit-limit approach (see core/circuit_monitor.py) --
@@ -1546,9 +1638,12 @@ class Engine:
         # on every candle close for as long as the approach lasts and
         # circuit_monitor itself already warns once per episode.
         if self.circuit_monitor is not None and self.circuit_monitor.is_flagged(symbol):
+            self._gate(symbol, direction, "CIRCUIT")
             return
 
         if direction in self.entry_blocked.get(symbol, {}):
+            self._gate(symbol, direction, "BLOCKED",
+                       self.entry_blocked.get(symbol, {}).get(direction))
             return
 
         # 2026-07-24 (evening) -- the frozen 9:30 top-25-gainers/
@@ -1582,6 +1677,7 @@ class Engine:
         regime = self._market_regime()
         if (direction == LONG and regime == "SHORT_ONLY") \
                 or (direction == SHORT and regime == "LONG_ONLY"):
+            self._gate(symbol, direction, "REGIME", f"regime is {regime}")
             return
 
         # Trend-rank entry priority (2026-07-24, operator's thesis):
@@ -1591,18 +1687,21 @@ class Engine:
         # (see _is_trend_eligible). Silent skip, same convention as the
         # other quality gates in this method.
         if not self._is_trend_eligible(symbol, direction):
+            self._gate(symbol, direction, "TREND_RANK")
             return
 
         # One attempt per (symbol, direction) per day, 2026-07-25 --
         # kills the re-entry whipsaw (CHENNPETRO 9x, CORONA 6x in one
         # session, each round trip paying charges).
         if self._already_attempted(symbol, direction):
+            self._gate(symbol, direction, "ALREADY_TRIED")
             return
 
         # RELATIVE-STRENGTH BAND, 2026-07-25 (the study's main result).
         # Outperforming the market is what separated winners; being
         # the MOST extended is what killed them. Band, not top-N.
         if not self._passes_rs_band(symbol, direction):
+            self._gate(symbol, direction, "RS_BAND")
             return
 
         # STILL TRENDING (2026-07-25) -- is it holding near today's high
@@ -1610,12 +1709,14 @@ class Engine:
         # "% moved" ceiling, which blocked the day's best trend by
         # construction. See _is_still_trending().
         if not self._is_still_trending(symbol, direction):
+            self._gate(symbol, direction, "STILL_TRENDING")
             return
 
         # SECTOR / THEME STRENGTH (2026-07-25). Ride what the market is
         # actually rotating into -- a breakout inside a leading sector,
         # not an orphan mid-cap nobody is bidding for.
         if not self._passes_sector_gate(symbol, direction):
+            self._gate(symbol, direction, "SECTOR")
             return
 
         # Concurrency cap (item 4) + SLOT ROTATION (2026-07-24). Once
@@ -1634,10 +1735,15 @@ class Engine:
         # after STAGED_NO_ENTRY_AFTER.
         position_cap = self._staged_position_cap(effective_time)
         if position_cap <= 0:
+            self._gate(symbol, direction, "NO_ENTRY_WINDOW",
+                       f"past {STAGED_NO_ENTRY_AFTER}")
             return
         if len(self.open_positions) >= position_cap:
             if not (ENABLE_SLOT_ROTATION
                     and self._maybe_rotate_out(symbol, direction, effective_time)):
+                self._gate(symbol, direction, "BOOK_FULL",
+                           f"{len(self.open_positions)} of {position_cap} "
+                           f"seats taken")
                 return
 
         # Daily guardrails (item 5): a realized day at/below the loss
@@ -1653,6 +1759,8 @@ class Engine:
                     f"the rest of the session. Open positions still "
                     f"managed normally."
                 )
+            self._gate(symbol, direction, "DAILY_HALT",
+                       f"loss halt ({realized:.0f})")
             return
         if realized >= DAILY_PROFIT_TARGET_RS:
             if self._daily_halt_logged != "GOAL":
@@ -1663,6 +1771,8 @@ class Engine:
                     f"no new entries. Open positions still managed "
                     f"normally."
                 )
+            self._gate(symbol, direction, "DAILY_HALT",
+                       f"goal met ({realized:.0f})")
             return
 
         # Breakout-quality margin (items 8/9): the close must clear
@@ -1680,9 +1790,15 @@ class Engine:
             close = closed_candle["close"]
             if direction == LONG and \
                     close < orb_range["high"] * (1 + BREAKOUT_MIN_MARGIN_PCT):
+                self._gate(symbol, direction, "BREAKOUT_MARGIN",
+                           _margin_detail(close, orb_range["high"]),
+                           effective_time)
                 return
             if direction == SHORT and \
                     close > orb_range["low"] * (1 - BREAKOUT_MIN_MARGIN_PCT):
+                self._gate(symbol, direction, "BREAKOUT_MARGIN",
+                           _margin_detail(orb_range["low"], close),
+                           effective_time)
                 return
 
         # Volume-surge filter (Change 2, 2026-07-24) -- a real breakout
@@ -1693,6 +1809,9 @@ class Engine:
         # thin, so it can never block a trade just because the feed
         # isn't delivering volume (see _breakout_has_volume()).
         if ENABLE_VOLUME_FILTER and not self._breakout_has_volume(symbol, closed_candle):
+            self._gate(symbol, direction, "VOLUME",
+                       "no volume surge on the breakout candle",
+                       effective_time)
             return
 
         if direction == LONG and self.sector_monitor is not None \
@@ -1704,6 +1823,8 @@ class Engine:
                 f"sentiment-driven decline, not this stock's own "
                 f"fundamentals",
             )
+            self._gate(symbol, direction, "PANIC_SECTOR",
+                       f"sector '{sector}' panic-flagged", effective_time)
             return
 
         stop_seed, target, qty, stop_mode = self._entry_stop_and_target(
@@ -1714,7 +1835,13 @@ class Engine:
             # qty came out below 1 share -- see _atr_entry_sizing()'s
             # docstring. Silent skip, same pattern as every other
             # "not a real signal yet" gate in this method.
+            self._gate(symbol, direction, "SIZING",
+                       "no ATR, or computed qty below 1 share",
+                       effective_time)
             return
+        # Passed every gate -- record the ACCEPT so the funnel's
+        # survivor column ends at the real entry count.
+        self._gate_accept(symbol, direction)
         self._enter(
             symbol, security_id, closed_candle["close"], stop_seed,
             closed_candle["time"], entry_reason, direction, target=target,

@@ -235,6 +235,14 @@
   .btn-refresh:hover { border-color: var(--accent, #4c8bf5); color: #fff; }
   .btn-refresh.spinning { opacity: 0.6; pointer-events: none; }
 
+  /* -- 2026-07-26 gate funnel -- */
+  .gate-help { color: var(--text-dim); font-size: 12px; }
+  .gate-bar-cell { width: 140px; }
+  .gate-bar { display: block; height: 10px; border-radius: 3px; background: var(--accent); min-width: 0; }
+  .gate-events { color: var(--text-dim); font-size: 12px; }
+  tr.gate-worst { background: rgba(99,102,241,0.10); }
+  tr.gate-worst .gate-bar { background: var(--amber); }
+
   /* -- 2026-07-26 seats strip / RS / ORB columns -- */
   .seats-strip {
     display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
@@ -398,6 +406,22 @@
         </thead>
         <tbody id="openRows"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- ============ Why no trade (2026-07-26) -- the gate funnel ============ -->
+  <div class="panel" style="margin-top:14px;">
+    <div class="panel-head-row">
+      <h2>Why No Trade <span id="gateSummary" class="pos-count"></span></h2>
+      <span class="gl-refresh-note" id="gateNote"></span>
+    </div>
+    <div id="gateBody"></div>
+    <div class="trend-note">
+      A <b>candidate</b> is a stock that made a fresh ORB cross — not every
+      stock in the universe. Each candidate is counted once, at the
+      <b>deepest</b> gate it ever reached. The gate killing the most is the
+      first place to look, <b>not</b> automatically the one to loosen — the
+      top gate is usually doing its job.
     </div>
   </div>
 
@@ -766,6 +790,64 @@ const TREND_LABEL = {
   DOWNTREND: "Downtrend", STRONG_DOWN: "Stepping down",
 };
 
+// -- Why no trade: the gate funnel (2026-07-26) --------------------
+// core/engine.py declines candidates at seventeen gates and recorded
+// none of them until now. Eight of those thresholds are guesses
+// (POST_MONDAY_TODO H3), and a threshold set too tight has exactly one
+// symptom -- trades that never happened.
+function renderGateFunnel(gf) {
+  const body = document.getElementById("gateBody");
+  const head = document.getElementById("gateSummary");
+  const note = document.getElementById("gateNote");
+
+  if (!gf || !gf.available) {
+    head.textContent = "";
+    note.textContent = "";
+    body.innerHTML = `<span class="empty-note">${escapeHtml((gf && gf.reason) || "nothing recorded yet")}</span>`;
+    return;
+  }
+
+  const s = gf.summary || {};
+  head.textContent = `${fmtNum(s.candidates)} candidates · ${fmtNum(s.entries)} traded · ${fmtNum(s.rejected)} declined`;
+  note.textContent = gf.note || "";
+
+  const worst = s.biggest_filter;
+  const maxDied = Math.max(1, ...(gf.funnel || []).map(r => r.died));
+
+  const rows = (gf.funnel || []).map(r => `
+    <tr class="${r.gate === worst ? "gate-worst" : ""}">
+      <td><strong>${escapeHtml(r.gate)}</strong></td>
+      <td class="gate-help">${escapeHtml(r.help)}</td>
+      <td class="gate-bar-cell">
+        <span class="gate-bar" style="width:${(r.died / maxDied) * 100}%"></span>
+      </td>
+      <td>${fmtNum(r.died)}</td>
+      <td>${r.died_pct ? r.died_pct.toFixed(1) + "%" : "—"}</td>
+      <td>${fmtNum(r.survived)}</td>
+      <td class="gate-events" title="raw firings — a big number here against a small 'died' just means the condition lasted a long time">${fmtNum(r.events)}</td>
+    </tr>`).join("");
+
+  const misses = (gf.near_misses || []).map(m => `
+    <div class="risk-row">
+      <span>${symbolCell(m.symbol)} <span style="color:var(--text-dim)">${escapeHtml(m.direction || "")}</span>
+        <span class="chip">${escapeHtml(m.gate)}</span></span>
+      <span class="reason">${escapeHtml(m.detail || "")}${m.at ? " · " + escapeHtml(m.at) : ""}</span>
+    </div>`).join("");
+
+  body.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Gate</th><th>What it checks</th><th></th>
+          <th>Died here</th><th>% of all</th><th>Survived</th><th>Firings</th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="7"><span class="empty-note">No gate has fired yet</span></td></tr>`}</tbody>
+      </table>
+    </div>
+    <h3 class="gl-col-title" style="margin-top:14px;">Near misses — passed every selection rule, died on mechanics</h3>
+    <div>${misses || `<span class="empty-note">None yet</span>`}</div>`;
+}
+
 // -- Relative strength vs the market at entry (2026-07-26) ---------
 // The ONE input with measured evidence: win rate rose 14.5% -> 39%
 // across its quintiles. core/engine.py has stamped it on every
@@ -1037,6 +1119,9 @@ function render(snap) {
 
   // -- Staged seats: is the cap binding, or the gates upstream? --
   renderSeats(snap.seats);
+
+  // -- Why no trade: the gate funnel --
+  renderGateFunnel(snap.gate_funnel);
 
   // -- My Book: exposure by sector + sector P&L + long/short score --
   const book = snap.book_analytics || { exposure: [], sector_pnl: [], long_open: 0, short_open: 0, long_realized_net: 0, short_realized_net: 0 };

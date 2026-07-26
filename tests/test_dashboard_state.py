@@ -1419,3 +1419,103 @@ def test_closed_trades_carry_rel_strength_and_the_rotation_flag():
     assert rows["A"]["rel_strength"] == 2.5
     assert rows["A"]["rotated_out"] is True
     assert rows["B"]["rotated_out"] is False
+
+
+# ==================================================
+# GATE FUNNEL PANEL  (2026-07-26)
+# ==================================================
+# Pure passthrough of core/gate_log.py. It is a diagnostic, so the
+# tests that matter are the ones proving it cannot take the dashboard
+# down with it.
+
+def _gate_snapshot(**over):
+    base = {
+        "day": "2026-07-27",
+        "summary": {"candidates": 10, "entries": 2, "rejected": 8,
+                    "biggest_filter": "RS_BAND", "biggest_filter_died": 5},
+        "funnel": [
+            {"gate": "REGIME", "help": "market regime forbids this",
+             "died": 0, "survived": 10, "events": 0},
+            {"gate": "RS_BAND", "help": "relative strength outside band",
+             "died": 5, "survived": 5, "events": 300},
+            {"gate": "SECTOR", "help": "sector not leading",
+             "died": 3, "survived": 2, "events": 12},
+        ],
+        "near_misses": [{"symbol": "PARAS", "direction": "LONG",
+                         "gate": "VOLUME", "detail": "0.6x average",
+                         "at": "10:02:00"}],
+    }
+    base.update(over)
+    return base
+
+
+def _funnel_state(snapshot):
+    loader = _loader({"PARAS": "IT"})
+    engine = _FakeEngine()
+    engine.get_gate_log = lambda: snapshot
+    return DashboardState(engine, _FakeMarketData(), loader)
+
+
+def test_gate_funnel_passes_the_engine_log_through():
+    gf = _funnel_state(_gate_snapshot())._build_gate_funnel()
+    assert gf["available"] is True
+    assert gf["summary"]["candidates"] == 10
+    assert gf["near_misses"][0]["symbol"] == "PARAS"
+
+
+def test_gates_that_never_fired_are_not_shown():
+    """Seventeen rows of zeroes is noise, not information."""
+    gf = _funnel_state(_gate_snapshot())._build_gate_funnel()
+    assert [r["gate"] for r in gf["funnel"]] == ["RS_BAND", "SECTOR"]
+
+
+def test_died_pct_is_relative_to_all_candidates():
+    gf = _funnel_state(_gate_snapshot())._build_gate_funnel()
+    rows = {r["gate"]: r for r in gf["funnel"]}
+    assert rows["RS_BAND"]["died_pct"] == 50.0
+    assert rows["SECTOR"]["died_pct"] == 30.0
+
+
+def test_died_pct_does_not_divide_by_zero():
+    snap = _gate_snapshot(summary={"candidates": 0, "entries": 0,
+                                   "rejected": 0, "biggest_filter": None,
+                                   "biggest_filter_died": 0})
+    gf = _funnel_state(snap)._build_gate_funnel()
+    assert all(r["died_pct"] == 0.0 for r in gf["funnel"])
+
+
+def test_gate_funnel_is_unavailable_before_anything_happens():
+    gf = _funnel_state({"day": None, "summary": {}, "funnel": [],
+                        "near_misses": []})._build_gate_funnel()
+    assert gf["available"] is False
+
+
+def test_gate_funnel_survives_an_engine_without_the_method():
+    """An engine restored from an older build has no get_gate_log."""
+    loader = _loader({"A": "IT"})
+    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader)
+    assert state._build_gate_funnel()["available"] is False
+
+
+def test_gate_funnel_survives_a_raising_engine():
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine()
+
+    def boom():
+        raise RuntimeError("nope")
+    engine.get_gate_log = boom
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    assert state._build_gate_funnel()["available"] is False
+
+
+def test_gate_funnel_states_what_a_candidate_means():
+    """The top-of-funnel number is the easy one to misread: 40
+    candidates out of 545 names does NOT mean 505 were rejected."""
+    gf = _funnel_state(_gate_snapshot())._build_gate_funnel()
+    assert "fresh ORB cross" in gf["note"]
+
+
+def test_gate_funnel_appears_in_the_snapshot():
+    state = _funnel_state(_gate_snapshot())
+    state.refresh()
+    assert "gate_funnel" in state.get_snapshot()

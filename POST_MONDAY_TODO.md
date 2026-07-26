@@ -275,6 +275,36 @@ still-trending 0.65. Each is my guess. Test one at a time against
 recorded sessions -- never two together, or neither result means
 anything.
 
+> **2026-07-26 -- you can now SEE which of them is binding.**
+> Operator: *"we can judge our bot trading descison on this i guess and
+> improve the gates which are used by bot"*.
+>
+> `core/engine.py` declines candidates at **seventeen** gates and
+> recorded **none** of them. A threshold set too tight has exactly one
+> symptom -- trades that never happened -- and those were invisible.
+>
+> `core/gate_log.py` + the **Why No Trade** panel now show the funnel:
+> candidates seen, which gate each one died at, survivors, and the
+> near-misses that passed every selection rule and died on mechanics.
+>
+> **The counting rule is the design.** These gates re-fire on every
+> candle close while their condition holds -- a name failing the RS
+> band from 09:31 to 15:15 would log ~350 rejections. So it counts
+> CANDIDATES, at the **deepest** gate each one ever reached, not
+> events. Raw firings are kept in a separate column for context.
+>
+> **Two things not to misread:**
+> 1. A *candidate* is a fresh ORB cross, not every stock. 40 candidates
+>    out of 545 names does not mean 505 were rejected -- they never
+>    broke out to be judged.
+> 2. The gate killing the most is the first place to LOOK, not
+>    automatically the one to loosen. The top gate is usually doing its
+>    job.
+>
+> It has no vote. `test_logging_does_not_change_a_single_decision` runs
+> an identical session with the log on and off and asserts every trade
+> matches; `ENABLE_GATE_LOG = False` makes every call a no-op.
+
 ### H4. Charges eat ~78% of gross profit
 Not solved, only mitigated by trading less. ~Rs 117 a round trip against
 a best-bucket expectancy of ~Rs 136. **The edge is currently thinner

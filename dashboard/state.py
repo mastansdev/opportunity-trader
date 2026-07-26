@@ -410,6 +410,7 @@ class DashboardState:
                 open_positions, closed_positions
             ),
             "seats": self._build_seats(open_positions, closed_positions),
+            "gate_funnel": self._build_gate_funnel(),
             "daily_trend": self._build_daily_trend(open_positions),
             "open_positions": self._build_open_positions(open_positions),
             "closed_positions": self._build_closed_positions(closed_positions),
@@ -766,6 +767,54 @@ class DashboardState:
             "sector_gainers": sector["sector_gainers"],
             "sector_losers": sector["sector_losers"],
             "sector_built_at": sector["built_at"],
+        }
+
+    # --------------------------------------------------
+    # GATE FUNNEL  (2026-07-26)
+    # --------------------------------------------------
+
+    def _build_gate_funnel(self):
+        """
+        Why the bot did NOT take a trade -- see core/gate_log.py.
+
+        Pure passthrough of the engine's own log plus a couple of
+        derived percentages for display. Fails open to a "not
+        available" marker: this is a diagnostic, and it must never be
+        able to take the dashboard down with it.
+        """
+        try:
+            snap = self.engine.get_gate_log()
+        except Exception:                   # noqa: BLE001 -- fail open
+            snap = None
+
+        if not snap or not snap.get("funnel"):
+            return {"available": False,
+                    "reason": "no candidates yet today"}
+
+        summary = snap.get("summary") or {}
+        total = summary.get("candidates") or 0
+
+        rows = []
+        for row in snap["funnel"]:
+            if not row["died"] and not row["events"]:
+                continue                    # never fired -- don't clutter
+            rows.append({
+                **row,
+                "died_pct": round(row["died"] / total * 100, 1)
+                if total else 0.0,
+            })
+
+        return {
+            "available": True,
+            "day": snap.get("day"),
+            "summary": summary,
+            "funnel": rows,
+            "near_misses": snap.get("near_misses") or [],
+            # Stated on the panel itself, because the top-of-funnel
+            # number is the easy one to misread: 40 candidates out of
+            # 545 subscribed names does NOT mean 505 were rejected --
+            # they never broke out to be judged.
+            "note": "a candidate is a fresh ORB cross, not every stock",
         }
 
     # --------------------------------------------------

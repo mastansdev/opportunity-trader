@@ -269,6 +269,32 @@ SECTOR_GAINERS_LOSERS_MIN_SYMBOLS = 3
 SECTOR_HEATMAP_TOP_N = 10
 
 # ----------------------------------------------------------
+# GATE LOG  (2026-07-26)
+# ----------------------------------------------------------
+# Operator: "#1 too we can judge our bot trading descison on this i
+# guess and improve the gates which are used by bot".
+#
+# core/engine.py declines candidates at seventeen consecutive gates and
+# recorded NONE of them. That is the system's biggest blind spot,
+# because eight of those thresholds are admitted guesses (see
+# POST_MONDAY_TODO H3) and a threshold set too tight has exactly one
+# symptom: trades that never happened, which are invisible.
+#
+# core/gate_log.py counts CANDIDATES at the deepest gate each one
+# reached -- not events. These gates re-fire on every candle close
+# while their condition holds, so an event count would measure how long
+# conditions lasted, not which gate is binding.
+#
+# Costs one dict write per declined candidate per candle. No I/O, no
+# lock, bounded at one row per (symbol, direction) -- 1,500 rows at the
+# absolute maximum. Set False to make every call a no-op (NullGateLog).
+#
+# IT HAS NO VOTE. Nothing in core/engine.py branches on what it holds,
+# and tests/test_engine.py pins that trading behaviour is byte-identical
+# with it on and off.
+ENABLE_GATE_LOG = True
+
+# ----------------------------------------------------------
 # DAILY TREND PANEL  (2026-07-26)
 # ----------------------------------------------------------
 # Operator: "we need to create the daily candle of our universe in

@@ -104,6 +104,37 @@ def _feed_volume_history_then_breakout(engine, breakout_vol, normal_vol=100):
     engine.process_tick("TCS", "1", 112.0, _t(9, 38, 0), cum)
 
 
+
+def _drive_session(engine):
+    """
+    A small but REAL session covering all three funnel outcomes:
+    a symbol that enters, one declined at a gate, and one that crosses
+    after square-off.
+
+    Note what a "candidate" is: the funnel starts where
+    core/strategy.py detects a FRESH cross of the ORB boundary, not at
+    every stock in the universe. A stock that simply never breaks out
+    is not a declined candidate -- it was never a candidate.
+    """
+    for symbol, sid in (("TCS", "1"), ("INFY", "2"), ("SBIN", "3")):
+        _feed_orb_range(engine, symbol=symbol, sid=sid)
+
+    # TCS clears the range decisively -> enters
+    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 0))
+    engine.process_tick("TCS", "1", 112.0, _t(9, 32, 0))
+
+    # INFY crosses just as decisively but is blocked for a stated
+    # reason -> a real rejection at the BLOCKED gate, re-firing on
+    # several candles so the events-vs-candidates split is exercised.
+    engine._block_entry("INFY", "LONG", "blocked for this test")
+    for m in range(31, 36):
+        engine.process_tick("INFY", "2", 112.0 + m * 0.01, _t(9, m, 0))
+    engine.process_tick("INFY", "2", 113.0, _t(9, 36, 0))
+
+    # SBIN crosses after the hard square-off -> SQUARE_OFF gate
+    engine.process_tick("SBIN", "3", 112.0, _t(15, 20, 0))
+    engine.process_tick("SBIN", "3", 112.0, _t(15, 21, 0))
+
 def test_volume_surge_lets_a_high_volume_breakout_through():
     """A breakout candle with 3x the recent average volume (300 vs
     100) clears the 1.5x surge bar -> real breakout, enters."""
@@ -3164,3 +3195,122 @@ def test_no_rotation_when_the_challenger_is_not_clearly_stronger(monkeypatch):
     _long_breakout(engine, "NEW", "9")
     assert "HOLD" in engine.open_positions               # not evicted
     assert "NEW" not in engine.open_positions            # book stays full
+
+
+# ==================================================
+# GATE LOG  (2026-07-26) -- observation with zero authority
+# ==================================================
+# core/gate_log.py records WHY a candidate was declined. The whole
+# safety argument is that it changes nothing, so that is what these
+# pin. If any of them fails, the log has acquired a vote and must be
+# reverted before the next session.
+
+from core.gate_log import GATE_INDEX, GateLog, NullGateLog  # noqa: E402
+import core.engine as engine_module  # noqa: E402
+
+
+def test_logging_does_not_change_a_single_decision():
+    """THE test. Run an identical session twice -- once with the gate
+    log on, once with it off -- and every trade must match exactly."""
+    def run(gate_log):
+        eng = _engine(gate_log=gate_log)
+        _drive_session(eng)
+        return (
+            sorted(eng.open_positions),
+            [(p.get("symbol"), p.get("direction"), p.get("entry_price"),
+              p.get("qty"), p.get("exit_price"), p.get("exit_reason"))
+             for p in eng.closed_positions],
+        )
+
+    with_log = run(GateLog())
+    without = run(NullGateLog())
+    assert with_log == without
+
+
+def test_a_broken_gate_log_cannot_break_a_tick():
+    """A diagnostic must never kill trading -- same posture as
+    core/candle_recorder.py."""
+    class _Exploding:
+        day = None
+
+        def start_day(self, day):
+            raise RuntimeError("boom")
+
+        def reject(self, *a, **k):
+            raise RuntimeError("boom")
+
+        def accept(self, *a, **k):
+            raise RuntimeError("boom")
+
+        def snapshot(self):
+            raise RuntimeError("boom")
+
+    eng = _engine(gate_log=_Exploding())
+    _drive_session(eng)                      # must not raise
+    assert eng.get_gate_log() is None        # fails to None, not up
+
+
+def test_rejections_are_recorded_with_the_gate_that_caused_them():
+    log = GateLog()
+    eng = _engine(gate_log=log)
+    _drive_session(eng)
+    snap = eng.get_gate_log()
+    assert snap is not None
+    assert snap["summary"]["candidates"] >= 1
+    assert [r["gate"] for r in snap["funnel"]][0] == "SQUARE_OFF"
+
+
+def test_the_funnel_accounts_for_every_candidate():
+    log = GateLog()
+    eng = _engine(gate_log=log)
+    _drive_session(eng)
+    snap = eng.get_gate_log()
+    died = sum(r["died"] for r in snap["funnel"])
+    assert died + snap["summary"]["entries"] == snap["summary"]["candidates"]
+
+
+def test_the_gate_log_rolls_to_the_new_day_not_the_restart():
+    log = GateLog()
+    eng = _engine(gate_log=log)
+    eng._gate_day(datetime(2026, 7, 27, 9, 30))
+    log.reject("PARAS", "LONG", "RS_BAND")
+    eng._gate_day(datetime(2026, 7, 27, 14, 0))          # same day
+    assert log.summary()["candidates"] == 1
+    eng._gate_day(datetime(2026, 7, 28, 9, 30))          # new day
+    assert log.summary()["candidates"] == 0
+
+
+def test_gate_log_defaults_to_the_null_when_disabled(monkeypatch):
+    monkeypatch.setattr(engine_module, "ENABLE_GATE_LOG", False)
+    assert isinstance(_engine().gate_log, NullGateLog)
+
+
+def test_gate_log_is_on_by_default(monkeypatch):
+    monkeypatch.setattr(engine_module, "ENABLE_GATE_LOG", True)
+    assert isinstance(_engine().gate_log, GateLog)
+
+
+def test_margin_detail_reads_back_the_number_that_caused_the_reject():
+    """SONACOMS cleared a Rs 734 high by Rs 1.50 on 2026-07-24."""
+    text = engine_module._margin_detail(735.50, 734.0)
+    assert "+0.20%" in text
+
+
+def test_margin_detail_survives_bad_input():
+    assert engine_module._margin_detail(None, 100.0) is None
+    assert engine_module._margin_detail(100.0, 0) is None
+
+
+def test_the_engine_never_reads_the_gate_log_to_decide():
+    """If this fails, someone gave the diagnostic a vote. Read
+    core/gate_log.py's 'WHAT THIS IS NOT' section before deciding that
+    was right."""
+    import inspect
+    source = inspect.getsource(engine_module)
+    body = source[source.index("def _try_structural_entry"):]
+    body = body[:body.index("\n    def _enter")]
+    # writes are fine; any READ of the log inside the entry path is not
+    for forbidden in ("gate_log.funnel", "gate_log.summary",
+                      "gate_log.snapshot", "gate_log.recent",
+                      "gate_log._deepest"):
+        assert forbidden not in body
