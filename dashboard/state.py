@@ -116,6 +116,8 @@ from config import (
     FII_NET_CR, DII_NET_CR,
     SANITY_BAND_MULTIPLE, CIRCUIT_LOCK_TOLERANCE_PCT,
     MARKET_BREADTH_REFRESH_SECONDS,
+    DAILY_TREND_PANEL_ENABLED, DAILY_TREND_WINDOW_DAYS,
+    DAILY_TREND_REFRESH_SECONDS, DAILY_TREND_BROKE_LIMIT,
 )
 
 from trading.charges import round_trip_charges
@@ -130,6 +132,13 @@ def _fmt_time(value):
     if value is None:
         return None
     return value.strftime("%H:%M:%S")
+
+
+def _round_or_none(value, places=2):
+    try:
+        return round(float(value), places)
+    except (TypeError, ValueError):
+        return None
 
 
 def _signed_pnl(direction, entry_price, exit_or_last_price, qty):
@@ -243,6 +252,15 @@ class DashboardState:
         self._breadth_cache = None
         self._breadth_built_at = 0.0
 
+        # Daily-trend cache (2026-07-26). Same own-cadence pattern, but
+        # the slowest of the lot by a wide margin: the 7-day
+        # higher-high/higher-low structure is computed from CLOSED
+        # daily bars, so it physically cannot change until tomorrow's
+        # bhavcopy lands. See config.DAILY_TREND_REFRESH_SECONDS.
+        self._daily_trend_cache = None
+        self._daily_trend_built_at = 0.0
+        self._daily_store = None
+
     # --------------------------------------------------
 
     def refresh(self):
@@ -310,6 +328,7 @@ class DashboardState:
             "book_analytics": self._build_book_analytics(
                 open_positions, closed_positions
             ),
+            "daily_trend": self._build_daily_trend(open_positions),
             "open_positions": self._build_open_positions(open_positions),
             "closed_positions": self._build_closed_positions(closed_positions),
             "risk_filters": self._build_risk_filters(entry_blocked),
@@ -666,6 +685,163 @@ class DashboardState:
             "sector_losers": sector["sector_losers"],
             "sector_built_at": sector["built_at"],
         }
+
+    # --------------------------------------------------
+    # DAILY TREND  (2026-07-26)
+    # --------------------------------------------------
+
+    def _daily_trend_store(self):
+        """Lazily opened, and NEVER re-attempted noisily. The daily
+        store is optional: a machine that has never run
+        tools/build_daily_history.py has no file, and that must cost
+        the panel, not the session."""
+        if self._daily_store is False:
+            return None
+        if self._daily_store is None:
+            try:
+                from core.daily_store import DailyStore
+                self._daily_store = DailyStore()
+            except Exception:               # noqa: BLE001 -- fail open
+                self._daily_store = False
+                return None
+        return self._daily_store
+
+    def _build_daily_trend(self, open_positions):
+        """
+        The 7-day higher-high / higher-low shape of every stock we can
+        trade, plus -- the case the operator singled out -- the ones
+        whose structure JUST BROKE.
+
+        OBSERVATION ONLY. Nothing in this method is consulted by
+        core/engine.py, and that is deliberate: see
+        config.DAILY_TREND_PANEL_ENABLED for the arithmetic on why
+        gating longs to STRONG_UP would be a huge change on no
+        evidence.
+
+        Fails open in every direction. No daily store, no history, a
+        corrupt row -- the panel says so and the session continues.
+        """
+        if not DAILY_TREND_PANEL_ENABLED:
+            return {"available": False, "reason": "disabled in config"}
+
+        now = time.time()
+        if (self._daily_trend_cache is not None
+                and now - self._daily_trend_built_at
+                < DAILY_TREND_REFRESH_SECONDS):
+            cached = dict(self._daily_trend_cache)
+            # Positions change intraday even though the structure
+            # doesn't, so re-map the position rows off the cached
+            # per-symbol labels rather than serving a stale book.
+            cached["positions"] = self._trend_rows_for_positions(
+                open_positions, cached.get("by_symbol") or {})
+            return cached
+
+        built = self._compute_daily_trend(open_positions)
+        self._daily_trend_cache = built
+        self._daily_trend_built_at = now
+        return built
+
+    def _compute_daily_trend(self, open_positions):
+        store = self._daily_trend_store()
+        if store is None:
+            return {"available": False,
+                    "reason": "no daily history -- run "
+                              "py tools/build_daily_history.py 30"}
+
+        try:
+            from core.trend_structure import analyse
+            stats = store.stats()
+            symbols = self.master_loader.all_symbols()
+        except Exception as exc:            # noqa: BLE001 -- fail open
+            return {"available": False, "reason": f"unavailable ({exc})"}
+
+        if stats.get("days", 0) < 3:
+            return {"available": False,
+                    "reason": f"only {stats.get('days', 0)} day(s) of "
+                              f"daily history -- need 3+"}
+
+        by_symbol, counts, broke = {}, {}, []
+        for symbol in symbols:
+            try:
+                result = analyse(
+                    store.history(symbol, days=DAILY_TREND_WINDOW_DAYS))
+            except Exception:               # noqa: BLE001 -- one bad
+                continue                    # symbol, not the panel
+            label = result.get("structure")
+            if not label or label == "UNKNOWN":
+                continue
+            row = {
+                "structure": label,
+                "hh_streak": result.get("hh_streak") or 0,
+                "ll_streak": result.get("ll_streak") or 0,
+                "broke": result.get("broke_structure"),
+                "pct_from_high": _round_or_none(result.get("pct_from_high")),
+                "pct_from_low": _round_or_none(result.get("pct_from_low")),
+                "days_since_high": result.get("days_since_high"),
+            }
+            by_symbol[symbol] = row
+            counts[label] = counts.get(label, 0) + 1
+            if row["broke"]:
+                broke.append(dict(symbol=symbol, **row))
+
+        # Worst break first -- furthest below the window high is the
+        # one that has moved most since the character changed.
+        broke.sort(key=lambda r: r["pct_from_high"] if
+                   r["pct_from_high"] is not None else 0)
+
+        return {
+            "available": True,
+            "as_of": stats.get("last"),
+            "history_days": stats.get("days"),
+            "window": DAILY_TREND_WINDOW_DAYS,
+            "analysed": len(by_symbol),
+            "counts": counts,
+            "broke": broke[:DAILY_TREND_BROKE_LIMIT],
+            "broke_total": len(broke),
+            "by_symbol": by_symbol,
+            "positions": self._trend_rows_for_positions(
+                open_positions, by_symbol),
+            "note": "observation only -- does not gate any trade",
+        }
+
+    @staticmethod
+    def _trend_rows_for_positions(open_positions, by_symbol):
+        """
+        Every open position against the daily structure it was entered
+        into.
+
+        `alignment` is the whole point of the panel: AGREES when a LONG
+        sits in an uptrend or a SHORT in a downtrend, AGAINST when it
+        is the other way round, NEUTRAL in a range. It is a LABEL, not
+        a verdict -- an ORB long into a broken downtrend is exactly the
+        reversal trade the operator described wanting to catch, so
+        AGAINST does not mean wrong.
+        """
+        up = ("STRONG_UP", "UPTREND")
+        down = ("STRONG_DOWN", "DOWNTREND")
+        rows = []
+        for symbol, position in open_positions.items():
+            trend = by_symbol.get(symbol)
+            direction = position.get("direction", "LONG")
+            if not trend:
+                rows.append({"symbol": symbol, "direction": direction,
+                             "structure": "UNKNOWN", "alignment": None,
+                             "broke": None, "hh_streak": 0, "ll_streak": 0,
+                             "pct_from_high": None})
+                continue
+            label = trend["structure"]
+            if label in up:
+                alignment = "AGREES" if direction == "LONG" else "AGAINST"
+            elif label in down:
+                alignment = "AGREES" if direction == "SHORT" else "AGAINST"
+            else:
+                alignment = "NEUTRAL"
+            rows.append({"symbol": symbol, "direction": direction,
+                         "alignment": alignment, **trend})
+        rows.sort(key=lambda r: (r["alignment"] != "AGAINST", r["symbol"]))
+        return rows
+
+    # --------------------------------------------------
 
     def _build_open_positions(self, open_positions):
         rows = []

@@ -66,6 +66,33 @@ Same three knowledge stores as the morning run, but **forced** and
 without touching `master_stocks.csv`. Use it if you want the calendars
 refreshed right now, out of cycle. **Already run.**
 
+### `py tools/fetch_history.py`
+**Fills the replay bench with real market.** Pulls 1-minute candles from
+Dhan (five years available, 90 days per request) plus daily bars, for
+every `SUBSCRIBE = YES` stock.
+
+```
+py tools/fetch_history.py                 # ~62 sessions, one request per symbol
+py tools/fetch_history.py --days 250      # a year
+py tools/fetch_history.py --daily-only    # daily bars only, fast
+py tools/fetch_history.py --check         # what's already stored
+```
+
+| Writes | |
+|---|---|
+| `data/history_candles.db` | 1-minute bars — **separate** from the live recorder's file |
+| `data/daily_candles.db` | daily bars, feeds the trend structure |
+
+**Resumable.** Dedup is on (date, symbol, minute), so a re-run after a
+dropped connection costs time and nothing else.
+
+**Read the split check at the end of the run.** Any day-on-day close
+move over 25% that isn't explained by a recorded corporate action means
+that window's data is not trustworthy — an unadjusted split reads as a
+gap that never happened.
+
+Then: `py backtest/monday_replay.py`.
+
 ---
 
 ## 3. Reports — read-only, run whenever
@@ -109,6 +136,24 @@ precedes a gap.
 py tools/deals_report.py 15       # last 15 days
 ```
 
+### `py tools/structure_performance.py`
+**Does the daily trend actually predict anything?** Joins every closed
+trade to the 7-day structure the stock had *that morning* — computed
+with an `upto` cutoff so it can only see bars that had closed before the
+entry.
+
+Buckets win rate and expectancy by structure, by direction × structure,
+and by **alignment** (traded WITH the daily trend vs AGAINST it — the
+continuation-vs-mean-reversion question).
+
+Refuses to draw a conclusion below 20 trades on each side. That's the
+point of it.
+
+```
+py tools/structure_performance.py --min 5
+py tools/structure_performance.py --since 2026-07-01
+```
+
 ### `py tools/refresh_universe.py`
 Proposes ADD / REMOVE against `master_stocks.csv` and writes
 `data/universe_review.csv`. **Proposal only — changes nothing.**
@@ -146,7 +191,7 @@ automatically.
 py -m pytest -q
 ```
 
-548 tests. Run after any code change — if this isn't green, don't trade.
+666 tests. Run after any code change — if this isn't green, don't trade.
 
 ---
 

@@ -186,6 +186,25 @@ class TradeMemory:
                 )
             ).scalar_one()
 
+    def all_trades(self, since=None):
+        """
+        Every stored trade as a plain dict, oldest first.
+
+        Added 2026-07-26 for tools/structure_performance.py. The
+        _bucket() helpers above can only group by a column that is
+        already IN this table, and the daily trend structure is not --
+        it lives in core/daily_store.py and is derived, not recorded.
+        Joining the two needs the raw rows.
+
+        Read-only. `since` is a YYYY-MM-DD trade_date floor.
+        """
+        q = select(self.trades)
+        if since:
+            q = q.where(self.trades.c.trade_date >= since)
+        q = q.order_by(self.trades.c.trade_date, self.trades.c.entry_time)
+        with self.engine.begin() as conn:
+            return [dict(r._mapping) for r in conn.execute(q)]
+
     def by_sector(self, min_trades=1):
         return self._bucket(self.trades.c.sector, min_trades)
 

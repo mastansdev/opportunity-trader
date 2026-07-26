@@ -235,6 +235,26 @@
   .btn-refresh:hover { border-color: var(--accent, #4c8bf5); color: #fff; }
   .btn-refresh.spinning { opacity: 0.6; pointer-events: none; }
 
+  /* -- 2026-07-26 daily trend panel -- */
+  .trend-bar { display: flex; height: 26px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 10px; }
+  .trend-seg { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; min-width: 0; white-space: nowrap; }
+  .trend-seg.STRONG_UP   { background: #15803d; }
+  .trend-seg.UPTREND     { background: #22c55e; }
+  .trend-seg.RANGE       { background: #64748b; }
+  .trend-seg.DOWNTREND   { background: #ef4444; }
+  .trend-seg.STRONG_DOWN { background: #991b1b; }
+  .trend-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: var(--text-dim); margin-bottom: 12px; }
+  .trend-legend b { color: var(--text); font-weight: 600; }
+  .trend-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .align-AGREES  { color: var(--green); font-weight: 600; }
+  .align-AGAINST { color: var(--amber); font-weight: 600; }
+  .align-NEUTRAL { color: var(--text-dim); }
+  .trend-broke { color: var(--amber); font-weight: 600; }
+  .trend-note {
+    font-size: 11.5px; color: var(--text-dim); font-style: italic;
+    border-left: 2px solid var(--border); padding-left: 8px; margin-top: 10px;
+  }
+
   /* NSE-style sector heatmap: colored tiles */
   .heatmap-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
   .heatmap-col h3 { margin-bottom: 10px; }
@@ -337,6 +357,22 @@
         </thead>
         <tbody id="openRows"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- ============ Daily Trend (2026-07-26) -- observation only ============ -->
+  <div class="panel" style="margin-top:14px;">
+    <div class="panel-head-row">
+      <h2>Daily Trend <span id="trendAsOf" class="pos-count"></span></h2>
+      <span class="gl-refresh-note" id="trendWindow"></span>
+    </div>
+    <div id="trendBody"></div>
+    <div class="trend-note">
+      Observation only — the daily structure does not gate any trade.
+      A LONG marked AGAINST is not wrong: an ORB long out of a broken
+      downtrend is exactly the reversal setup. Run
+      <b>py tools/structure_performance.py</b> to see whether the label
+      actually predicts anything.
     </div>
   </div>
 
@@ -678,6 +714,77 @@ function trendCell(label, pct, sub) {
   const arrow = pct > 0.05 ? "▲" : (pct < -0.05 ? "▼" : "▬");
   return mktCell(label, `${arrow} ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`, cls, sub);
 }
+// -- Daily Trend (2026-07-26) ------------------------------------
+// The 7-day higher-high/higher-low structure of the tradeable
+// universe, plus the "just broke" names. Read-only: nothing here
+// influences an entry. See core/trend_structure.py.
+const TREND_ORDER = ["STRONG_UP", "UPTREND", "RANGE", "DOWNTREND", "STRONG_DOWN"];
+const TREND_LABEL = {
+  STRONG_UP: "Stepping up", UPTREND: "Uptrend", RANGE: "Range",
+  DOWNTREND: "Downtrend", STRONG_DOWN: "Stepping down",
+};
+
+function renderDailyTrend(dt) {
+  const body = document.getElementById("trendBody");
+  const asOf = document.getElementById("trendAsOf");
+  const win = document.getElementById("trendWindow");
+
+  if (!dt || !dt.available) {
+    asOf.textContent = "";
+    win.textContent = "";
+    body.innerHTML = `<span class="empty-note">${escapeHtml((dt && dt.reason) || "no daily history")}</span>`;
+    return;
+  }
+
+  asOf.textContent = `as of ${dt.as_of || "—"} · ${fmtNum(dt.analysed)} stocks`;
+  win.textContent = `${dt.window}-bar structure · ${dt.history_days} days stored`;
+
+  const counts = dt.counts || {};
+  const total = TREND_ORDER.reduce((s, k) => s + (counts[k] || 0), 0) || 1;
+
+  const bar = TREND_ORDER.filter(k => counts[k]).map(k => {
+    const pct = (counts[k] / total) * 100;
+    return `<div class="trend-seg ${k}" style="width:${pct}%" title="${TREND_LABEL[k]}: ${counts[k]}">${pct > 7 ? counts[k] : ""}</div>`;
+  }).join("");
+
+  const legend = TREND_ORDER.map(k =>
+    `<span><span class="trend-dot trend-seg ${k}"></span>${TREND_LABEL[k]} <b>${fmtNum(counts[k] || 0)}</b></span>`
+  ).join("");
+
+  // Open positions against the structure they were entered into.
+  const rows = (dt.positions || []).map((r, i) => `<tr>
+      <td>${i + 1}</td>
+      <td><strong>${escapeHtml(r.symbol)}</strong></td>
+      <td>${escapeHtml(r.direction || "")}</td>
+      <td>${escapeHtml(TREND_LABEL[r.structure] || r.structure || "—")}</td>
+      <td class="align-${r.alignment || "NEUTRAL"}">${r.alignment || "—"}</td>
+      <td>${r.hh_streak ? r.hh_streak + "d up" : (r.ll_streak ? r.ll_streak + "d down" : "—")}</td>
+      <td>${r.pct_from_high != null ? r.pct_from_high.toFixed(2) + "%" : "—"}</td>
+      <td class="trend-broke">${r.broke ? r.broke + " broke" : ""}</td>
+    </tr>`).join("");
+
+  const broke = (dt.broke || []).map(r =>
+    `<span class="chip ${r.broke === "UP" ? "red" : "green"}" title="${escapeHtml(TREND_LABEL[r.structure] || "")}">${escapeHtml(r.symbol)} ${r.pct_from_high != null ? r.pct_from_high.toFixed(1) + "%" : ""}</span>`
+  ).join("");
+
+  body.innerHTML = `
+    <div class="trend-bar">${bar}</div>
+    <div class="trend-legend">${legend}</div>
+    <h3 class="gl-col-title">Open positions vs their daily structure</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>S.No</th><th>Symbol</th><th>Direction</th><th>7-day structure</th>
+          <th>Alignment</th><th>Streak</th><th>From 7d high</th><th></th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="8"><span class="empty-note">No open positions</span></td></tr>`}</tbody>
+      </table>
+    </div>
+    <h3 class="gl-col-title" style="margin-top:14px;">Structure just broke${dt.broke_total ? ` (${dt.broke_total})` : ""}</h3>
+    <div class="chip-list">${broke || `<span class="empty-note">Nothing broke structure on the last bar</span>`}</div>
+  `;
+}
+
 function renderMarketIntelligence(mi) {
   const trendClsMap = { bull: "mc-bull", bear: "mc-bear", flat: "mc-flat" };
   const cells = [
@@ -773,6 +880,9 @@ function render(snap) {
 
   // -- Market Intelligence --
   renderMarketIntelligence(snap.market_intelligence || {});
+
+  // -- Daily Trend (observation only) --
+  renderDailyTrend(snap.daily_trend);
 
   // -- My Book: exposure by sector + sector P&L + long/short score --
   const book = snap.book_analytics || { exposure: [], sector_pnl: [], long_open: 0, short_open: 0, long_realized_net: 0, short_realized_net: 0 };

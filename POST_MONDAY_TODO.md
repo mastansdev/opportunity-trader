@@ -182,6 +182,79 @@ wire it as a gate -- one line. If not, delete the module.
 downtrends, only 47 trending up. Monday's long side is thin by
 construction.
 
+> **2026-07-26 -- that plan had a hole, and it was mine.**
+> `core/trend_structure.py`'s own docstring said the label was
+> *"recorded against every trade the bot takes"*. It was not. The only
+> file that imported the module was `tools/trend_report.py` -- nothing
+> in `core/engine.py`, nothing in `dashboard/`. Five sessions from now
+> there would have been **nothing to bucket**, and I would have found
+> that out at the moment we sat down to answer the question.
+>
+> Closed WITHOUT touching `core/engine.py`, because the label never
+> needed to be recorded live: it is a pure function of daily bars we
+> already store. Given a trade on 07-24 in PARAS, the structure the bot
+> saw at 09:15 is exactly
+> `analyse(daily_store.history("PARAS", days=8, upto="2026-07-23"))`.
+>
+> ```
+> py tools/structure_performance.py
+> ```
+>
+> The `upto` cutoff is the whole thing: include the trade day's own bar
+> and the label "knows" how the day ended. That is lookahead, it always
+> flatters the answer, and there is a test pinning it
+> (`test_label_uses_only_bars_before_the_trade`).
+>
+> Also now VISIBLE: a Daily Trend panel on the trading dashboard --
+> universe split by structure, every open position against the shape it
+> was entered into, and the "just broke" list. **Read-only. It gates
+> nothing**, and `test_daily_trend_never_gates_anything` fails if anyone
+> wires it in without reading why first.
+>
+> Live numbers from the 30 days stored, as of 2026-07-24:
+> `STRONG_DOWN 237 · DOWNTREND 133 · RANGE 127 · UPTREND 37 ·
+> STRONG_UP 10`, and **102 names broke structure on the last bar**.
+> Gating longs to STRONG_UP would cut the long side to 10 of 544.
+
+### H1b. The replay bench is not missing logic. It is missing MARKET.
+`backtest/monday_replay.py` already runs the real rules -- top-20
+movers, top-8 sectors, RS band, staged seats, rotation, ATR stops,
+charges -- over **one** recorded session, and that one restart-muddied.
+Every question below is unanswerable for that single reason.
+
+Dhan already serves the fix, and we already hold the credentials:
+1-minute candles, **five years back**, every active instrument, 90 days
+per request, 5 requests/second, 100,000/day.
+
+```
+py tools/fetch_history.py            # 62 sessions x 545 symbols, ~545 requests
+py backtest/monday_replay.py         # 62 sessions instead of 1
+```
+
+| Pull | Requests | Wall clock |
+|---|---|---|
+| 62 sessions x 545 | 545 | ~2 min |
+| 1 year x 545 | 2,725 | ~10 min |
+| 5 years x 545 | ~13,600 | ~45 min |
+
+The API is not the constraint. Disk is: 545 x 375 minutes x 62 sessions
+is ~12.7 million rows (~1.2 GB). `CandleStore.add_many()` was issuing
+one `execute()` per row -- fine for the live recorder, most of a day for
+this -- and is now chunked `executemany` at ~97,000 rows/sec.
+
+**Two things to check before believing ANY result from this data:**
+
+1. **Splits.** It is undocumented whether Dhan's history is
+   split-adjusted. If not, a 1:10 reads as -90% and invents an ORB gap
+   that never happened. Every day-on-day close move over 25% is printed
+   at the end of the run and cross-checked against the 141 corporate
+   actions in `core/stock_memory.py`. **Anything marked UNEXPLAINED
+   means that window is not trustworthy.**
+2. **Survivorship.** `master_stocks.csv` is TODAY'S universe. Two years
+   of it excludes everything delisted since and includes names that
+   only became liquid recently. That biases results upward. State it in
+   any conclusion that comes out of this data.
+
 ### H2. Is the whole direction backwards?
 On 2026-07-24, against a +1.13% market baseline:
 

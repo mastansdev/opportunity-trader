@@ -269,6 +269,52 @@ SECTOR_GAINERS_LOSERS_MIN_SYMBOLS = 3
 SECTOR_HEATMAP_TOP_N = 10
 
 # ----------------------------------------------------------
+# DAILY TREND PANEL  (2026-07-26)
+# ----------------------------------------------------------
+# Operator: "we need to create the daily candle of our universe in
+# dashboard. to identify the stock whether it is in uptrend or
+# downtrend... bot must know the stock is in which trend... (reversal
+# may happen at anyday)".
+#
+# The data layer already existed (core/daily_store.py holds 30 days,
+# core/trend_structure.py reads the 7-day higher-high/higher-low
+# shape). What was missing was any way to SEE it while trading, and
+# -- less obviously -- any way to MEASURE it: trend_structure.py's own
+# docstring claimed the label was "recorded against every trade the
+# bot takes", and it was not. Nothing imported it except
+# tools/trend_report.py. POST_MONDAY_TODO H1 ("5 sessions, then bucket
+# win rate by structure label") could not have worked.
+#
+# This panel is READ-ONLY and gates NOTHING. Deliberately, and it is
+# worth writing down why, because the reasoning cuts against the
+# obvious use: only 47 of 544 stocks are in daily uptrends and 370 are
+# in downtrends, so gating longs on STRONG_UP would cut the long side
+# to 8.6% of the universe. That is an enormous behaviour change to
+# make on zero evidence -- and it presumes continuation beats
+# mean-reversion, which is the one question 2026-07-24 left OPEN (both
+# sides mean-reverted). Measure with tools/structure_performance.py
+# first. See core/trend_structure.py's own "WHY THIS IS NOT WIRED AS
+# AN ENTRY GATE" section.
+DAILY_TREND_PANEL_ENABLED = True
+
+# Bars of daily history the structure read uses. 8 bars = 7 legs =
+# the "last 7 day trend" the operator asked for.
+DAILY_TREND_WINDOW_DAYS = 8
+
+# Daily structure changes once a day, after the close. Recomputing it
+# on the dashboard's 1s cycle would be ~545 SQLite queries a second
+# for an answer that cannot change until tomorrow. 15 minutes is
+# still far more often than necessary and keeps the panel responsive
+# if the daily store is refilled mid-session.
+DAILY_TREND_REFRESH_SECONDS = 900
+
+# How many "structure just broke" names to list. This is the case the
+# operator singled out by name (PARAS, KALYANKJIL, DATAPATTNS): a
+# staircase that stopped making higher highs AND then took out the
+# previous day's low.
+DAILY_TREND_BROKE_LIMIT = 15
+
+# ----------------------------------------------------------
 # Data-sanity filters for breadth / gainers-losers, 2026-07-24 --
 # two real, distinct problems the operator caught live:
 #   1. JLHL did a 2:10 stock split; our stored prev_close wasn't

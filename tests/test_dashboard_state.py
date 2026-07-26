@@ -965,3 +965,181 @@ def test_system_health_feed_alive_is_none_when_not_wired():
 # Opportunity Queue — approaching ORB boundary") -- its two tests
 # (proximity ranking, excludes symbols with an open position) went
 # with it, along with dashboard/state.py's _build_opportunity_queue().
+
+
+# ==================================================
+# DAILY TREND PANEL  (2026-07-26)
+# ==================================================
+# Read-only panel over core/daily_store.py + core/trend_structure.py.
+# The tests that matter are the fail-open ones: the daily store is
+# OPTIONAL, and a machine that never ran build_daily_history.py must
+# still trade.
+
+def _daily_state(tmp_path, symbols, bars, open_positions=None):
+    """A DashboardState wired to a real (temp) DailyStore."""
+    from core.daily_store import DailyStore
+    store = DailyStore(url=f"sqlite:///{tmp_path}/daily.db")
+    store.upsert_many(bars)
+    loader = _loader({s: "IT" for s in symbols})
+    engine = _FakeEngine(open_positions=open_positions or {})
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    state._daily_store = store
+    return state
+
+
+def _daily_bar(date, symbol, high, low):
+    return dict(date=date, symbol=symbol, series="EQ", open=low, high=high,
+                low=low, close=(high + low) / 2, prev_close=None,
+                volume=1000.0, turnover=None)
+
+
+def _up_bars(symbol="PARAS", n=8):
+    return [_daily_bar(f"2026-07-{14 + i:02d}", symbol, 100 + i * 2,
+                       95 + i * 2) for i in range(n)]
+
+
+def _down_bars(symbol="FALLER", n=8):
+    return [_daily_bar(f"2026-07-{14 + i:02d}", symbol, 100 - i * 2,
+                       95 - i * 2) for i in range(n)]
+
+
+def _position(direction="LONG"):
+    return {"direction": direction, "entry_price": 100.0, "qty": 10,
+            "entry_time": datetime(2026, 7, 24, 10, 5),
+            "initial_stop": 98.0}
+
+
+def test_daily_trend_counts_the_universe_by_structure(tmp_path):
+    state = _daily_state(tmp_path, ["PARAS", "FALLER"],
+                         _up_bars() + _down_bars())
+    dt = state._build_daily_trend({})
+    assert dt["available"] is True
+    assert dt["counts"]["STRONG_UP"] == 1
+    assert dt["counts"]["STRONG_DOWN"] == 1
+    assert dt["as_of"] == "2026-07-21"
+
+
+def test_daily_trend_marks_a_long_in_an_uptrend_as_agreeing(tmp_path):
+    state = _daily_state(tmp_path, ["PARAS"], _up_bars(),
+                         open_positions={"PARAS": _position("LONG")})
+    row = state._build_daily_trend(
+        {"PARAS": _position("LONG")})["positions"][0]
+    assert row["symbol"] == "PARAS"
+    assert row["structure"] == "STRONG_UP"
+    assert row["alignment"] == "AGREES"
+
+
+def test_daily_trend_marks_a_long_in_a_downtrend_as_against(tmp_path):
+    """AGAINST is a LABEL, not a verdict -- an ORB long out of a broken
+    downtrend is exactly the reversal setup the operator wants."""
+    state = _daily_state(tmp_path, ["FALLER"], _down_bars())
+    row = state._build_daily_trend(
+        {"FALLER": _position("LONG")})["positions"][0]
+    assert row["alignment"] == "AGAINST"
+
+
+def test_daily_trend_marks_a_short_in_a_downtrend_as_agreeing(tmp_path):
+    state = _daily_state(tmp_path, ["FALLER"], _down_bars())
+    row = state._build_daily_trend(
+        {"FALLER": _position("SHORT")})["positions"][0]
+    assert row["alignment"] == "AGREES"
+
+
+def test_daily_trend_puts_against_trend_positions_first(tmp_path):
+    state = _daily_state(tmp_path, ["PARAS", "FALLER"],
+                         _up_bars() + _down_bars())
+    rows = state._build_daily_trend({
+        "PARAS": _position("LONG"),        # agrees
+        "FALLER": _position("LONG"),       # against
+    })["positions"]
+    assert rows[0]["symbol"] == "FALLER"
+
+
+def test_daily_trend_handles_a_position_with_no_history(tmp_path):
+    state = _daily_state(tmp_path, ["PARAS"], _up_bars())
+    rows = state._build_daily_trend(
+        {"GHOST": _position("LONG")})["positions"]
+    assert rows[0]["structure"] == "UNKNOWN"
+    assert rows[0]["alignment"] is None
+
+
+def test_daily_trend_lists_broken_structures(tmp_path):
+    """The operator's own case: stops making higher highs, then takes
+    out the previous day's low."""
+    bars = _up_bars("PARAS", n=7)
+    bars.append(_daily_bar("2026-07-21", "PARAS", high=105, low=80))
+    state = _daily_state(tmp_path, ["PARAS"], bars)
+    dt = state._build_daily_trend({})
+    assert dt["broke_total"] == 1
+    assert dt["broke"][0]["symbol"] == "PARAS"
+    assert dt["broke"][0]["broke"] == "UP"
+
+
+def test_daily_trend_is_absent_without_a_store(tmp_path):
+    """No daily_candles.db must cost the PANEL, not the session."""
+    loader = _loader({"TCS": "IT"})
+    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader)
+    state._daily_store = False           # simulates a failed open
+    dt = state._build_daily_trend({})
+    assert dt["available"] is False
+    assert "build_daily_history" in dt["reason"]
+
+
+def test_daily_trend_is_absent_with_too_little_history(tmp_path):
+    state = _daily_state(tmp_path, ["PARAS"],
+                         [_daily_bar("2026-07-20", "PARAS", 100, 95)])
+    dt = state._build_daily_trend({})
+    assert dt["available"] is False
+    assert "history" in dt["reason"]
+
+
+def test_daily_trend_survives_a_broken_store(tmp_path):
+    class _Boom:
+        def stats(self):
+            raise RuntimeError("db is corrupt")
+
+    loader = _loader({"TCS": "IT"})
+    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader)
+    state._daily_store = _Boom()
+    dt = state._build_daily_trend({})
+    assert dt["available"] is False
+
+
+def test_daily_trend_is_cached_but_positions_stay_live(tmp_path):
+    """The structure can't change until tomorrow's bhavcopy, but the
+    open book changes all session -- so the cache must not freeze it."""
+    state = _daily_state(tmp_path, ["PARAS"], _up_bars())
+    first = state._build_daily_trend({})
+    assert first["positions"] == []
+
+    state._daily_store = None            # any recompute would now fail
+    second = state._build_daily_trend({"PARAS": _position("LONG")})
+    assert second["available"] is True                    # served cached
+    assert second["positions"][0]["symbol"] == "PARAS"    # but re-mapped
+
+
+def test_daily_trend_appears_in_the_snapshot(tmp_path):
+    state = _daily_state(tmp_path, ["PARAS"], _up_bars())
+    state.refresh()
+    assert "daily_trend" in state.get_snapshot()
+
+
+def test_daily_trend_can_be_switched_off(tmp_path, monkeypatch):
+    import dashboard.state as state_module
+    monkeypatch.setattr(state_module, "DAILY_TREND_PANEL_ENABLED", False)
+    state = _daily_state(tmp_path, ["PARAS"], _up_bars())
+    dt = state._build_daily_trend({})
+    assert dt["available"] is False
+    assert dt["reason"] == "disabled in config"
+
+
+def test_daily_trend_never_gates_anything(tmp_path):
+    """The panel is observation only. If this ever fails, someone wired
+    the structure into a trading decision -- read
+    core/trend_structure.py's 'WHY THIS IS NOT WIRED AS AN ENTRY GATE'
+    before deciding that was right."""
+    import inspect
+    import core.engine as engine_module
+    source = inspect.getsource(engine_module)
+    assert "trend_structure" not in source
+    assert "daily_trend" not in source
