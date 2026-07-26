@@ -23,7 +23,7 @@ trading dashboard, and squares off at 15:15.
 
 | Gives you | |
 |---|---|
-| Live dashboard | http://127.0.0.1:8000 |
+| Live dashboard | http://127.0.0.1:8000 — **Today's Major Events** strip at the top |
 | Trades | logged to `data/trade_log.txt` |
 | Candles | recorded to `data/backtest_candles.db` |
 | Learning | every closed trade into the trade memory |
@@ -123,9 +123,8 @@ The 24/7 news engine. Own process, no broker, no market hours. Fetches
 RSS + NSE/BSE announcements forever and writes to the shared store.
 Run it locally in its own window, or deploy to Railway.
 
-### `py news_dashboard.py`
-Always-on news view at **http://127.0.0.1:8050** — works outside market
-hours, unlike the trading dashboard. Read-only.
+*(The separate news dashboard on port 8050 was removed 2026-07-26 —
+major events now show at the top of the trading dashboard itself.)*
 
 ---
 

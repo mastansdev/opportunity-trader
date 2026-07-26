@@ -1306,3 +1306,8 @@ ENABLE_TRADE_MEMORY = True
 # trend structure, deal flow and trade memory. Set True to restore the
 # veto -- ideally only once the paid classifier is running.
 ENABLE_NEWS_BLOCKING = False
+
+# How many rows the dashboard's major-events strip shows. It is a
+# glance-strip at the top of the screen, not an archive -- the operator
+# asked for "only recent one". Reports carry the history.
+NEWS_FEED_MAX_ITEMS = 12

@@ -157,6 +157,26 @@ def _quote(last_price, open_=None, high=None, low=None, prev_close=None, volume=
 # _is_plausible_move / _is_circuit_locked (pure logic, direct)
 # --------------------------------------------------
 
+
+def _state(news_gate=None):
+    """Minimal DashboardState for the events-strip tests -- only
+    _build_news_feed is exercised, so the other collaborators can be
+    bare stubs."""
+    class _E:
+        open_positions = {}
+        closed_positions = []
+        entry_blocked = {}
+    class _M:
+        def get_quote(self, *a, **k):
+            return None
+    class _L:
+        def all_symbols(self, include_blocked=False):
+            return []
+        def get_by_symbol(self, s):
+            return None
+    return DashboardState(_E(), _M(), _L(), news_gate=news_gate)
+
+
 def test_is_plausible_move_true_when_circuit_limits_unavailable():
     # Fail-open -- absence of circuit data is not evidence of a problem.
     assert _is_plausible_move(-80.0, 100.0, None, None) is True
@@ -947,77 +967,89 @@ def test_open_position_with_atr_trailing_uses_its_own_live_stop_field():
     assert row["stop"] == 106.5
 
 
-def test_news_feed_preserves_gate_order_with_full_fields():
-    loader = _loader({"TCS": "IT"})
-    # The gate hands the state layer an already newest-first feed; the
-    # state layer must preserve that order and expose the full fields.
-    news_gate = _FakeNewsGate(recent=[
-        {
-            "symbol": "INFY", "priority": "HIGH", "direction": "bearish",
-            "confidence": 90, "materiality": "material", "reason": "guidance cut",
-            "title": "Infosys cuts FY guidance", "link": "http://x/infy",
-            "time": "2026-07-23T10:05:00", "source": "exchange",
-            "classifier": "haiku",
-        },
-        {
-            "symbol": "TCS", "priority": "MID", "direction": "bullish",
-            "confidence": 55, "materiality": "routine", "reason": "results beat",
-            "title": "TCS Q1 in line", "link": "http://x/tcs",
-            "time": "2026-07-23T09:20:00", "source": "RSS",
-            "classifier": "keyword",
-        },
-    ])
-    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader, news_gate=news_gate)
-    state.refresh()
-    feed = state.get_snapshot()["news_feed"]
+def test_events_strip_shows_only_MAJOR_events_today(monkeypatch):
+    """
+    Operator, 2026-07-26: "display intraday news, announcements,
+    results, any other major events/news not all other mid news".
 
-    assert [item["symbol"] for item in feed["items"]] == ["INFY", "TCS"]
-    assert feed["items"][0]["reason"] == "guidance cut"
-    assert feed["items"][0]["source"] == "exchange"
-    assert feed["items"][0]["priority"] == "HIGH"
-    # HIGH + haiku -> blocks a contradicting trade.
-    assert feed["items"][0]["blocks"] is True
-    # MID never blocks, regardless of classifier.
-    assert feed["items"][1]["blocks"] is False
-    assert feed["items"][1]["classifier"] == "keyword"
-    assert feed["counts"] == {
-        "total": 2, "high": 1, "mid": 1, "blocking": 1, "keyword": 1,
-    }
+    So a results filing and an order win appear; a generic
+    "management commentary" item does not.
+    """
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    class _Gate:
+        def recent_feed(self, limit=None):
+            return [
+                {"symbol": "TCS", "title": "Financial Results for Q1",
+                 "direction": "bullish", "time": f"{today}T13:05:00",
+                 "classifier": "keyword", "link": "http://x"},
+                {"symbol": "LT", "title": "Bagging of order worth Rs 500cr",
+                 "direction": "bullish", "time": f"{today}T11:20:00",
+                 "classifier": "keyword"},
+                {"symbol": "NOISE", "title": "Management commentary on demand",
+                 "direction": "bullish", "time": f"{today}T10:00:00",
+                 "classifier": "keyword"},
+            ]
+
+    state = _state(news_gate=_Gate())
+    out = state._build_news_feed()
+
+    assert [i["symbol"] for i in out["items"]] == ["TCS", "LT"]
+    assert out["items"][0]["event"] == "RESULTS"
+    assert out["items"][1]["event"] == "ORDER"
+    assert out["counts"]["total"] == 2
+    assert out["counts"]["types"] == {"RESULTS": 1, "ORDER": 1}
 
 
-def test_news_feed_keyword_high_does_not_block_by_default():
-    loader = _loader({"TCS": "IT"})
-    # A HIGH item from the FREE keyword classifier must NOT be marked
-    # as blocking while NEWS_KEYWORD_CAN_BLOCK is False (the default) --
-    # it's display-only, mirroring core/engine.py's gate.
-    news_gate = _FakeNewsGate(recent=[
-        {
-            "symbol": "TCS", "priority": "HIGH", "direction": "bearish",
-            "confidence": 80, "materiality": "material", "reason": "keyword: probe",
-            "title": "SEBI opens probe", "link": "http://x/tcs",
-            "time": "2026-07-23T11:00:00", "source": "RSS",
-            "classifier": "keyword",
-        },
-    ])
-    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader, news_gate=news_gate)
-    state.refresh()
-    feed = state.get_snapshot()["news_feed"]
+def test_events_strip_carries_the_four_asked_for_fields():
+    """"stockname news direction time" -- and a short HH:MM clock."""
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
 
-    assert feed["items"][0]["priority"] == "HIGH"
-    assert feed["items"][0]["blocks"] is False   # keyword, display-only
-    assert feed["counts"]["high"] == 1
-    assert feed["counts"]["blocking"] == 0
-    assert feed["counts"]["keyword"] == 1
+    class _Gate:
+        def recent_feed(self, limit=None):
+            return [{"symbol": "TCS", "title": "Financial Results for Q1",
+                     "direction": "bullish", "time": f"{today}T13:05:00",
+                     "classifier": "keyword"}]
+
+    item = _state(news_gate=_Gate())._build_news_feed()["items"][0]
+    assert item["symbol"] == "TCS"
+    assert item["direction"] == "bullish"
+    assert item["time"] == "13:05"
+    assert "Financial Results" in item["title"]
 
 
-def test_news_feed_empty_without_a_news_gate():
-    loader = _loader({"TCS": "IT"})
-    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader)
-    state.refresh()
-    feed = state.get_snapshot()["news_feed"]
-    assert feed["items"] == []
-    assert feed["counts"]["total"] == 0
-    assert feed["counts"]["blocking"] == 0
+def test_events_strip_drops_yesterday():
+    """An intraday screen. History lives in the reports."""
+    class _Gate:
+        def recent_feed(self, limit=None):
+            return [{"symbol": "TCS", "title": "Financial Results",
+                     "direction": "bullish", "time": "2020-01-01T13:05:00",
+                     "classifier": "keyword"}]
+
+    assert _state(news_gate=_Gate())._build_news_feed()["items"] == []
+
+
+def test_events_strip_is_capped():
+    from config import NEWS_FEED_MAX_ITEMS
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    class _Gate:
+        def recent_feed(self, limit=None):
+            return [{"symbol": f"S{i}", "title": "Financial Results",
+                     "direction": "bullish", "time": f"{today}T13:05:00",
+                     "classifier": "keyword"}
+                    for i in range(NEWS_FEED_MAX_ITEMS + 10)]
+
+    out = _state(news_gate=_Gate())._build_news_feed()
+    assert len(out["items"]) == NEWS_FEED_MAX_ITEMS
+
+
+def test_events_strip_empty_without_a_news_gate():
+    out = _state(news_gate=None)._build_news_feed()
+    assert out == {"items": [], "counts": {"total": 0, "types": {}}}
 
 
 def test_system_health_reports_tick_count_staleness_and_universe_size():

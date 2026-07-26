@@ -119,7 +119,8 @@ from config import (
 )
 
 from trading.charges import round_trip_charges
-from news_bot.config import NEWS_KEYWORD_CAN_BLOCK
+from config import NEWS_FEED_MAX_ITEMS
+from news_bot.major_events import classify_event
 
 try:
     import psutil
@@ -1026,78 +1027,62 @@ class DashboardState:
         }
 
     def _build_news_feed(self):
-        """Today's MID+HIGH news items, newest first -- the news-impact
-        panel. Same advisory source core/engine.py's news-contradiction
-        check reads (core/news_gate.py), enriched with the fields the
-        operator needs to judge it at a glance:
+        """
+        MAJOR events only, today, newest first -- the strip at the top
+        of the screen.
 
-          priority   -- HIGH (can gate a trade) vs MID (watch only).
-          classifier -- "haiku" (paid, trusted) vs "keyword" (free,
-                        crude). So a MID/HIGH item from the free
-                        classifier is visibly marked as such.
-          blocks     -- whether THIS item actually vetoes a
-                        contradicting trade today. True only for HIGH
-                        items the engine trusts: Haiku always, keyword
-                        only if the operator turned on
-                        NEWS_KEYWORD_CAN_BLOCK. Mirrors the exact rule
-                        in core/engine.py's _news_contradiction() so
-                        the panel never claims a block the engine
-                        wouldn't actually enforce.
+        Operator, 2026-07-26: "it must display intraday news,
+        announcements, results, any other major events/news not all
+        other mid news. that too on top of this display only recent one
+        with stockname news direction time".
 
-        Returns {"items": [...], "counts": {...}} so the panel can
-        show headline counts without recomputing them in the browser."""
+        So this is deliberately NOT the old "everything MID and HIGH"
+        feed. Two filters:
+
+          1. news_bot/major_events.py -- the headline must actively look
+             like results / order / M&A / fundraise / capital action /
+             approval / rating / legal / disruption / distress /
+             guidance. "Not obviously junk" is not enough.
+          2. TODAY only. This is an intraday screen; yesterday's filing
+             is history, and history lives in the reports.
+
+        Four fields per row, as asked: stock, what happened, direction,
+        time. `blocks` is gone -- news cannot block a trade at all now
+        (config.ENABLE_NEWS_BLOCKING), so a column claiming otherwise
+        would be a lie.
+        """
+        empty = {"items": [], "counts": {"total": 0, "types": {}}}
         if self.news_gate is None:
-            return {"items": [], "counts": {
-                "total": 0, "high": 0, "mid": 0, "blocking": 0, "keyword": 0,
-            }}
+            return empty
 
-        items = []
-        high = mid = blocking = keyword = 0
+        today = datetime.now().strftime("%Y-%m-%d")
+        items, types = [], {}
+
         for rec in self.news_gate.recent_feed():
-            priority = rec.get("priority")
-            classifier = rec.get("classifier", "haiku")
-            is_high = priority == "HIGH"
-            # Same trust rule as core/engine.py's _news_contradiction():
-            # a HIGH item blocks unless it's a keyword item and the
-            # operator hasn't allowed keyword news to block.
-            blocks = is_high and (
-                classifier != "keyword" or NEWS_KEYWORD_CAN_BLOCK
-            )
+            title = rec.get("title") or ""
+            event = classify_event(title)
+            if event is None:
+                continue
 
-            if is_high:
-                high += 1
-            else:
-                mid += 1
-            if blocks:
-                blocking += 1
-            if classifier == "keyword":
-                keyword += 1
+            stamp = str(rec.get("time") or "")
+            if stamp and not stamp.startswith(today):
+                continue
 
+            types[event] = types.get(event, 0) + 1
             items.append({
                 "symbol": rec.get("symbol"),
-                "priority": priority,
+                "event": event,
+                "title": title,
                 "direction": rec.get("direction"),
-                "confidence": rec.get("confidence"),
-                "materiality": rec.get("materiality"),
-                "reason": rec.get("reason"),
-                "title": rec.get("title"),
+                "time": stamp[11:16] if len(stamp) >= 16 else stamp,
+                "classifier": rec.get("classifier", "keyword"),
                 "link": rec.get("link"),
-                "time": rec.get("time"),
-                "source": rec.get("source"),
-                "classifier": classifier,
-                "blocks": blocks,
             })
+            if len(items) >= NEWS_FEED_MAX_ITEMS:
+                break
 
-        return {
-            "items": items,
-            "counts": {
-                "total": len(items),
-                "high": high,
-                "mid": mid,
-                "blocking": blocking,
-                "keyword": keyword,
-            },
-        }
+        return {"items": items,
+                "counts": {"total": len(items), "types": types}}
 
     def _build_system_health(self, universe_size):
         """

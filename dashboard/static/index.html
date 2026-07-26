@@ -141,20 +141,20 @@
   .risk-row { display: flex; justify-content: space-between; align-items: flex-start; padding: 7px 8px; border-radius: 6px; background: var(--panel-2); margin-bottom: 6px; font-size: 12px; }
   .risk-row .reason { color: var(--text-dim); font-size: 11px; max-width: 60%; text-align: right; }
 
-  .news-item { padding: 7px 8px; border-radius: 6px; background: var(--panel-2); margin-bottom: 6px; font-size: 12px; }
-  .news-item.blocking { border-left: 3px solid var(--red); }
-  .news-item .nh { display: flex; justify-content: space-between; margin-bottom: 2px; align-items: center; }
-  .news-item .nh-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .news-item .reason { color: var(--text-dim); font-size: 11px; }
-  .news-item .time { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
-  .news-badge { font-size: 9px; font-weight: 700; letter-spacing: .3px; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; }
-  .nb-high { background: rgba(239,68,68,.16); color: var(--red); }
-  .nb-mid { background: var(--panel); color: var(--text-dim); border: 1px solid var(--border); }
-  .nb-block { background: var(--red); color: #fff; }
-  .nb-keyword { background: rgba(245,158,11,.16); color: var(--amber, #f59e0b); }
-  .nb-haiku { background: rgba(59,130,246,.16); color: var(--blue, #3b82f6); }
-  .news-counts { display: flex; gap: 10px; font-size: 10px; color: var(--text-dim); margin-bottom: 8px; flex-wrap: wrap; }
-  .news-counts b { color: var(--text); }
+  .events-note { font-size: 10px; color: var(--text-dim); letter-spacing: .3px; }
+  .events-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .events-table td { padding: 5px 8px; border-bottom: 1px solid var(--panel-2); vertical-align: top; }
+  .events-table tr:last-child td { border-bottom: none; }
+  .ev-sym { font-weight: 700; white-space: nowrap; width: 1%; }
+  .ev-type { width: 1%; white-space: nowrap; }
+  .ev-tag { font-size: 9px; font-weight: 700; letter-spacing: .3px; padding: 1px 6px;
+            border-radius: 4px; background: var(--panel-2); color: var(--text-dim); }
+  .ev-title { color: var(--text-dim); }
+  .ev-title a { color: var(--text-dim); text-decoration: none; }
+  .ev-title a:hover { text-decoration: underline; }
+  .ev-dir { white-space: nowrap; width: 1%; font-weight: 600; }
+  .ev-dir.dir-flat { color: var(--text-dim); }
+  .ev-time { color: var(--text-dim); white-space: nowrap; width: 1%; font-variant-numeric: tabular-nums; }
 
   .health-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 12px; }
   .health-item { display: flex; justify-content: space-between; padding: 6px 8px; background: var(--panel-2); border-radius: 6px; }
@@ -307,6 +307,18 @@
 
   <div class="cards" id="statCards"></div>
 
+  <!-- ============ TODAY'S MAJOR EVENTS (top strip) ============
+       Operator, 2026-07-26: results / announcements / major events
+       only, at the top -- stock, what happened, direction, time.
+       Not the old everything-MID feed. -->
+  <div class="panel" style="margin-bottom:14px;">
+    <div class="panel-head-row">
+      <h2>Today's Major Events</h2>
+      <span class="events-note" id="eventsCounts"></span>
+    </div>
+    <div id="eventsStrip"></div>
+  </div>
+
   <!-- ============ Market Intelligence + Daily Guardrail ============ -->
   <div class="panel" style="margin-bottom:14px;">
     <div class="panel-head-row">
@@ -441,20 +453,10 @@
 
   </div>
 
-  <!-- ============ Row 4: News Feed | System Health ============ -->
-  <div class="layout-2col" style="margin-top:14px;">
-
-    <div class="panel">
-      <h2>News Impact — today's HIGH &amp; MID items</h2>
-      <div id="newsCounts" class="news-counts"></div>
-      <div id="newsFeed"></div>
-    </div>
-
-    <div class="panel">
-      <h2>Feed &amp; System Health</h2>
-      <div class="health-grid" id="healthGrid"></div>
-    </div>
-
+  <!-- ============ Row 4: System Health ============ -->
+  <div class="panel" style="margin-top:14px;">
+    <h2>Feed &amp; System Health</h2>
+    <div class="health-grid" id="healthGrid"></div>
   </div>
 
   <!-- ============ Bottom: Closed Trades | Performance ============ -->
@@ -815,43 +817,37 @@ function render(snap) {
         <span class="${pnlClass(s.net_pnl)}"><strong>${fmtINR(s.net_pnl)}</strong></span></div>`).join("")
     : `<span class="empty-note">No closed trades yet</span>`;
 
-  // -- news impact feed (HIGH + MID, with classifier + blocking status) --
+  // -- TODAY'S MAJOR EVENTS (top strip) --
+  // Only results / orders / M&A / fundraise / capital actions /
+  // approvals / ratings / legal / disruption / distress / guidance,
+  // and only today. Four columns: stock, what happened, direction,
+  // time. No "blocks" column -- news cannot block a trade
+  // (config.ENABLE_NEWS_BLOCKING), so showing one would be a lie.
   const news = snap.news_feed || { items: [], counts: {} };
-  const newsItems = news.items || [];
-  const nc = news.counts || {};
-  document.getElementById("newsCounts").innerHTML = newsItems.length
-    ? `<span><b>${nc.total ?? 0}</b> today</span>
-       <span><b>${nc.high ?? 0}</b> HIGH</span>
-       <span><b>${nc.mid ?? 0}</b> MID</span>
-       <span><b>${nc.blocking ?? 0}</b> blocking a trade</span>
-       ${(nc.keyword ?? 0) > 0 ? `<span><b>${nc.keyword}</b> free/keyword (display-only)</span>` : ""}`
+  const evItems = news.items || [];
+  const evTypes = (news.counts || {}).types || {};
+  document.getElementById("eventsCounts").textContent = evItems.length
+    ? Object.entries(evTypes).map(([k, v]) => `${k} ${v}`).join("  ·  ")
     : "";
-  document.getElementById("newsFeed").innerHTML = newsItems.length
-    ? newsItems.map(n => {
+  document.getElementById("eventsStrip").innerHTML = evItems.length
+    ? `<table class="events-table"><tbody>` + evItems.map(n => {
         const dirClass = n.direction === 'bullish' ? 'dir-bull'
-                        : n.direction === 'bearish' ? 'dir-bear' : '';
-        const prBadge = n.priority === 'HIGH'
-          ? `<span class="news-badge nb-high">High</span>`
-          : `<span class="news-badge nb-mid">Mid</span>`;
-        const clBadge = n.classifier === 'keyword'
-          ? `<span class="news-badge nb-keyword" title="Free keyword classifier — display only">Keyword</span>`
-          : `<span class="news-badge nb-haiku" title="Paid Haiku classifier">AI</span>`;
-        const blockBadge = n.blocks
-          ? `<span class="news-badge nb-block" title="Vetoes a contradicting trade in this symbol today">Blocks</span>`
-          : "";
-        return `<div class="news-item ${n.blocks ? 'blocking' : ''}">
-          <div class="nh">
-            <span class="nh-left">
-              <strong>${escapeHtml(n.symbol)}</strong>
-              <span class="${dirClass}">${escapeHtml(n.direction || '—')} (${n.confidence ?? '—'}%)</span>
-              ${prBadge}${clBadge}${blockBadge}
-            </span>
-            <span class="time">${escapeHtml((n.time || '').replace('T', ' '))}</span>
-          </div>
-          <div class="reason">${escapeHtml(n.title || n.reason || '')}</div>
-        </div>`;
-      }).join("")
-    : `<span class="empty-note">No news matched today</span>`;
+                       : n.direction === 'bearish' ? 'dir-bear' : 'dir-flat';
+        const dirText = n.direction === 'bullish' ? '\u25B2 Bullish'
+                      : n.direction === 'bearish' ? '\u25BC Bearish' : '\u2014';
+        const title = escapeHtml(n.title || '');
+        const cell = n.link
+          ? `<a href="${escapeHtml(n.link)}" target="_blank" rel="noopener">${title}</a>`
+          : title;
+        return `<tr>
+          <td class="ev-sym">${escapeHtml(n.symbol || '')}</td>
+          <td class="ev-type"><span class="ev-tag">${escapeHtml(n.event || '')}</span></td>
+          <td class="ev-title">${cell}</td>
+          <td class="ev-dir ${dirClass}">${dirText}</td>
+          <td class="ev-time">${escapeHtml(n.time || '')}</td>
+        </tr>`;
+      }).join("") + `</tbody></table>`
+    : `<span class="empty-note">No major events yet today</span>`;
 
   // -- Top gainers / losers (replaces the old ORB watchlist, 2026-07-23) --
   const gl = snap.gainers_losers || { gainers: [], losers: [] };
