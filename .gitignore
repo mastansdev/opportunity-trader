@@ -15,3 +15,6 @@ data/dashboard_token.txt
 data/*.db
 *.db-journal
 data/entries_paused.flag
+data/universe_review.csv
+data/*.csv.gz
+data/*.zip
