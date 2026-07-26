@@ -173,6 +173,16 @@ def main():
         f"master database (data/master_stocks.csv)."
     )
 
+    # SUBSCRIBE = YES only (core/subscribe_list.py). Stocks the morning
+    # run marked NO -- T2T, ETFs, sub-Rs 200, illiquid, narrow price
+    # band, going ex-split today, unclassified -- are excluded from the
+    # FEED itself, not merely blocked at entry. That matters: a T2T name
+    # on the feed still consumes a subscription slot and still lands in
+    # the gainers/losers table, and a stock whose price scale changed
+    # overnight would poison sector strength and the breadth regime read
+    # with a fake -80%. They stay in master_loader for sector and news
+    # lookups; they just never tick.
+    blocked = master_loader.blocked_symbols()
     resolved = {
         symbol: master_loader.security_id(symbol)
         for symbol in master_loader.all_symbols()
@@ -181,7 +191,19 @@ def main():
         warn("No universe symbols resolved. Nothing to trade. Exiting.")
         sys.exit(1)
 
-    decision(f"Universe resolved: {len(resolved)} symbols.")
+    if master_loader.has_subscribe_column:
+        decision(
+            f"Universe resolved: {len(resolved)} subscribed, "
+            f"{len(blocked)} marked NO by the morning run."
+        )
+    else:
+        decision(f"Universe resolved: {len(resolved)} symbols.")
+        warn(
+            "No SUBSCRIBE column in data/master_stocks.csv -- every symbol "
+            "is being subscribed, including any T2T names that cannot be "
+            "traded intraday at all. Run 'py tools/morning_universe.py' "
+            "before the open to build today's list."
+        )
 
     # security_id -> symbol, the reverse of `resolved` above. Built
     # once, here, and reused by both the circuit monitor (below) and

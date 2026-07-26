@@ -27,6 +27,14 @@ REQUIRED_COLUMNS = [
     "COMMODITY_EXPOSURE", "ECONOMIC_SENSITIVITY", "KEYWORDS", "THEMES",
 ]
 
+# Written by tools/morning_universe.py before the open -- see
+# core/subscribe_list.py for what makes a stock NO (T2T, ETF, price
+# band, illiquid, ex-date, unclassified). OPTIONAL on purpose: a file
+# that predates the feature, or a hand-made test fixture, has no such
+# column and every row is then treated as tradeable. The bot must never
+# refuse to start just because the morning tool hasn't been run.
+SUBSCRIBE_COLUMN = "SUBSCRIBE"
+
 
 class MasterLoader:
 
@@ -34,6 +42,15 @@ class MasterLoader:
         self.csv_path = csv_path
         self._by_symbol = {}
         self._by_security_id = {}
+        # Every row stays in _by_symbol regardless of SUBSCRIBE, because
+        # sector lookups and news keyword matching are still wanted for
+        # a blocked stock. Only the FEED list is filtered.
+        self._subscribed = []
+        self._blocked = {}
+        # False means the morning tool has never been run against this
+        # file -- main.py warns loudly, because it then subscribes to
+        # everything including T2T names.
+        self.has_subscribe_column = False
 
     # --------------------------------------------------
 
@@ -74,10 +91,26 @@ class MasterLoader:
                 f"{df.loc[dup_ids, 'SECURITY ID'].tolist()}"
             )
 
+        has_subscribe = SUBSCRIBE_COLUMN in df.columns
+        self.has_subscribe_column = has_subscribe
+
         for _, row in df.iterrows():
             record = row.to_dict()
-            self._by_symbol[record["SYMBOL"]] = record
+            symbol = record["SYMBOL"]
+            self._by_symbol[symbol] = record
             self._by_security_id[str(record["SECURITY ID"])] = record
+
+            if has_subscribe:
+                flag = str(record.get(SUBSCRIBE_COLUMN) or "").strip().upper()
+                # Anything that isn't an explicit "NO" is subscribed --
+                # fail-open. A blank or garbled cell must not silently
+                # drop a stock from the feed.
+                if flag == "NO":
+                    self._blocked[symbol] = str(
+                        record.get("SUBSCRIBE_REASON") or "marked NO"
+                    )
+                    continue
+            self._subscribed.append(symbol)
 
         return len(df)
 
@@ -89,8 +122,24 @@ class MasterLoader:
     def get_by_security_id(self, security_id):
         return self._by_security_id.get(str(security_id))
 
-    def all_symbols(self):
-        return list(self._by_symbol.keys())
+    def all_symbols(self, include_blocked=False):
+        """
+        Symbols to SUBSCRIBE to -- i.e. SUBSCRIBE = YES only.
+
+        This is what main.py builds the WebSocket subscription from, so
+        a T2T / illiquid / ex-date stock never reaches the feed, never
+        appears in gainers-losers, and can never be traded by accident.
+        Pass include_blocked=True for the full master list (the news
+        matcher wants that -- news about a blocked stock is still worth
+        recording).
+        """
+        if include_blocked:
+            return list(self._by_symbol.keys())
+        return list(self._subscribed)
+
+    def blocked_symbols(self):
+        """{symbol: reason} for everything the morning run marked NO."""
+        return dict(self._blocked)
 
     def security_id(self, symbol):
         record = self._by_symbol.get(symbol)

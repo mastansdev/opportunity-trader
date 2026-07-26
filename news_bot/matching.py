@@ -93,7 +93,7 @@ class NewsMatcher:
 
     def __init__(self, loader: MasterLoader = None):
         self.loader = loader or MasterLoader()
-        if not self.loader.all_symbols():
+        if not self.loader.all_symbols(include_blocked=True):
             self.loader.load()
 
         # COMPANY tier
@@ -114,7 +114,11 @@ class NewsMatcher:
     # --------------------------------------------------
 
     def _build_indices(self):
-        for symbol in self.loader.all_symbols():
+        # include_blocked=True on purpose. A stock the morning run marked
+        # SUBSCRIBE = NO is not TRADED today, but news about it is still
+        # worth recording -- it may be back to YES tomorrow, and the news
+        # engine runs 24/7 independently of whether we hold a position.
+        for symbol in self.loader.all_symbols(include_blocked=True):
             record = self.loader.get_by_symbol(symbol)
 
             if len(symbol) >= _MIN_SYMBOL_LEN:

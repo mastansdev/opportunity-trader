@@ -29,7 +29,7 @@ def main():
     mismatches = []
     not_found = []
 
-    for symbol in loader.all_symbols():
+    for symbol in loader.all_symbols(include_blocked=True):
         expected_id = str(loader.security_id(symbol))
         live_id = im.resolve(symbol)
 

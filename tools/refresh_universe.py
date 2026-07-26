@@ -34,7 +34,7 @@ from core.universe_builder import (
 def main(date=None):
     loader = MasterLoader()
     loader.load()
-    current = set(loader.all_symbols())
+    current = set(loader.all_symbols(include_blocked=True))
     decision(f"[UNIVERSE] Current universe: {len(current)} symbols.")
     decision(f"[UNIVERSE] Rules: series EQ only, "
              f"Rs {MIN_PRICE:.0f}-{MAX_PRICE:,.0f}, "

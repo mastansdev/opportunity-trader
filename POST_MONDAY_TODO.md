@@ -27,18 +27,21 @@ day were entered at **13:50 (IPCALAB +₹1,346)** and **13:51
 Open item: *does* late-day entry quality decay? Measure after 5 sessions
 by bucketing win rate by entry hour — don't guess a cutoff again.
 
-### A2. T2T stocks are still in the universe
-The universe tool found **8 symbols that cannot be traded intraday at
-all**: DBREALTY, JAIBALAJI, KRN, MTARTECH, QPOWER, **STLTECH**,
-**SUDEEPPHRM**, TRIVENI.
+### A2. T2T stocks in the universe — ✅ FIXED 2026-07-25
+Now handled automatically by the morning run (`SUBSCRIBE` column, see
+`MORNING_ROUTINE.md`). **7** symbols are genuinely T2T and are marked
+NO: DBREALTY, JAIBALAJI, KRN, MTARTECH, QPOWER, **STLTECH**, TRIVENI.
 
-**STLTECH and SUDEEPPHRM appear 20 times in the existing trade log** —
-the bot has been "trading" stocks that legally cannot be traded
-intraday. Invisible in PAPER; in LIVE they become compulsory delivery
-and the shorts are impossible.
+**And I had one of them wrong.** I previously told you SUDEEPPHRM was
+T2T as well. It isn't. It appears **twice** in the bhavcopy — once in
+series `BL` (the block-deal window) and once in `EQ`. The old tool
+judged whichever row it read first. `BL` is a block deal, not
+trade-to-trade, and SUDEEPPHRM is perfectly tradeable. The new code
+always prefers the EQ row, and there's a regression test pinning this
+exact case.
 
-**Fix (safe to do before Monday):** delete those 8 rows from
-`data/master_stocks.csv`. Pure data change, no code.
+So the real count is **7, not 8** — and STLTECH is the only one of the
+two names in the trade log that was actually an invalid trade.
 
 ---
 
