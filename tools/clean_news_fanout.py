@@ -52,7 +52,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import delete, func, select  # noqa: E402
 
 from core.logger import decision, warn  # noqa: E402
-from news_bot.matching import is_routine_filing  # noqa: E402
+from news_bot.matching import (  # noqa: E402
+    is_company_story, is_routine_filing,
+)
 from news_bot.news_store import NewsStore  # noqa: E402
 
 
@@ -76,14 +78,21 @@ def plan(store):
             routine_ids.extend(r.id for r in group)
             routine_titles.add(title)
             continue
-        # Fan-out signature: this headline named a company AND was also
-        # matched broadly. The broad half is the noise.
-        has_company = any(r.tier == "COMPANY" for r in group)
-        if has_company:
-            broad = [r for r in group if r.tier == "BROAD"]
-            if broad:
-                fanout_ids.extend(r.id for r in broad)
-                fanout_titles.add(title)
+        # Fan-out signature, two shapes:
+        #
+        #   a) the headline named a company we DO track, and was also
+        #      matched broadly -- the broad half is noise
+        #   b) the headline is about ONE company we do NOT track
+        #      ("V-Mart Retail Q1 Results", "Steel Strips Wheels
+        #      Limited"), so nothing matched at COMPANY tier and the
+        #      sector patterns sprayed it. Every row is noise.
+        broad = [r for r in group if r.tier == "BROAD"]
+        if not broad:
+            continue
+        if any(r.tier == "COMPANY" for r in group) \
+                or is_company_story(str(title or "")):
+            fanout_ids.extend(r.id for r in broad)
+            fanout_titles.add(title)
 
     return dict(
         total=len(rows),

@@ -48,6 +48,19 @@ _CORP_SUFFIXES = {
 _MIN_SYMBOL_LEN = 3          # guard against short/generic symbol false-hits
 _MIN_COMPANY_TERM_LEN = 3    # guard against 1-2 char normalized names
 
+# NOTE: an earlier version of this file capped a story at 25 symbols and
+# DROPPED anything wider. That was wrong -- measured against the real
+# universe, legitimate sector news is genuinely wide:
+#
+#     "Crude oil prices surge"    ->  67 symbols
+#     "IT services hiring demand" ->  46 symbols
+#     "Steel prices surge"        -> 151 symbols
+#
+# Deleting those loses real information. The harm was never the WIDTH,
+# it was letting a sector story reach HIGH priority and block entries in
+# every one of those names. That is fixed where priority is decided --
+# see news_bot/priority.py's BROAD rule -- not by throwing the data away.
+
 # Routine exchange housekeeping. Real compliance obligations, zero
 # trading information. Checked against the UPPERCASED headline+summary.
 _ROUTINE_FILING_MARKERS = (
@@ -66,6 +79,37 @@ _ROUTINE_FILING_MARKERS = (
     "INVESTOR COMPLAINT", "GRIEVANCE REDRESSAL",
     "RELATED PARTY", "SECRETARIAL",
 )
+
+
+# A headline that is ABOUT ONE COMPANY, whether or not that company is
+# in our 750. Found 2026-07-26, after the first fan-out fix:
+#
+#   "V-Mart Retail Q1 Results: Profit surges 40%"
+#        -> tagged bullish-HIGH on RELIANCE, DMART, ABFRL, ARVINDFASN
+#   "Steel Strips Wheels Limited has informed the Exchange..."
+#        -> tagged to 131 symbols
+#
+# Neither company is in our universe, so nothing matched at COMPANY
+# tier, so the broad sector patterns ran and sprayed the story across
+# the sector. V-Mart's profit says nothing about Reliance.
+#
+# If a headline names a company and we cannot resolve it, the correct
+# answer is SILENCE.
+_COMPANY_STORY_MARKERS = (
+    " LIMITED", " LTD", " PVT", " INC.", " CORP",
+    "HAS INFORMED THE EXCHANGE", "HAS SUBMITTED TO THE EXCHANGE",
+    "INFORMED THE EXCHANGE", "SUBMITTED TO THE EXCHANGE",
+)
+
+_QUARTER_RESULT_RE = re.compile(r"\bQ[1-4]\s+RESULTS?\b")
+
+
+def is_company_story(text):
+    """True when the headline is about one named company."""
+    upper = str(text or "").upper()
+    if _QUARTER_RESULT_RE.search(upper):
+        return True
+    return any(marker in upper for marker in _COMPANY_STORY_MARKERS)
 
 
 def is_routine_filing(text):
@@ -252,6 +296,12 @@ class NewsMatcher:
         # headline. This one condition removes almost all of it.
         if results:
             return MatchedNews(item=item, matches=results)
+
+        # A named company we could not resolve -> say nothing. Fanning it
+        # across the sector is how "V-Mart Retail Q1 Results" ended up
+        # flagged bullish on RELIANCE.
+        if is_company_story(text):
+            return MatchedNews(item=item, matches=[])
 
         for field, patterns in self._broad_patterns.items():
             for pattern, term, symbol in patterns:

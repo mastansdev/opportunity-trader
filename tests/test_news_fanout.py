@@ -206,3 +206,85 @@ def test_the_company_NAME_is_still_case_insensitive():
     m = NewsMatcher(loader=L())
     hits = m.match(_Item("Oil India Limited wins an exploration block"))
     assert "OIL" in {x.symbol for x in hits.matches}
+
+
+# ---------------------------------------------------------------
+# A company we do NOT track must not spray its sector
+# ---------------------------------------------------------------
+
+def test_an_untracked_company_produces_silence(matcher):
+    """
+    2026-07-26, after the first fan-out fix. V-Mart is not in our 750, so
+    nothing matched at COMPANY tier, so "Retail" fanned out and the story
+    was stored as bullish/HIGH against RELIANCE, DMART and ABFRL.
+    V-Mart's profit says nothing about Reliance.
+    """
+    result = matcher.match(_Item(
+        "V-Mart Retail Q1 Results: Profit surges 40% to Rs 47 crore"))
+    assert result.matches == []
+
+
+def test_an_untracked_exchange_filing_produces_silence(matcher):
+    """"Steel Strips Wheels Limited has informed the Exchange..." reached
+    131 symbols, including ABB and ASHOKLEY."""
+    result = matcher.match(_Item(
+        "Steel Strips Wheels Limited has informed the Exchange regarding "
+        "Allotment of shares"))
+    assert result.matches == []
+
+
+def test_is_company_story_recognises_the_real_shapes():
+    from news_bot.matching import is_company_story
+    for text in ("V-Mart Retail Q1 Results: Profit surges 40%",
+                 "Steel Strips Wheels Limited has informed the Exchange",
+                 "Ratnaveer Precision Engineering Limited has submitted to "
+                 "the Exchange",
+                 "Some Company Ltd announces expansion"):
+        assert is_company_story(text) is True, text
+
+    for text in ("Steel prices surge on new import duty",
+                 "IT services sector sees strong hiring demand",
+                 "RBI cuts repo rate by 25 bps"):
+        assert is_company_story(text) is False, text
+
+
+def test_genuine_sector_news_is_still_kept_however_wide(matcher):
+    """An earlier fix capped stories at 25 symbols and DELETED wider
+    ones. Wrong -- real sector news is genuinely wide (crude oil hits 67
+    names in the real universe). The harm was HIGH priority, not width."""
+    result = matcher.match(_Item("Steel prices surge on new import duty"))
+    assert {m.symbol for m in result.matches} == {"VEDL", "TATASTEEL", "ABB"}
+
+
+# ---------------------------------------------------------------
+# Sector news is context -- it must never veto a trade
+# ---------------------------------------------------------------
+
+def _classification(direction="bullish", confidence=90):
+    return dict(direction=direction, confidence=confidence,
+                materiality="material", reason="test")
+
+
+def test_a_BROAD_match_can_never_be_HIGH():
+    from news_bot.models import MatchResult
+    from news_bot.priority import tier_for
+    out = tier_for(MatchResult("RELIANCE", "SECTOR", "REFINING", "BROAD"),
+                   _classification())
+    assert out.priority == "MID"
+
+
+def test_a_COMPANY_match_still_reaches_HIGH():
+    from news_bot.models import MatchResult
+    from news_bot.priority import tier_for
+    out = tier_for(MatchResult("RELIANCE", "COMPANY_NAME", "RELIANCE",
+                               "COMPANY"),
+                   _classification())
+    assert out.priority == "HIGH"
+
+
+def test_a_COMPANY_match_still_needs_confidence_and_direction():
+    from news_bot.models import MatchResult
+    from news_bot.priority import tier_for
+    m = MatchResult("RELIANCE", "COMPANY_NAME", "RELIANCE", "COMPANY")
+    assert tier_for(m, _classification(confidence=40)).priority == "MID"
+    assert tier_for(m, _classification(direction="neutral")).priority == "MID"

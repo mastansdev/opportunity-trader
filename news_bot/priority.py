@@ -63,10 +63,21 @@ def tier_for(match_result, classification_result):
     confidence = classification_result["confidence"]
     materiality = classification_result["materiality"]
 
+    # A BROAD match is a SECTOR story, not a fact about this stock.
+    # 2026-07-26: "V-Mart Retail Q1 Results: Profit surges 40%" was
+    # stored as bullish/HIGH against RELIANCE, DMART and ABFRL, and a
+    # single steel filing reached 131 symbols at HIGH. Through the news
+    # gate that blocks entries in every one of them at once, on the
+    # strength of a story about a different company.
+    #
+    # Sector news is still recorded and still shown -- it is context,
+    # and context should never veto an individual trade. Only a headline
+    # that NAMES the stock (COMPANY tier) can reach HIGH.
     is_high = (
         confidence >= HIGH_CONFIDENCE_THRESHOLD
         and materiality == "material"
         and direction != "neutral"
+        and match_result.tier == "COMPANY"
     )
 
     return PriorityResult(
