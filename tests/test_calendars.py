@@ -224,13 +224,18 @@ def test_the_earliest_broadcast_of_the_day_wins(results):
 
 def test_follow_up_documents_are_not_treated_as_results():
     """The 15-INFY bug. Each of these contains 'result' but is filed
-    hours or days after the numbers."""
+    hours or days after the numbers.
+
+    Note what is NOT here: "Intimation of board meeting for results".
+    That one SHOULD pass -- looks_like_results() is used for board-meeting
+    purposes, where an intimation is precisely how the bot learns a
+    forthcoming results DATE. Announcements are judged separately, by
+    is_results_announcement(), which can see the category."""
     for noise in (
         "Newspaper Publication of Financial Results",
         "Investor Presentation on Q1 Results",
         "Transcript of Earnings Call on results",
         "Audio recording of the results conference call",
-        "Intimation of board meeting for results",
         "Press Release - Q2 Results",
         "Corrigendum to financial results",
     ):
@@ -432,3 +437,65 @@ def test_zero_timings_always_forces_a_refresh(results):
     results.remember("TCS", date(2026, 7, 20),
                      broadcast_at=datetime(2026, 7, 20, 16, 0))
     assert results.needs_refresh(date(2026, 7, 26)) is False
+
+
+# ===============================================================
+# Category filtering -- the 598-minute-spread bug
+# ===============================================================
+# Real data, 2026-07-26. NSE's `desc` is the announcement CATEGORY, and
+# all three of these mention "results" in the body:
+#
+#   Outcome of Board Meeting   13:58 14:06 14:11 15:05  <- the numbers
+#   Shareholders meeting       21:15 23:27 23:56 19:39  <- AGM minutes
+#   Updates                    15:19 16:27 21:02        <- misc
+#
+# Matching the body swept in AGM proceedings filed near midnight, which
+# is how ASIANPAINT got a 598-minute "habit".
+
+def test_board_meeting_outcome_is_the_results_filing():
+    from core.results_calendar import is_results_announcement
+    assert is_results_announcement(
+        "Outcome of Board Meeting",
+        "The Board of Directors at their meeting held today approved the "
+        "unaudited financial results for the quarter") is True
+
+
+def test_shareholders_meeting_is_never_the_results(  ):
+    """ASIANPAINT 2025-06-26 21:15 and 2026-07-09 23:56 -- AGM minutes
+    that mention results, filed near midnight."""
+    from core.results_calendar import is_results_announcement
+    assert is_results_announcement(
+        "Shareholders meeting",
+        "Please find enclosed herewith the Summary of proceedings ... "
+        "financial results were adopted") is False
+
+
+def test_updates_category_is_never_the_results():
+    """INFY 2026-04-16 and 2025-07-15 -- 'Updates' rows that put three
+    entries into a single quarter."""
+    from core.results_calendar import is_results_announcement
+    assert is_results_announcement(
+        "Updates",
+        "Infosys Limited has informed the Exchange regarding results") \
+        is False
+
+
+def test_a_board_meeting_about_something_else_is_not_results():
+    """Board meetings also approve fundraising and appointments."""
+    from core.results_calendar import is_results_announcement
+    assert is_results_announcement(
+        "Outcome of Board Meeting",
+        "The Board approved raising of funds via NCDs") is False
+
+
+def test_follow_up_documents_are_still_excluded():
+    from core.results_calendar import is_results_announcement
+    for desc in ("Investor Presentation", "Newspaper Publication",
+                 "Analyst Meet", "Press Release"):
+        assert is_results_announcement(desc, "financial results") is False, desc
+
+
+def test_empty_input_is_not_results():
+    from core.results_calendar import is_results_announcement
+    assert is_results_announcement("", "") is False
+    assert is_results_announcement(None, None) is False

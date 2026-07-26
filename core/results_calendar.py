@@ -86,29 +86,70 @@ def in_results_season(day=None):
     return day.month in RESULTS_SEASON_MONTHS
 
 
-# ...but "result" appears in a great many announcements that are NOT the
-# filing itself. Caught on the first live run, 2026-07-26: INFY came back
-# with FIFTEEN "results" in 400 days -- a company reports four times a
-# year. The extras are newspaper publications of the results, investor
-# presentations about them, earnings-call transcripts and audio, and
-# board-meeting outcome intimations. Each lands hours or days after the
-# numbers, which is why the spreads were absurd (COFORGE +/-1409 min --
-# a 23-hour "habit").
+# ...but the word "result" appears in the BODY of a great many
+# announcements that are not the filing. NSE's `desc` field is the
+# CATEGORY, and that is the reliable signal. Real data, 2026-07-26:
 #
-# So anything carrying one of these is a FOLLOW-UP document, not the
-# broadcast of the numbers.
+#   Outcome of Board Meeting   13:58  14:06  14:11  15:05   <- the numbers
+#   Shareholders meeting       21:15  23:27  23:56  19:39   <- AGM minutes
+#   Updates                    15:19  16:27  21:02          <- misc
+#
+# All three mention "results" somewhere in the text, so matching on the
+# body swept in AGM proceedings filed near midnight -- which is how
+# ASIANPAINT ended up with a 598-minute "habit" and INFY with fifteen
+# results in a year.
+#
+# Strip to the board-meeting category and ASIANPAINT reads ~14:06 with a
+# 67-minute spread; TCS reads 15:52 with a SEVEN-minute spread. That is
+# what a real habit looks like.
+_RESULT_CATEGORIES = ("outcome of board meeting", "financial result",
+                      "financial statement")
+
+# Categories that never carry the numbers, whatever their body says.
+_EXCLUDED_CATEGORIES = ("shareholders meeting", "update", "analyst",
+                        "investor", "press release", "newspaper",
+                        "presentation", "transcript", "certificate",
+                        "trading window", "disclosure under")
+
+# Follow-up documents, checked against the whole text as a backstop.
 _NOISE_MARKERS = (
     "newspaper", "publication", "published", "advertisement",
     "presentation", "transcript", "audio", "video", "recording",
     "conference call", "earnings call", "analyst", "investor meet",
-    "schedule", "intimation of", "press release", "clarification",
-    "corrigendum", "revised",
+    "schedule of", "press release", "corrigendum",
 )
 
 
 def looks_like_results(purpose):
-    """True only for the filing that carries the numbers."""
+    """
+    True only for text that describes the filing of the numbers.
+
+    Used for BOARD-MEETING purposes, where the purpose string is all we
+    get ("To consider and approve the unaudited financial results").
+    For announcements use is_results_announcement(), which can also see
+    the category.
+    """
     text = str(purpose or "").lower()
+    if not any(marker in text for marker in _RESULT_MARKERS):
+        return False
+    return not any(noise in text for noise in _NOISE_MARKERS)
+
+
+def is_results_announcement(desc, body=""):
+    """
+    True only for the announcement that CARRIES the numbers.
+
+    `desc` is NSE's category. Judging on the body alone is what produced
+    the 598-minute spreads -- see the note above.
+    """
+    category = str(desc or "").lower().strip()
+    if any(bad in category for bad in _EXCLUDED_CATEGORIES):
+        return False
+    if not any(good in category for good in _RESULT_CATEGORIES):
+        return False
+    # A board meeting can be about fundraising or an appointment, so the
+    # text still has to mention the numbers.
+    text = f"{category} {str(body or '').lower()}"
     if not any(marker in text for marker in _RESULT_MARKERS):
         return False
     return not any(noise in text for noise in _NOISE_MARKERS)
@@ -488,12 +529,12 @@ def fetch_filed_results(calendar, days_back=400, known_symbols=None,
             if known_symbols and symbol not in known_symbols:
                 continue
 
-            subject = " ".join(str(row.get(k) or "") for k in
-                               ("desc", "attchmntText", "smIndustry",
-                                "subject"))
-            if not looks_like_results(subject):
+            desc = str(row.get("desc") or row.get("subject") or "")
+            body = str(row.get("attchmntText") or "")
+            if not is_results_announcement(desc, body):
                 not_results += 1
                 continue
+            subject = f"{desc} {body}".strip()
             matched += 1
 
             broadcast = _as_datetime(
