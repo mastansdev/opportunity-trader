@@ -65,12 +65,26 @@ def test_jlhl_split_is_flagged_as_price_distorting(tmp_path):
     assert "SPLIT" in distorting["JLHL"][0]
 
 
-def test_dividend_also_distorts_the_price(tmp_path):
-    """A stock going ex-dividend opens lower by the dividend. That is
-    not weakness and shorting it is a mistake."""
+def test_an_ordinary_dividend_does_NOT_block(tmp_path):
+    """
+    REVERSED 2026-07-26 on the operator's correction: "when did i say to
+    block trading for any dividend stocks? dividend is very minimal
+    effect."
+
+    This test previously asserted the opposite. The reasoning behind the
+    old version -- a stock opens lower by the dividend, so a short is a
+    mistake -- is true but trivially small: ITC's Rs 6 on a ~Rs 400 share
+    is 1.5%, and the largest real case measured was DLF at 1.24%, against
+    a normal daily range of 2-3%. Losing a liquid large-cap for the whole
+    session over that costs more than it saves.
+
+    Dividends are still REMEMBERED (see below) -- just not a veto. Only a
+    special dividend above DIVIDEND_BLOCK_PCT still blocks.
+    """
     m = _mem(tmp_path)
     m.remember("ITC", "DIVIDEND", TODAY, "Interim dividend Rs 6", "NSE")
-    assert "ITC" in m.price_distorting_symbols(TODAY)
+    assert "ITC" not in m.price_distorting_symbols(TODAY)
+    assert m.facts_for("ITC", TODAY)          # but it IS remembered
 
 
 def test_informational_actions_do_not_block(tmp_path):

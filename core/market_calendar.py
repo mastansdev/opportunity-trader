@@ -122,9 +122,49 @@ class MarketCalendar:
         self._cache = None
         return True
 
-    def refresh_from_nse(self):
+    def covers_year(self, year=None):
+        """Do we already hold NSE's published list for this year?
+
+        Operator, 2026-07-26: "Holiday list is just one time event per
+        whole year. rarely we get extra holiday for any unplanned
+        events. so better plan this in that way."
+
+        Right -- NSE publishes the whole year in one go, in December.
+        Re-downloading it every morning for the other 250 sessions is
+        pointless traffic and one more thing that can fail at 08:45.
+        A year is 'covered' once we hold NSE-sourced records for it;
+        inferred ones do not count, since one inferred holiday would
+        otherwise stop us ever fetching the real list.
+        """
+        year = year or datetime.now().year
+        prefix = f"{year}-"
+        return any(k.startswith(prefix) and rec["source"] == "NSE"
+                   for k, rec in self._load().items())
+
+    def needs_refresh(self, today=None):
+        """
+        True only when there is real work to do:
+          - we have no NSE list for THIS year, or
+          - it is December and we have none for NEXT year yet (the new
+            list is published then, and the bot should know about
+            1 January before it arrives).
+        Unplanned closures -- the rare ones -- are still caught, because
+        a weekday with no bhavcopy gets inferred into the calendar by
+        the daily backfill regardless of this.
+        """
+        today = _as_date(today)
+        if not self.covers_year(today.year):
+            return True
+        return today.month == 12 and not self.covers_year(today.year + 1)
+
+    def refresh_from_nse(self, force=False, today=None):
         """Pull NSE's holiday master. Returns how many were stored, or 0
-        on any failure -- never raises."""
+        on any failure -- never raises. Skips the download entirely when
+        the year is already covered (see needs_refresh)."""
+        if not force and not self.needs_refresh(today):
+            diagnostic("[CALENDAR] Holiday list already covers this year "
+                       "-- skipping the download.")
+            return 0
         try:
             from nse import NSE
             with NSE(download_folder="data") as n:
@@ -262,13 +302,17 @@ def default_calendar():
     return _default
 
 
-def refresh(calendar=None, daily_store=None):
+def refresh(calendar=None, daily_store=None, force=False):
     """
     One full refresh: NSE's list, plus anything inferable from the daily
     candle history. Never raises.
+
+    The NSE download is skipped when the current year is already covered
+    -- it is a once-a-year publication, not a daily feed. Pass force=True
+    to fetch anyway.
     """
     calendar = calendar or default_calendar()
-    n_nse = calendar.refresh_from_nse()
+    n_nse = calendar.refresh_from_nse(force=force)
 
     n_inferred = 0
     try:

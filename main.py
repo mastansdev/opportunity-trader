@@ -292,11 +292,17 @@ def main():
         market_calendar = refresh_calendar()
         today = datetime.now().date()
         if not market_calendar.is_trading_day(today):
+            # Operator, 2026-07-26: "Holiday = no trading of that day."
+            # So EXIT, rather than starting a feed that will never tick.
+            # Starting anyway would leave the dashboard up showing a
+            # frozen, empty market and the console filling with feed-
+            # staleness warnings -- an hour later you cannot tell that
+            # from a real outage.
             why = market_calendar.reason(today)
             nxt = market_calendar.next_trading_day(today)
-            warn(f"[CALENDAR] {today} is NOT a trading day ({why}). "
-                 f"Next session: {nxt}. Starting anyway -- no ticks will "
-                 f"arrive; stop with Ctrl-C if this was unintended.")
+            decision(f"[CALENDAR] {today} is not a trading day ({why}). "
+                     f"Next session: {nxt}. Nothing to do -- exiting.")
+            sys.exit(0)
     except Exception as exc:
         warn(f"[CALENDAR] Market calendar unavailable ({exc}).")
 

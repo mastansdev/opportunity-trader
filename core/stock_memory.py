@@ -64,39 +64,42 @@ from news_bot.news_store import resolve_database_url
 # Action types that MOVE THE PRICE MECHANICALLY -- the reference price
 # changes, so a % move computed against yesterday's close is a lie.
 # These are the ones that must block or adjust, not merely inform.
-PRICE_ADJUSTING = {"SPLIT", "BONUS", "RIGHTS", "DEMERGER", "DIVIDEND"}
+# 2026-07-26, OPERATOR CORRECTION: "when did i say to block trading for
+# any dividend stocks? dividend is very minimal effect."
+#
+# Correct, and DIVIDEND was in this set on my initiative, never asked
+# for. The measured effect on real names:
+#
+#     CRISIL      Rs 10.00 on Rs 4,347  = 0.23%
+#     TATACAP     Rs  0.57 on Rs   342  = 0.17%
+#     PERSISTENT  Rs 18.00 on Rs 5,200  = 0.35%
+#     DLF         Rs  8.00 on Rs   645  = 1.24%
+#
+# Against a normal 2-3% daily range that is noise, and blocking a liquid
+# large-cap over it costs a whole day's opportunity in that name. A
+# SPLIT is a different animal entirely -- JLHL's 2:10 read as -80%.
+#
+# So dividends are INFORMATIONAL: remembered, shown, never a veto.
+PRICE_ADJUSTING = {"SPLIT", "BONUS", "RIGHTS", "DEMERGER"}
 
 # Everything else is context: it may explain volatility, but the price
-# scale is unchanged.
-INFORMATIONAL = {"EARNINGS", "BOARD_MEETING", "AGM", "BUYBACK", "OTHER"}
+# scale is unchanged (or changes so little it does not matter).
+INFORMATIONAL = {"EARNINGS", "BOARD_MEETING", "AGM", "BUYBACK",
+                 "DIVIDEND", "OTHER"}
 
-# A SPLIT / BONUS / RIGHTS / DEMERGER always rescales the price by a
-# large factor (2:10, 1:1 -- never 0.2%), and the ratio text is a
-# nightmare to parse reliably. Those always block, no arithmetic.
+# THE ONE EXCEPTION, and it is a real one. A SPECIAL dividend can be a
+# large fraction of the share price -- companies have paid out 20%+ of
+# their market cap in one go. That is a genuine rescaling, identical in
+# effect to a split, and the "dividends are noise" reasoning above stops
+# applying somewhere.
 #
-# A DIVIDEND is different, and this is the 2026-07-26 correction. It
-# reduces the reference price by exactly the rupee amount, which is
-# usually TINY:
-#
-#     CRISIL      Rs 10.00 on Rs 4,347   = 0.23%
-#     TATACAP     Rs  0.57 on Rs   342   = 0.17%
-#     PERSISTENT  Rs 18.00 on Rs 5,200   = 0.35%
-#     DLF         Rs  8.00 on Rs   645   = 1.24%
-#     WIPRO       Rs  2.00 on Rs   177   = 1.13%
-#
-# Blocking CRISIL for the day over 0.23% -- inside the noise of any
-# normal 2-3% daily range -- is not caution, it is throwing away a
-# liquid large-cap for nothing. All seven of the above were blocked on
-# 2026-07-26. DLF and WIPRO genuinely matter against a 0.4% stop; the
-# other five do not.
-#
-# So a dividend blocks only when it is MATERIAL relative to the share
-# price. Above this, the unadjusted previous close is misleading enough
-# to distort the %-move the bot ranks on.
-MIN_DIVIDEND_DISTORTION_PCT = 1.0
+# This threshold is where. Anything below it never blocks, which covers
+# every ordinary dividend you will ever see (the largest above is
+# 1.24%). Set it to None to switch the safety net off entirely.
+DIVIDEND_BLOCK_PCT = 5.0
 
 # Actions whose materiality we can compute (needs the rupee amount and
-# the price). Everything else in PRICE_ADJUSTING blocks unconditionally.
+# the price). Everything in PRICE_ADJUSTING blocks unconditionally.
 _MEASURABLE = {"DIVIDEND"}
 
 _AMOUNT_RE = re.compile(
@@ -222,7 +225,7 @@ class StockMemory:
 
     def price_distorting_symbols(self, on_date=None, window_days=1,
                                  price_lookup=None,
-                                 min_pct=MIN_DIVIDEND_DISTORTION_PCT):
+                                 min_pct=DIVIDEND_BLOCK_PCT):
         """
         The set the engine actually needs: every symbol whose PRICE SCALE
         is being changed MATERIALLY around `on_date`. A %-move computed
@@ -232,7 +235,7 @@ class StockMemory:
 
         price_lookup: optional callable symbol -> last close. When given,
         a DIVIDEND is only counted if it is at least `min_pct` of the
-        share price (see MIN_DIVIDEND_DISTORTION_PCT for why, with real
+        share price (see DIVIDEND_BLOCK_PCT for why, with real
         numbers). Splits, bonuses, rights and demergers always count.
 
         WITHOUT a price_lookup the behaviour is unchanged -- every
@@ -253,7 +256,8 @@ class StockMemory:
                 select(self.actions).where(
                     (self.actions.c.ex_date >= lo)
                     & (self.actions.c.ex_date <= hi)
-                    & (self.actions.c.action_type.in_(tuple(PRICE_ADJUSTING)))
+                    & (self.actions.c.action_type.in_(
+                        tuple(PRICE_ADJUSTING) + tuple(_MEASURABLE)))
                 )
             ).all()
         out = {}
@@ -262,12 +266,22 @@ class StockMemory:
             reason = (f"{d['action_type']}"
                       + (f" ({d['detail']})" if d.get("detail") else ""))
 
-            if price_lookup is not None and d["action_type"] in _MEASURABLE:
+            if d["action_type"] in _MEASURABLE:
+                # Dividends are informational (see PRICE_ADJUSTING's
+                # note). The ONLY one that still blocks is a special
+                # dividend large enough to rescale the price like a
+                # split -- DIVIDEND_BLOCK_PCT. Set that to None and no
+                # dividend ever blocks.
+                if min_pct is None or price_lookup is None:
+                    continue
                 pct = self._distortion_pct(d, price_lookup)
-                if pct is not None and pct < min_pct:
-                    continue                 # immaterial -- trade it
-                if pct is not None:
-                    reason += f" -- {pct:.2f}% of price"
+                if pct is None or pct < min_pct:
+                    # Unmeasurable is treated as SMALL here, the opposite
+                    # of the old rule -- because "dividend" now means
+                    # "almost certainly noise", so the burden of proof is
+                    # on blocking, not on trading.
+                    continue
+                reason += f" -- {pct:.2f}% of price, a special dividend"
 
             out.setdefault(d["symbol"], []).append(reason)
         return out
@@ -290,7 +304,7 @@ class StockMemory:
 
     def immaterial_symbols(self, on_date=None, window_days=1,
                            price_lookup=None,
-                           min_pct=MIN_DIVIDEND_DISTORTION_PCT):
+                           min_pct=DIVIDEND_BLOCK_PCT):
         """
         The mirror of the above: actions we are DELIBERATELY ignoring
         because they are too small to matter. Exists so the decision is

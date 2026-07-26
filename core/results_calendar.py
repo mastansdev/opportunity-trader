@@ -65,6 +65,26 @@ DEFAULT_DB = os.environ.get("RESULTS_CALENDAR_DB",
 _RESULT_MARKERS = ("result", "financial statement", "unaudited",
                    "audited financial")
 
+# Operator, 2026-07-26: "the result part now this would be 4 times per
+# year and around 4 months per year. so here too we need not check in
+# after results sessions completed."
+#
+# Correct. Indian listed companies report quarterly, and the filings
+# cluster hard into four windows. Q1 (Apr-Jun) lands in Jul-Aug, Q2 in
+# Oct-Nov, Q3 in Jan-Feb, Q4 plus the annual audit in Apr-May. Outside
+# those, board meetings about results are a trickle of stragglers.
+#
+# So the refresh runs DAILY in season and WEEKLY out of season. Not
+# "never": a company can and does move its date, and a straggler filing
+# still carries a broadcast timestamp worth having for the pulse.
+RESULTS_SEASON_MONTHS = {1, 2, 4, 5, 7, 8, 10, 11}
+OFF_SEASON_REFRESH_DAYS = 7
+
+
+def in_results_season(day=None):
+    day = _as_date(day) or datetime.now().date()
+    return day.month in RESULTS_SEASON_MONTHS
+
 
 def looks_like_results(purpose):
     text = str(purpose or "").lower()
@@ -132,6 +152,11 @@ class ResultsCalendar:
             Column("broadcast_at", DateTime),
             Column("source", String(16)),
             UniqueConstraint("symbol", "results_date", name="uq_result"),
+        )
+        self.meta = Table(
+            "results_meta", self.md,
+            Column("key", String(32), primary_key=True),
+            Column("value", String(64)),
         )
         self.md.create_all(self.engine)
 
@@ -269,6 +294,37 @@ class ResultsCalendar:
 
     # --------------------------------------------------
 
+    # --------------------------------------------------
+    # Refresh cadence -- results are seasonal, not daily
+    # --------------------------------------------------
+
+    def last_refreshed(self):
+        with self.engine.begin() as conn:
+            row = conn.execute(select(self.meta.c.value).where(
+                self.meta.c.key == "last_refresh")).first()
+        return _as_date(row[0]) if row else None
+
+    def mark_refreshed(self, day=None):
+        day = _as_date(day) or datetime.now().date()
+        with self.engine.begin() as conn:
+            stmt = sqlite_insert(self.meta).values(
+                key="last_refresh", value=day.isoformat())
+            conn.execute(stmt.on_conflict_do_update(
+                index_elements=["key"], set_=dict(value=day.isoformat())))
+
+    def needs_refresh(self, day=None):
+        """
+        Daily in results season, weekly outside it. See
+        RESULTS_SEASON_MONTHS for the reasoning.
+        """
+        day = _as_date(day) or datetime.now().date()
+        last = self.last_refreshed()
+        if last is None:
+            return True
+        if in_results_season(day):
+            return last < day
+        return (day - last).days >= OFF_SEASON_REFRESH_DAYS
+
     def stats(self):
         with self.engine.begin() as conn:
             total = conn.execute(
@@ -320,62 +376,110 @@ def fetch_board_meetings(calendar, days_ahead=45, known_symbols=None):
     return stored
 
 
-def fetch_filed_results(calendar, days_back=400, known_symbols=None):
+def fetch_filed_results(calendar, days_back=400, known_symbols=None,
+                        chunk_days=30, today=None):
     """
     PAST filings, which carry the broadcast timestamp -- the earnings
-    pulse. Reaches back a year by default so a first run picks up four
-    quarters at once instead of waiting a year to become useful.
+    pulse. `broadCastDate` looks like "01-Jul-2026 11:00:51", i.e. a real
+    time of day, which is exactly what we need.
+
+    FETCHED IN CHUNKS. A single 400-day request came back with just 90
+    rows, all stragglers from defunct companies filing 2018-19 accounts
+    (IL&FSTRANS, Videocon) -- the endpoint clearly caps or paginates a
+    wide window. Month-sized slices get the real volume.
+
+    Reaches back a year by default so a first run picks up four quarters
+    at once instead of waiting a year to become useful.
     """
-    try:
-        from nse import NSE
-        with NSE(download_folder="data") as n:
-            rows = n.financial_results(
-                segment="equities", period="quarterly",
-                from_date=datetime.now() - timedelta(days=days_back),
-                to_date=datetime.now()) or []
-    except Exception as exc:
-        warn(f"[RESULTS] Filed results unavailable ({exc}).")
-        return 0
-
+    today = _as_date(today) or datetime.now().date()
     stored = 0
-    skipped_no_date = 0
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        symbol = str(row.get("symbol") or "").strip().upper()
-        if not symbol or (known_symbols and symbol not in known_symbols):
-            continue
-        broadcast = _as_datetime(
-            row.get("broadCastDate") or row.get("broadcastDate")
-            or row.get("filingDate") or row.get("creationDate"))
-        day = (broadcast.date() if broadcast
-               else _as_date(row.get("broadCastDate")
-                             or row.get("filingDate")))
-        if day is None:
-            skipped_no_date += 1
-            continue
-        if calendar.remember(symbol, day,
-                             purpose="Quarterly Results (filed)",
-                             relating_to=row.get("relatingTo") or "",
-                             broadcast_at=broadcast, source="NSE_FR"):
-            stored += 1
+    seen_rows = 0
+    matched = 0
+    no_date = 0
+    sample_keys = []
 
-    # Loudly explain a silent zero. NSE renames these fields from time to
-    # time, and a filing whose date we cannot parse contributes nothing
-    # to the earnings pulse -- which would otherwise just look like "no
-    # data yet" forever.
-    if rows and not stored:
-        sample = sorted(rows[0].keys()) if isinstance(rows[0], dict) else []
-        warn(f"[RESULTS] NSE returned {len(rows)} filings but none could "
-             f"be stored ({skipped_no_date} had no parseable date). The "
-             f"field names have probably changed. Keys seen: {sample}")
+    start = today - timedelta(days=days_back)
+    while start < today:
+        end = min(start + timedelta(days=chunk_days), today)
+        try:
+            from nse import NSE
+            with NSE(download_folder="data") as n:
+                rows = n.financial_results(
+                    segment="equities", period="quarterly",
+                    from_date=datetime.combine(start, datetime.min.time()),
+                    to_date=datetime.combine(end, datetime.min.time())) or []
+        except Exception as exc:
+            warn(f"[RESULTS] Filings {start}..{end} unavailable ({exc}).")
+            rows = []
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            seen_rows += 1
+            if not sample_keys:
+                sample_keys = sorted(row.keys())
+            symbol = str(row.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            if known_symbols and symbol not in known_symbols:
+                continue
+            matched += 1
+
+            broadcast = _as_datetime(
+                row.get("broadCastDate") or row.get("broadcastDate")
+                or row.get("filingDate") or row.get("creationDate"))
+            day = (broadcast.date() if broadcast
+                   else _as_date(row.get("broadCastDate")
+                                 or row.get("filingDate")))
+            if day is None:
+                no_date += 1
+                continue
+            if calendar.remember(symbol, day,
+                                 purpose="Quarterly Results (filed)",
+                                 relating_to=row.get("relatingTo") or "",
+                                 broadcast_at=broadcast, source="NSE_FR"):
+                stored += 1
+
+        start = end
+
+    # Explain a zero precisely, because the three causes need three
+    # different fixes and all look identical from the outside.
+    if seen_rows and not matched:
+        warn(f"[RESULTS] NSE returned {seen_rows} filings but NONE were in "
+             f"our universe -- they are stragglers from delisted names. "
+             f"Not a parsing problem.")
+    elif matched and not stored:
+        warn(f"[RESULTS] {matched} filings matched our universe but none "
+             f"could be dated ({no_date} unparseable). Field names have "
+             f"probably changed. Keys seen: {sample_keys}")
+    elif not seen_rows:
+        warn("[RESULTS] NSE returned no filings at all for the window.")
     return stored
 
 
 def refresh(calendar=None, known_symbols=None, days_ahead=45,
-            days_back=400):
-    """One full refresh. Never raises."""
+            days_back=400, force=False, today=None):
+    """One full refresh. Never raises.
+
+    Skipped entirely when nothing is due -- see needs_refresh(). Results
+    are a four-times-a-year event; polling NSE every morning in, say,
+    September buys nothing.
+    """
     calendar = calendar or ResultsCalendar()
+    today = _as_date(today) or datetime.now().date()
+
+    if not force and not calendar.needs_refresh(today):
+        stats = calendar.stats()
+        decision(
+            f"[RESULTS] Nothing due -- "
+            + ("in season, already refreshed today. "
+               if in_results_season(today)
+               else f"off-season, next check in "
+                    f"{OFF_SEASON_REFRESH_DAYS} days. ")
+            + f"{stats['events']} events known, "
+              f"{stats['with_time']} with a time."
+        )
+        return calendar
 
     # Count ROWS, before and after. remember() returns True for every
     # valid call including updates, so counting calls overstated the
@@ -395,6 +499,8 @@ def refresh(calendar=None, known_symbols=None, days_ahead=45,
         f"new scheduled, +{after['events'] - mid['events']} new filed, "
         f"+{after['with_time'] - before['with_time']} new timings.)"
     )
+    calendar.mark_refreshed(today)
+
     if after["with_time"] == 0:
         decision(
             "[RESULTS] No broadcast timings yet -- the earnings pulse "

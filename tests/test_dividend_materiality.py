@@ -1,21 +1,26 @@
 """
-Dividend materiality -- 2026-07-26.
+Dividends do NOT block trading -- 2026-07-26.
 
-The stock memory was built for the JLHL case: a 2:10 split that the bot
-read as an 80% crash. Correct. But the same rule was then blocking
-liquid large-caps for trivial dividends. Real output from the first live
-refresh:
+Operator: "when did i say to block trading for any dividend stocks?
+dividend is very minimal effect."
 
-    CRISIL      Rs 10.00 on Rs 4,347  = 0.23%   <- blocked
-    TATACAP     Rs  0.57 on Rs   342  = 0.17%   <- blocked
-    PERSISTENT  Rs 18.00 on Rs 5,200  = 0.35%   <- blocked
-    DEEPAKNTR   Rs  7.50 on Rs 1,650  = 0.45%   <- blocked
-    ARE&M       Rs  5.20 on Rs   873  = 0.60%   <- blocked
-    DLF         Rs  8.00 on Rs   645  = 1.24%   <- correctly blocked
-    WIPRO       Rs  2.00 on Rs   177  = 1.13%   <- correctly blocked
+They were right, and DIVIDEND was in PRICE_ADJUSTING on my initiative,
+never asked for. Real output from the first live refresh, all of which
+were being blocked:
 
-Five of seven were lost for nothing -- 0.23% is inside the noise of any
-normal 2-3% daily range.
+    CRISIL      Rs 10.00 on Rs 4,347  = 0.23%
+    TATACAP     Rs  0.57 on Rs   342  = 0.17%
+    PERSISTENT  Rs 18.00 on Rs 5,200  = 0.35%
+    DEEPAKNTR   Rs  7.50 on Rs 1,650  = 0.45%
+    ARE&M       Rs  5.20 on Rs   873  = 0.60%
+    DLF         Rs  8.00 on Rs   645  = 1.24%
+    WIPRO       Rs  2.00 on Rs   177  = 1.13%
+
+Against a normal 2-3% daily range every one of those is noise.
+
+The single exception kept is a SPECIAL dividend big enough to rescale
+the price like a split (DIVIDEND_BLOCK_PCT, 5%). Splits, bonuses, rights
+and demergers still block unconditionally -- that is the JLHL case.
 """
 
 from datetime import date
@@ -23,7 +28,8 @@ from datetime import date
 import pytest
 
 from core.stock_memory import (
-    MIN_DIVIDEND_DISTORTION_PCT, StockMemory, parse_amount,
+    DIVIDEND_BLOCK_PCT, INFORMATIONAL, PRICE_ADJUSTING, StockMemory,
+    parse_amount,
 )
 
 # The real closes, from the daily store on 2026-07-24.
@@ -55,15 +61,126 @@ def memory(tmp_path):
 
 
 # ---------------------------------------------------------------
-# parse_amount
+# The classification itself
+# ---------------------------------------------------------------
+
+def test_dividend_is_informational_not_price_adjusting():
+    assert "DIVIDEND" not in PRICE_ADJUSTING
+    assert "DIVIDEND" in INFORMATIONAL
+
+
+def test_splits_and_friends_are_still_price_adjusting():
+    assert PRICE_ADJUSTING == {"SPLIT", "BONUS", "RIGHTS", "DEMERGER"}
+
+
+# ---------------------------------------------------------------
+# No ordinary dividend blocks anything
+# ---------------------------------------------------------------
+
+def test_no_ordinary_dividend_blocks_even_without_a_price(memory):
+    """The plain call the engine makes. Nothing should come back."""
+    assert memory.price_distorting_symbols(EX) == {}
+
+
+def test_no_ordinary_dividend_blocks_with_a_price_either(memory):
+    assert memory.price_distorting_symbols(EX, price_lookup=price_of) == {}
+
+
+def test_dlf_and_wipro_are_no_longer_blocked(memory):
+    """These two were the 'material' ones under the previous 1% rule.
+    At 1.24% and 1.13% they are still just dividends."""
+    blocked = memory.price_distorting_symbols(EX, price_lookup=price_of)
+    assert "DLF" not in blocked
+    assert "WIPRO" not in blocked
+
+
+def test_dividends_are_still_REMEMBERED(memory):
+    """Not blocking is not the same as not knowing. The fact stays on
+    record and shows up in the reports."""
+    assert memory.counts_for("CRISIL") == {"DIVIDEND": 1}
+    assert len(memory.facts_for("CRISIL", EX)) == 1
+
+
+# ---------------------------------------------------------------
+# The one exception: a special dividend that rescales the price
+# ---------------------------------------------------------------
+
+def test_a_huge_special_dividend_still_blocks(tmp_path):
+    """20% of the share price is a rescaling, not a dividend in any
+    meaningful sense -- identical in effect to a split."""
+    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
+    m.remember("SPECIAL", "DIVIDEND", EX, "Special Dividend - Rs 200 Per Share")
+    blocked = m.price_distorting_symbols(EX, price_lookup=lambda s: 1000.0)
+    assert "SPECIAL" in blocked
+    assert "special dividend" in blocked["SPECIAL"][0]
+
+
+def test_just_under_the_threshold_does_not_block(tmp_path):
+    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
+    m.remember("NEARLY", "DIVIDEND", EX, "Dividend - Rs 49 Per Share")
+    assert m.price_distorting_symbols(
+        EX, price_lookup=lambda s: 1000.0) == {}      # 4.9%
+
+
+def test_an_unparseable_dividend_does_NOT_block(tmp_path):
+    """Reversed from the old rule. 'Dividend' now means 'almost certainly
+    noise', so the burden of proof is on blocking, not on trading."""
+    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
+    m.remember("VAGUE", "DIVIDEND", EX, "Dividend declared")
+    assert m.price_distorting_symbols(
+        EX, price_lookup=lambda s: 1000.0) == {}
+
+
+def test_an_unknown_price_does_NOT_block(tmp_path):
+    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
+    m.remember("NOPRICE", "DIVIDEND", EX, "Dividend - Rs 500 Per Share")
+    assert m.price_distorting_symbols(
+        EX, price_lookup=lambda s: None) == {}
+
+
+def test_the_safety_net_can_be_switched_off(memory):
+    m = memory
+    m.remember("BIG", "DIVIDEND", EX, "Special Dividend - Rs 300 Per Share")
+    assert "BIG" in m.price_distorting_symbols(
+        EX, price_lookup=lambda s: 1000.0)
+    assert m.price_distorting_symbols(
+        EX, price_lookup=lambda s: 1000.0, min_pct=None) == {}
+
+
+def test_default_threshold_is_documented_and_sane():
+    assert DIVIDEND_BLOCK_PCT == 5.0
+
+
+# ---------------------------------------------------------------
+# Splits still behave exactly as before -- the JLHL case
+# ---------------------------------------------------------------
+
+def test_a_split_always_blocks_however_it_is_worded(tmp_path):
+    """Ratios are not parseable as rupees, and splits are never trivial."""
+    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
+    m.remember("JLHL", "SPLIT", EX, "Face Value Split From Rs 10 To Rs 2")
+    m.remember("OTHER", "BONUS", EX, "Bonus 1:1")
+    m.remember("THIRD", "DEMERGER", EX, "Scheme of Arrangement")
+    blocked = m.price_distorting_symbols(EX, price_lookup=lambda s: 1000.0)
+    assert set(blocked) == {"JLHL", "OTHER", "THIRD"}
+
+
+def test_a_split_blocks_with_no_price_lookup_at_all(tmp_path):
+    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
+    m.remember("JLHL", "SPLIT", EX, "2:10")
+    assert "JLHL" in m.price_distorting_symbols(EX)
+
+
+# ---------------------------------------------------------------
+# parse_amount -- still used by the special-dividend net
 # ---------------------------------------------------------------
 
 @pytest.mark.parametrize("text,expected", [
     ("Dividend - Rs 5.20 Per Share", 5.20),
     ("Interim Dividend - Rs 10  Per Share", 10.0),
-    ("Dividend - Re 0.57 Per Share", 0.57),       # "Re", not "Rs"
-    ("Dividend - Rs. 12 Per Share", 12.0),        # trailing full stop
-    ("Special Dividend INR 1,250 Per Share", 1250.0),   # digit grouping
+    ("Dividend - Re 0.57 Per Share", 0.57),            # "Re", not "Rs"
+    ("Dividend - Rs. 12 Per Share", 12.0),             # trailing full stop
+    ("Special Dividend INR 1,250 Per Share", 1250.0),  # digit grouping
 ])
 def test_parse_amount_handles_the_real_formats(text, expected):
     assert parse_amount(text) == expected
@@ -72,94 +189,3 @@ def test_parse_amount_handles_the_real_formats(text, expected):
 @pytest.mark.parametrize("text", ["", None, "Stock Split 2:10", "Bonus 1:1"])
 def test_parse_amount_returns_None_when_there_is_no_amount(text):
     assert parse_amount(text) is None
-
-
-# ---------------------------------------------------------------
-# The gate
-# ---------------------------------------------------------------
-
-def test_without_a_price_lookup_everything_still_blocks(memory):
-    """Backward compatibility: the conservative path stays the default,
-    so no existing caller changes behaviour."""
-    blocked = memory.price_distorting_symbols(EX)
-    assert set(blocked) == set(PRICES)
-
-
-def test_only_material_dividends_block(memory):
-    blocked = memory.price_distorting_symbols(EX, price_lookup=price_of)
-    assert set(blocked) == {"DLF", "WIPRO"}
-
-
-def test_the_five_trivial_ones_are_released(memory):
-    blocked = memory.price_distorting_symbols(EX, price_lookup=price_of)
-    for symbol in ("CRISIL", "TATACAP", "PERSISTENT", "DEEPAKNTR", "ARE&M"):
-        assert symbol not in blocked, f"{symbol} should be tradeable"
-
-
-def test_the_reason_now_carries_the_percentage(memory):
-    blocked = memory.price_distorting_symbols(EX, price_lookup=price_of)
-    assert "1.24% of price" in blocked["DLF"][0]
-
-
-def test_immaterial_symbols_makes_the_decision_auditable(memory):
-    """A stock quietly NOT being blocked must still be visible."""
-    ignored = memory.immaterial_symbols(EX, price_lookup=price_of)
-    assert set(ignored) == {"CRISIL", "TATACAP", "PERSISTENT",
-                            "DEEPAKNTR", "ARE&M"}
-    assert ignored == {} or "DLF" not in ignored
-
-
-def test_a_split_always_blocks_however_it_is_worded(tmp_path):
-    """The JLHL case. Ratios are not parseable as rupees, and splits are
-    never trivial -- they must block unconditionally."""
-    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
-    m.remember("JLHL", "SPLIT", EX, "Face Value Split From Rs 10 To Rs 2")
-    m.remember("OTHER", "BONUS", EX, "Bonus 1:1")
-    blocked = m.price_distorting_symbols(EX, price_lookup=lambda s: 1000.0)
-    assert set(blocked) == {"JLHL", "OTHER"}
-
-
-def test_an_unparseable_dividend_blocks_FAIL_CLOSED(tmp_path):
-    """An unmeasurable distortion must never be assumed to be small."""
-    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
-    m.remember("VAGUE", "DIVIDEND", EX, "Dividend declared")
-    blocked = m.price_distorting_symbols(EX, price_lookup=lambda s: 1000.0)
-    assert "VAGUE" in blocked
-
-
-def test_an_unknown_price_blocks_FAIL_CLOSED(tmp_path):
-    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
-    m.remember("NOPRICE", "DIVIDEND", EX, "Dividend - Rs 1 Per Share")
-    blocked = m.price_distorting_symbols(EX, price_lookup=lambda s: None)
-    assert "NOPRICE" in blocked
-
-
-def test_a_raising_price_lookup_blocks_FAIL_CLOSED(tmp_path):
-    def boom(symbol):
-        raise RuntimeError("store unavailable")
-    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
-    m.remember("X", "DIVIDEND", EX, "Dividend - Rs 1 Per Share")
-    assert "X" in m.price_distorting_symbols(EX, price_lookup=boom)
-
-
-def test_the_threshold_is_adjustable(memory):
-    # At 0.5%, ARE&M (0.60%) joins the blocked set.
-    blocked = memory.price_distorting_symbols(EX, price_lookup=price_of,
-                                              min_pct=0.5)
-    assert set(blocked) == {"DLF", "WIPRO", "ARE&M"}
-    # At 2%, nothing is material enough.
-    assert memory.price_distorting_symbols(
-        EX, price_lookup=price_of, min_pct=2.0) == {}
-
-
-def test_a_big_special_dividend_still_blocks(tmp_path):
-    """The threshold must not become a hole. A 12% special dividend is
-    exactly the distortion this whole module exists for."""
-    m = StockMemory(url=f"sqlite:///{tmp_path}/m.db")
-    m.remember("SPECIAL", "DIVIDEND", EX, "Special Dividend - Rs 120 Per Share")
-    blocked = m.price_distorting_symbols(EX, price_lookup=lambda s: 1000.0)
-    assert "SPECIAL" in blocked
-
-
-def test_default_threshold_is_documented_and_sane():
-    assert MIN_DIVIDEND_DISTORTION_PCT == 1.0

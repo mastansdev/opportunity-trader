@@ -259,3 +259,96 @@ def test_empty_memory_answers_cleanly(memory):
     assert memory.counts_for("ANY") == {}
     assert memory.history_for("ANY") == []
     assert memory.date_range() == (None, None)
+
+
+# ===============================================================
+# Refresh cadence -- rare events should not be polled daily
+# ===============================================================
+# Operator, 2026-07-26: "Holiday list is just one time event per whole
+# year... the result part now this would be 4 times per year and around
+# 4 months per year. so here too we need not check in after results
+# sessions completed."
+
+def test_holidays_are_not_refetched_once_the_year_is_covered(cal):
+    cal.add("2026-01-26", "Republic Day", source="NSE")
+    assert cal.covers_year(2026) is True
+    assert cal.needs_refresh(date(2026, 7, 27)) is False
+
+
+def test_an_empty_year_still_needs_a_fetch(cal):
+    assert cal.needs_refresh(date(2026, 7, 27)) is True
+
+
+def test_inferred_holidays_do_NOT_count_as_covering_the_year(cal):
+    """Otherwise one inferred holiday would stop us ever downloading the
+    real list, and we would never learn the actual dates."""
+    cal.add("2026-06-26", "no bhavcopy published", source="INFERRED")
+    assert cal.covers_year(2026) is False
+    assert cal.needs_refresh(date(2026, 7, 27)) is True
+
+
+def test_december_looks_ahead_to_next_year(cal):
+    """NSE publishes the new list in December; the bot should know about
+    1 January before it arrives."""
+    cal.add("2026-01-26", "Republic Day", source="NSE")
+    assert cal.needs_refresh(date(2026, 12, 10)) is True
+    cal.add("2027-01-26", "Republic Day", source="NSE")
+    assert cal.needs_refresh(date(2026, 12, 10)) is False
+
+
+def test_refresh_from_nse_skips_the_download_when_covered(cal, monkeypatch):
+    called = []
+    monkeypatch.setattr(cal, "add", lambda *a, **k: called.append(a))
+    cal.engine  # noqa -- keep the fixture explicit
+    # pre-populate via a direct insert so `add` isn't the thing we patch
+    MarketCalendar.add(cal, "2026-01-26", "Republic Day", source="NSE")
+    assert cal.refresh_from_nse(today=date(2026, 7, 27)) == 0
+
+
+# --- results season -------------------------------------------
+
+def test_results_season_months():
+    from core.results_calendar import in_results_season
+    for month in (1, 2, 4, 5, 7, 8, 10, 11):
+        assert in_results_season(date(2026, month, 15)) is True
+    for month in (3, 6, 9, 12):
+        assert in_results_season(date(2026, month, 15)) is False
+
+
+def test_first_ever_run_always_refreshes(results):
+    assert results.needs_refresh(date(2026, 9, 15)) is True
+
+
+def test_in_season_refreshes_daily(results):
+    results.mark_refreshed(date(2026, 7, 26))
+    assert results.needs_refresh(date(2026, 7, 26)) is False
+    assert results.needs_refresh(date(2026, 7, 27)) is True
+
+
+def test_off_season_refreshes_weekly(results):
+    results.mark_refreshed(date(2026, 9, 1))          # September
+    assert results.needs_refresh(date(2026, 9, 5)) is False
+    assert results.needs_refresh(date(2026, 9, 7)) is False
+    assert results.needs_refresh(date(2026, 9, 8)) is True
+
+
+def test_mark_refreshed_is_idempotent(results):
+    results.mark_refreshed(date(2026, 7, 26))
+    results.mark_refreshed(date(2026, 7, 26))
+    assert results.last_refreshed() == date(2026, 7, 26)
+
+
+def test_refresh_skips_when_nothing_is_due(results, monkeypatch):
+    import core.results_calendar as rc
+    calls = []
+    monkeypatch.setattr(rc, "fetch_board_meetings",
+                        lambda *a, **k: calls.append("bm") or 0)
+    monkeypatch.setattr(rc, "fetch_filed_results",
+                        lambda *a, **k: calls.append("fr") or 0)
+
+    results.mark_refreshed(date(2026, 9, 1))
+    rc.refresh(calendar=results, today=date(2026, 9, 3))
+    assert calls == []                       # off-season, only 2 days on
+
+    rc.refresh(calendar=results, today=date(2026, 9, 3), force=True)
+    assert calls == ["bm", "fr"]
