@@ -53,9 +53,26 @@ def _load():
 
 
 def _save(results):
+    """
+    ATOMIC. Write to a temp file in the same directory, flush, fsync,
+    then rename over the target.
+
+    2026-07-26: the first version wrote straight to RESULTS. Saving
+    per session meant a run cut short mid-write left a HALF-WRITTEN
+    json file, and the next run died on it -- losing every session
+    already replayed. Exactly the torn-write failure ISSUES_LOG
+    already records for the trade log; same fix.
+
+    os.replace() is atomic on both POSIX and Windows, so a reader
+    either sees the whole previous file or the whole new one.
+    """
     os.makedirs(os.path.dirname(RESULTS), exist_ok=True)
-    with open(RESULTS, "w", encoding="utf-8") as f:
+    tmp = RESULTS + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=1)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, RESULTS)
 
 
 def run(dates, store, results):
@@ -74,6 +91,14 @@ def run(dates, store, results):
         r["shorts"] = sum(1 for t in trades if t["dir"] == "SHORT")
         r["best"] = max((t["pnl"] for t in trades), default=0.0)
         r["worst"] = min((t["pnl"] for t in trades), default=0.0)
+        # Keep the trades themselves. Aggregates can tell you THAT the
+        # strategy loses; only the individual fills can tell you WHERE.
+        r["trades_detail"] = [
+            dict(sym=t["sym"], dir=t["dir"], t0=t["t0"], rs=t["rs"],
+                 entry=t["entry"], exit=t["exit"], qty=t["qty"],
+                 pnl=t["pnl"], reason=t["reason"])
+            for t in trades
+        ]
         results[date] = r
         # Saved per session, not at the end: a long run gets done in
         # slices, and a slice that is cut short must not throw away the
