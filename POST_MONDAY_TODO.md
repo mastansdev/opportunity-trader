@@ -163,6 +163,84 @@ gets defended.
 
 ---
 
+## 🟢 H. WHAT WE COULD STILL DO BETTER — the Monday-evening list
+
+Everything above is a known gap. This is the ORDER to work through them
+after Monday's close, worst-first, with what settles each one.
+
+### H1. The bot still cannot see YESTERDAY when it decides
+The single biggest gap. `core/trend_structure.py` now knows every
+stock's 7-day higher-high/higher-low shape -- and it gates NOTHING. This
+is why the bot bought SRF long after a 10% two-day fall: the session
+starts fresh at 09:15 and the previous week may as well not exist.
+
+**Settles it:** 5 clean sessions, then bucket win rate by the structure
+label the stock had that morning. If STRONG_UP longs beat RANGE longs,
+wire it as a gate -- one line. If not, delete the module.
+
+**Right now**, for context: 370 of 544 stocks (68%) are in daily
+downtrends, only 47 trending up. Monday's long side is thin by
+construction.
+
+### H2. Is the whole direction backwards?
+On 2026-07-24, against a +1.13% market baseline:
+
+```
+LONG:  up 2%+ and near the high    n= 9   -0.55% vs market
+SHORT: down 2%+ and near the low   n=53   +0.35% vs market
+```
+
+Both mean-reverted. One reversal day proves nothing -- but if this holds
+over five sessions the bot is trading the wrong way and no amount of
+gate-tuning fixes that. **Everything else is decoration until this is
+settled.**
+
+### H3. Eight rules running on reasoning, not evidence
+RS band 0.4-5%, sector top-8, staged 3/6/10, no-progress 30 min/0.5R,
+early-momentum RS>=1.0%, blow-off 12%, rotation edge 0.4%,
+still-trending 0.65. Each is my guess. Test one at a time against
+recorded sessions -- never two together, or neither result means
+anything.
+
+### H4. Charges eat ~78% of gross profit
+Not solved, only mitigated by trading less. ~Rs 117 a round trip against
+a best-bucket expectancy of ~Rs 136. **The edge is currently thinner
+than the fee.** Either the per-trade edge grows or the trade count falls
+further -- there is no third option.
+
+### H5. Two things on probation
+- **Block-deal window** -- see section G. Test at 09:05 Monday.
+- **Earnings pulse timing** -- 61% of names report AFTER 15:15, so the
+  whole-day block costs those sessions for nothing. Narrow it only after
+  watching real reporting days.
+
+### H6. Never built, in the order they are worth building
+1. Entry on the RETEST rather than the breakout candle -- better R:R
+   with no predictive skill needed.
+2. Relative strength vs its OWN sector, not just the market.
+3. Regime detection (`REGIME_NOTES.md` -- designed, zero code).
+4. Per-sector capital cap.
+5. Trade log: market-time timestamps + per-exit P&L column.
+
+### H7. Housekeeping that keeps biting
+- Universe still untrimmed: ~206 removals / ~247 additions proposed,
+  none applied. Would cut ~25% of the 09:15 tick load.
+- `NEW_STOCKS.md` classification queue -- new listings sit at
+  SUBSCRIBE=NO until their sector is filled in.
+- `git push` -- commits are ahead of origin.
+
+### H8. The process lesson, worth more than any item above
+Three things today looked useful and failed on contact with real output:
+news fan-out, keyword blocking, the events strip. A fourth (the earnings
+parser) took four attempts. Every one of them was caught by the operator
+reading actual output, not by me reasoning about it.
+
+**So: measure before defending, and inspect real rows before writing the
+parser.** Nothing on this list gets wired as a gate on the strength of a
+clean-looking table.
+
+---
+
 ## 🟣 F. Does the bot use the FULL session? (asked 2026-07-25)
 
 Short answer: **now yes on time, but no on trade count.**
