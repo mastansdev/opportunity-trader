@@ -115,13 +115,26 @@ def main():
     # _process_pending_manual_exits() docstring).
     market_data = MarketData()
 
-    # No news_gate/portfolio/sector_monitor/momentum_universe --
-    # every one is optional, and none of them matter for previewing
-    # the dashboard's data assembly/layout.
+    # No portfolio/sector_monitor/momentum_universe -- all optional and
+    # none of them matter for previewing layout.
     engine = Engine(circuit_monitor=circuit_monitor, market_data=market_data)
+
+    # The news gate IS wired, 2026-07-26. The "Today's Major Events"
+    # strip sits at the TOP of the dashboard now, and previewing a
+    # layout with its headline panel permanently empty is worse than
+    # not previewing at all. Read-only, no broker, works out of hours.
+    news_gate = None
+    try:
+        from core.news_gate import NewsGate
+        news_gate = NewsGate()
+        news_gate.refresh()
+    except Exception as exc:
+        warn(f"[PREVIEW] News gate unavailable ({exc}). The events "
+             f"strip will render empty.")
 
     dashboard_state = DashboardState(
         engine, market_data, master_loader,
+        news_gate=news_gate,
         get_feed_alive=lambda: None,
     )
 
