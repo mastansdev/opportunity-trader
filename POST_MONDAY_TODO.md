@@ -100,8 +100,12 @@ than the long side (9).
 
 ## ⚪ E. Never built (from the architecture deck)
 
-1. **Daily / higher-timeframe trend** — the bot cannot see yesterday. It
-   bought SRF long after a 10% two-day fall. Biggest structural gap.
+1. ~~**Daily / higher-timeframe trend**~~ — **data layer BUILT
+   2026-07-25** (`core/daily_store.py` + `core/trend_structure.py`,
+   see `DAILY_TREND.md`). The bot can now see the last 7 days'
+   higher-high / higher-low structure. **Still not wired as a gate** —
+   it records only, until we can measure whether STRONG_UP trades beat
+   RANGE trades. Backfill with `py tools/build_daily_history.py 30`.
 2. **Entry on the retest** instead of the breakout candle.
 3. **Relative strength vs its OWN sector** (we have vs market only).
 4. **Regime detection** (ADX + ATR percentile) — designed in
