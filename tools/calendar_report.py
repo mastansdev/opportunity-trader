@@ -15,8 +15,8 @@ Three questions, answered from stored data:
      results, dividends, splits, bonuses, buybacks, per symbol
      and across the universe?
 
-Read-only. Refresh the underlying data with
-`py tools/morning_universe.py`.
+Read-only. Refresh the underlying data with `py tools/refresh_calendars.py`
+(the morning tool refreshes it too).
 
 Author : H&M Opportunity Trader
 ==========================================================
@@ -95,7 +95,7 @@ def main():
             gap = (day - today).days
             decision(f"      {day}  ({gap:>3}d)  {desc}")
     elif calendar.count() == 0:
-        warn("  No holiday data. Run: py tools/morning_universe.py")
+        warn("  No holiday data. Run: py tools/refresh_calendars.py")
 
     # ---- 2. Results ---------------------------------------------
     results = ResultsCalendar()
@@ -122,7 +122,7 @@ def main():
                      + ("..." if len(names) > 10 else ""))
     else:
         warn("  No forthcoming results stored. Run: "
-             "py tools/morning_universe.py")
+             "py tools/refresh_calendars.py")
 
     # Who do we actually know the timing of?
     timed = [(s, results.typical_time(s))
@@ -151,7 +151,7 @@ def main():
         for action, n in counts.items():
             decision(f"      {action:<16} {n:>5}")
     else:
-        warn("  Memory is empty. Run: py tools/morning_universe.py")
+        warn("  Memory is empty. Run: py tools/refresh_calendars.py")
 
     busiest = memory.busiest_symbols(limit=10)
     if busiest:
