@@ -141,20 +141,6 @@
   .risk-row { display: flex; justify-content: space-between; align-items: flex-start; padding: 7px 8px; border-radius: 6px; background: var(--panel-2); margin-bottom: 6px; font-size: 12px; }
   .risk-row .reason { color: var(--text-dim); font-size: 11px; max-width: 60%; text-align: right; }
 
-  .events-note { font-size: 10px; color: var(--text-dim); letter-spacing: .3px; }
-  .events-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .events-table td { padding: 5px 8px; border-bottom: 1px solid var(--panel-2); vertical-align: top; }
-  .events-table tr:last-child td { border-bottom: none; }
-  .ev-sym { font-weight: 700; white-space: nowrap; width: 1%; }
-  .ev-type { width: 1%; white-space: nowrap; }
-  .ev-tag { font-size: 9px; font-weight: 700; letter-spacing: .3px; padding: 1px 6px;
-            border-radius: 4px; background: var(--panel-2); color: var(--text-dim); }
-  .ev-title { color: var(--text-dim); }
-  .ev-title a { color: var(--text-dim); text-decoration: none; }
-  .ev-title a:hover { text-decoration: underline; }
-  .ev-dir { white-space: nowrap; width: 1%; font-weight: 600; }
-  .ev-dir.dir-flat { color: var(--text-dim); }
-  .ev-time { color: var(--text-dim); white-space: nowrap; width: 1%; font-variant-numeric: tabular-nums; }
 
   .health-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 12px; }
   .health-item { display: flex; justify-content: space-between; padding: 6px 8px; background: var(--panel-2); border-radius: 6px; }
@@ -306,18 +292,6 @@
   </div>
 
   <div class="cards" id="statCards"></div>
-
-  <!-- ============ TODAY'S MAJOR EVENTS (top strip) ============
-       Operator, 2026-07-26: results / announcements / major events
-       only, at the top -- stock, what happened, direction, time.
-       Not the old everything-MID feed. -->
-  <div class="panel" style="margin-bottom:14px;">
-    <div class="panel-head-row">
-      <h2>Today's Major Events</h2>
-      <span class="events-note" id="eventsCounts"></span>
-    </div>
-    <div id="eventsStrip"></div>
-  </div>
 
   <!-- ============ Market Intelligence + Daily Guardrail ============ -->
   <div class="panel" style="margin-bottom:14px;">
@@ -816,38 +790,6 @@ function render(snap) {
         <span><strong>${escapeHtml(s.sector)}</strong></span>
         <span class="${pnlClass(s.net_pnl)}"><strong>${fmtINR(s.net_pnl)}</strong></span></div>`).join("")
     : `<span class="empty-note">No closed trades yet</span>`;
-
-  // -- TODAY'S MAJOR EVENTS (top strip) --
-  // Only results / orders / M&A / fundraise / capital actions /
-  // approvals / ratings / legal / disruption / distress / guidance,
-  // and only today. Four columns: stock, what happened, direction,
-  // time. No "blocks" column -- news cannot block a trade
-  // (config.ENABLE_NEWS_BLOCKING), so showing one would be a lie.
-  const news = snap.news_feed || { items: [], counts: {} };
-  const evItems = news.items || [];
-  const evTypes = (news.counts || {}).types || {};
-  document.getElementById("eventsCounts").textContent = evItems.length
-    ? Object.entries(evTypes).map(([k, v]) => `${k} ${v}`).join("  ·  ")
-    : "";
-  document.getElementById("eventsStrip").innerHTML = evItems.length
-    ? `<table class="events-table"><tbody>` + evItems.map(n => {
-        const dirClass = n.direction === 'bullish' ? 'dir-bull'
-                       : n.direction === 'bearish' ? 'dir-bear' : 'dir-flat';
-        const dirText = n.direction === 'bullish' ? '\u25B2 Bullish'
-                      : n.direction === 'bearish' ? '\u25BC Bearish' : '\u2014';
-        const title = escapeHtml(n.title || '');
-        const cell = n.link
-          ? `<a href="${escapeHtml(n.link)}" target="_blank" rel="noopener">${title}</a>`
-          : title;
-        return `<tr>
-          <td class="ev-sym">${escapeHtml(n.symbol || '')}</td>
-          <td class="ev-type"><span class="ev-tag">${escapeHtml(n.event || '')}</span></td>
-          <td class="ev-title">${cell}</td>
-          <td class="ev-dir ${dirClass}">${dirText}</td>
-          <td class="ev-time">${escapeHtml(n.time || '')}</td>
-        </tr>`;
-      }).join("") + `</tbody></table>`
-    : `<span class="empty-note">No major events yet today</span>`;
 
   // -- Top gainers / losers (replaces the old ORB watchlist, 2026-07-23) --
   const gl = snap.gainers_losers || { gainers: [], losers: [] };

@@ -119,8 +119,6 @@ from config import (
 )
 
 from trading.charges import round_trip_charges
-from config import NEWS_FEED_MAX_ITEMS
-from news_bot.major_events import classify_event
 
 try:
     import psutil
@@ -209,6 +207,10 @@ class DashboardState:
         self.engine = engine
         self.market_data = market_data
         self.master_loader = master_loader
+        # Kept on the object but NO LONGER DISPLAYED. The major-events
+        # strip was removed 2026-07-26 -- see the note on the operator's
+        # decision in dashboard/static/index.html. main.py still passes
+        # it, and re-adding a panel later needs no wiring change.
         self.news_gate = news_gate
         self.portfolio = portfolio
         self.sector_monitor = sector_monitor
@@ -317,7 +319,6 @@ class DashboardState:
             "closed_positions": self._build_closed_positions(closed_positions),
             "risk_filters": self._build_risk_filters(entry_blocked),
             "performance": performance,
-            "news_feed": self._build_news_feed(),
             "system_health": self._build_system_health(breadth["universe_size"]),
             # 2026-07-24 -- EXIT ALL popup's "Stop New Entries + Exit
             # All" option. Surfaced so the dashboard can show a
@@ -1025,64 +1026,6 @@ class DashboardState:
             "long_realized_net": round(long_net),
             "short_realized_net": round(short_net),
         }
-
-    def _build_news_feed(self):
-        """
-        MAJOR events only, today, newest first -- the strip at the top
-        of the screen.
-
-        Operator, 2026-07-26: "it must display intraday news,
-        announcements, results, any other major events/news not all
-        other mid news. that too on top of this display only recent one
-        with stockname news direction time".
-
-        So this is deliberately NOT the old "everything MID and HIGH"
-        feed. Two filters:
-
-          1. news_bot/major_events.py -- the headline must actively look
-             like results / order / M&A / fundraise / capital action /
-             approval / rating / legal / disruption / distress /
-             guidance. "Not obviously junk" is not enough.
-          2. TODAY only. This is an intraday screen; yesterday's filing
-             is history, and history lives in the reports.
-
-        Four fields per row, as asked: stock, what happened, direction,
-        time. `blocks` is gone -- news cannot block a trade at all now
-        (config.ENABLE_NEWS_BLOCKING), so a column claiming otherwise
-        would be a lie.
-        """
-        empty = {"items": [], "counts": {"total": 0, "types": {}}}
-        if self.news_gate is None:
-            return empty
-
-        today = datetime.now().strftime("%Y-%m-%d")
-        items, types = [], {}
-
-        for rec in self.news_gate.recent_feed():
-            title = rec.get("title") or ""
-            event = classify_event(title)
-            if event is None:
-                continue
-
-            stamp = str(rec.get("time") or "")
-            if stamp and not stamp.startswith(today):
-                continue
-
-            types[event] = types.get(event, 0) + 1
-            items.append({
-                "symbol": rec.get("symbol"),
-                "event": event,
-                "title": title,
-                "direction": rec.get("direction"),
-                "time": stamp[11:16] if len(stamp) >= 16 else stamp,
-                "classifier": rec.get("classifier", "keyword"),
-                "link": rec.get("link"),
-            })
-            if len(items) >= NEWS_FEED_MAX_ITEMS:
-                break
-
-        return {"items": items,
-                "counts": {"total": len(items), "types": types}}
 
     def _build_system_health(self, universe_size):
         """

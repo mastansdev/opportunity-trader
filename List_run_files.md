@@ -23,7 +23,7 @@ trading dashboard, and squares off at 15:15.
 
 | Gives you | |
 |---|---|
-| Live dashboard | http://127.0.0.1:8000 — **Today's Major Events** strip at the top |
+| Live dashboard | http://127.0.0.1:8000 |
 | Trades | logged to `data/trade_log.txt` |
 | Candles | recorded to `data/backtest_candles.db` |
 | Learning | every closed trade into the trade memory |
@@ -123,8 +123,11 @@ The 24/7 news engine. Own process, no broker, no market hours. Fetches
 RSS + NSE/BSE announcements forever and writes to the shared store.
 Run it locally in its own window, or deploy to Railway.
 
-*(The separate news dashboard on port 8050 was removed 2026-07-26 —
-major events now show at the top of the trading dashboard itself.)*
+**Nothing from it is displayed anywhere.** The news dashboard (port
+8050) and the major-events strip were both removed 2026-07-26 — RSS
+arrives already delayed, so none of it was usable for intraday
+decisions. The engine keeps collecting so the data exists when the paid
+classifier is bought.
 
 ---
 
@@ -135,7 +138,7 @@ major events now show at the top of the trading dashboard itself.)*
 | `py tools/diagnose_news.py` | news feed looks repetitive or wrong |
 | `py tools/inspect_results_feed.py` | earnings pulse is empty — shows NSE's raw fields |
 | `py tools/verify_master_database.py` | check every security ID against the live broker |
-| `py tools/dashboard_preview.py` | work on dashboard layout after 15:30 |
+| `py tools/dashboard_preview.py` | open the dashboard outside market hours (weekends, after 15:30) |
 | `py tools/clean_news.py` | one-time purge of old neutral news rows (already done) |
 
 ---
@@ -160,7 +163,7 @@ automatically.
 py -m pytest -q
 ```
 
-669 tests. Run after any code change — if this isn't green, don't trade.
+700 tests. Run after any code change — if this isn't green, don't trade.
 
 ---
 
