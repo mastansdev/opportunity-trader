@@ -112,6 +112,13 @@ than the long side (9).
    `REGIME_NOTES.md`, zero code.
 5. **Position IQ** — a position that re-thinks itself when news breaks
    mid-trade (`MONITOR → NEWS → RECALCULATE` from the deck).
+5b. **Narrow the earnings block using the pulse.** Data now exists
+   (`CALENDAR_AND_RESULTS.md`): of 107 names with a reliable reporting
+   time, **61% report after 15:15** — so the whole-day block costs us
+   those sessions for nothing. But 39% report DURING the session, some
+   as early as 11:30 (CARTRADE) and 12:09 (DIVISLAB). Change to "trade
+   normally, stop 30 min before the usual time" only after watching a
+   couple of real reporting days.
 6. **News decay / story clustering.**
 7. **Per-sector capital cap.**
 8. **Trade log:** market-time timestamps + per-exit P&L column.

@@ -82,33 +82,59 @@ Exactly the right framing, because the two halves are different problems:
   wire at 11:40 or 16:20 is announced nowhere — but it *is* observable
   after the fact, and companies are creatures of habit.
 
-So every filing's broadcast timestamp gets recorded. After a few
-quarters:
+Every results filing's broadcast timestamp gets recorded. Real output
+after four rounds of cleaning the input:
 
 ```
-TCS            ~16:05   (6 past results, +/-40min)
+RELIABLE reporting times (97 of 227 with history):
+    EMCURE       ~13:34   (3 past, spread   4min)
+    NEULANDLAB   ~16:12   (4 past, spread   7min)
+    ZYDUSWELL    ~12:47   (4 past, spread  13min)
+    TCS          ~15:52   (5 past, spread   7min)
+No usable pattern (130): COFORGE, NESCO, ACI, IOC, CHOLAFIN...
 ```
+
+**Reliable = 3+ results within a 2-hour spread.** Below that bar, the
+pulse says *"NO reliable pattern — do not rely on it"* instead of
+quoting a median. COFORGE genuinely filed at 21:54, 16:10, 23:35 and
+16:58 — a median of 17:06 for it is arithmetically true and useless.
+That's not a data problem to fix; it's a real property of the company.
 
 Median, not mean — one result that slipped to 22:00 shouldn't drag the
-estimate. The spread is shown so you can see how consistent a company
-actually is; a name with a 6-hour spread has no habit worth trusting.
+estimate.
 
-The first run reaches back **400 days**, so you get roughly four
-quarters immediately rather than waiting a year for it to become useful.
+### Getting this right took four passes
 
-### Why the time matters more than it sounds
+Worth writing down, because the mistake was the same each time: I
+filtered on text that *looked* right instead of checking what the field
+actually contained.
 
-Right now the earnings gate is blunt: a reporting stock is refused for
-the **whole session**. But if the numbers land at 16:20, the entire
-09:15–15:15 session was ordinary trading and we sat out for nothing.
+| Attempt | Result | What was wrong |
+|---|---|---|
+| `financial_results` endpoint | 91 rows/year | wrong endpoint — only late filings by delisted names |
+| match "result" in body | 15 per company | swept in AGM minutes filed at 23:56 |
+| filter follow-up documents | 6 per company | still counting "Updates" and "Shareholders meeting" |
+| **match the `desc` CATEGORY** | **~4 per company** | correct — plus drop exchange clarifications |
 
-Knowing the habitual time turns that into *"trade it normally, stop 30
-minutes before it usually reports."*
+**Lesson for next time: inspect real rows before writing the parser.**
 
-**That change is not made yet.** This only supplies the data. Once
-there's real timing history, we can measure whether reporting-day
-mornings actually behave like ordinary mornings — and change the rule on
-evidence rather than on the idea sounding good.
+### What the data says about the earnings block
+
+Of the 107 names with a reliable pulse:
+
+- **61% report after 15:15** — the whole session was ordinary trading
+  and the current whole-day block cost us the day for nothing
+- **39% report during the session**, some as early as **CARTRADE 11:30**
+  and **DIVISLAB 12:09**
+
+So the blunt block is wrong in both directions: too cautious for the
+majority, and for the earliest reporters it's the only thing protecting
+you from holding into the numbers.
+
+Narrowing it to *"trade normally, stop 30 minutes before the usual
+time"* is now supportable — **but it is not done yet.** It should be
+changed after watching a couple of reporting days, not on the strength
+of a table that looks clean.
 
 ---
 
