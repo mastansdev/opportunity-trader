@@ -1482,6 +1482,14 @@ class Engine:
         # square-off; only that hard flatten stops new positions.
         # (LAST_ENTRY_T is kept in config as a dormant dial in case a
         # cutoff is wanted later, but it no longer gates anything.)
+        #
+        # 2026-07-25 (operator decision): the ONE cutoff that does bite
+        # is STAGED_NO_ENTRY_AFTER, applied via _staged_position_cap()
+        # below. It was briefly set to 14:00 and is now 15:00 -- trade
+        # the full session, stop opening 15 minutes before the 15:15
+        # hard square-off. Rationale: on 2026-07-24 the two best entries
+        # of the day were 13:50 and 13:51, and nothing in the data marks
+        # 14:35 as different from 13:55.
 
         # Earnings-day entry exclusion, 2026-07-24 (config.py's
         # EARNINGS_CALENDAR docstring has the full sun/moon date-

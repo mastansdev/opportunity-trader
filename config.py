@@ -67,7 +67,13 @@ MARKET_CLOSE = "15:30"
 # forced square-off, which isn't a trade, it's a coin flip with a
 # deadline. Conservative first cut -- tighten toward midday later if
 # the data keeps supporting it.
-LAST_ENTRY_TIME = "14:30"
+# Revised 2026-07-25 (operator decision): trade the FULL session. The
+# 14:30 cutoff was a reasoned guess that cost us real trades -- on
+# 2026-07-24 the two best entries of the day were 13:50 and 13:51, and
+# nothing in the data says 14:35 is different from 13:55. Entries now
+# close at 15:00, leaving 15 minutes before the 15:15 hard square-off.
+# Kept in lockstep with STAGED_NO_ENTRY_AFTER.
+LAST_ENTRY_TIME = "15:00"
 
 # Any tick timestamped before MARKET_OPEN must never be
 # treated as live data for ORB building or entries. This is
@@ -724,9 +730,13 @@ ENABLE_STAGED_ENTRY = True
 STAGED_POSITION_LIMITS = [
     ("10:00", 3),    # before 10:00 -> max 3 concurrent
     ("11:00", 6),    # before 11:00 -> max 6
-    ("14:00", 10),   # before 14:00 -> max 10
+    ("15:00", 10),   # before 15:00 -> max 10
 ]
-STAGED_NO_ENTRY_AFTER = "14:00"   # no fresh entries after this
+# No fresh entries after this. Set to 15:00 (2026-07-25): the earlier
+# 14:00 cutoff threw away the afternoon, and on 2026-07-24 the two BEST
+# trades of the day were entered at 13:50 and 13:51. Positions still
+# flatten at SQUARE_OFF_TIME (15:15) regardless.
+STAGED_NO_ENTRY_AFTER = "15:00"
 
 # --- One trade per stock per day --------------------------
 # A symbol gets ONE attempt per direction per day. Kills the

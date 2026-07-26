@@ -62,8 +62,9 @@ Two memories, both consulted before any decision:
 |---|---|
 | 09:30–10:00 | **3** |
 | 10:00–11:00 | **6** |
-| 11:00–14:00 | **10** |
-| after 14:00 | **no new entries** |
+| 11:00–15:00 | **10** |
+| after 15:00 | **no new entries** (positions still managed) |
+| 15:15 | hard square-off |
 
 `STAGED_POSITION_LIMITS`. On 2026-07-24, 11 of 27 entries fired in one
 minute at 09:34 — the whole book committed at the noisiest moment.
