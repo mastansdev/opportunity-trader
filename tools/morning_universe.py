@@ -185,6 +185,29 @@ def main():
     decision(f"  Bhavcopy               : {bhav_date:%Y-%m-%d} "
              f"({len(bhav_rows)} rows)")
 
+    # Keep the daily candle before anything else touches the rows. The
+    # bhavcopy's OpnPric/HghPric/LwPric/ClsPric ARE a daily bar -- we
+    # were reading three columns for the SUBSCRIBE decision and throwing
+    # the rest away. Storing them is what lets the bot finally see
+    # YESTERDAY (core/trend_structure.py). Dedup is on (date, symbol),
+    # so running this twice in a morning stores nothing the second time.
+    try:
+        from core.daily_store import DailyStore, bars_from_bhavcopy
+        store = DailyStore()
+        written = store.upsert_many(
+            bars_from_bhavcopy(bhav_rows, bhav_date.strftime("%Y-%m-%d"))
+        )
+        st = store.stats()
+        decision(f"  Daily candles          : +{written} today, "
+                 f"{st['bars']:,} bars over {st['days']} day(s)")
+        if st["days"] < 8:
+            warn(f"  Only {st['days']} day(s) of daily history -- a 7-day "
+                 f"structure read needs 8. Run: "
+                 f"py tools/build_daily_history.py")
+    except Exception as exc:
+        warn(f"[MORNING] Daily-candle store failed ({exc}). Subscribe "
+             f"list is unaffected.")
+
     bhav_index = build_bhav_index(bhav_rows)
     excluded = fetch_excluded_symbols()
     bands = fetch_price_bands(bhav_date)
