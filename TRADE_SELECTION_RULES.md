@@ -124,8 +124,12 @@ broke out to a full book and were simply dropped.*
 
 - Realized loss ≤ **−₹8,000** → no more entries (`DAILY_MAX_LOSS_RS`)
 - Open positions are still managed normally after a halt
-- **No daily profit target** — a ₹50k/day goal is 5%/day, structurally
-  unreachable, and chasing it forces the overtrading that kills accounts
+- Realized profit ≥ **+₹30,000** → no more entries
+  (`DAILY_PROFIT_TARGET_RS`, set 2026-07-26). A **ceiling, not a
+  target**: it can only make the bot trade less, never harder. Open
+  positions are still managed normally.
+  *(This list previously said no such switch existed — it did, at
+  ₹50,000.)*
 
 ---
 

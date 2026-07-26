@@ -88,8 +88,17 @@ minute at 09:34 — the whole book committed at the noisiest moment.
 
 - Daily realized loss halt: **−₹8,000** (`DAILY_MAX_LOSS_RS`)
 - Max 10 concurrent, no scale-in (pyramiding declined)
-- **No daily profit target.** A ₹50k/day goal = 5%/day = structurally
-  unreachable, and chasing it forces the overtrading that kills accounts
+- **Daily profit CEILING: +₹30,000** (`DAILY_PROFIT_TARGET_RS`). Once
+  realized P&L reaches it, no new entries; open positions are managed
+  normally. It is not a target — nothing makes the bot trade harder or
+  size up to reach it, it can only ever cause *less* trading. (This
+  document previously claimed no such switch existed. It always did,
+  at ₹50,000; corrected 2026-07-26.)
+- **Not a per-trade target.** Those were measured and they destroy
+  expectancy — the ₹1,100 target gave 53.6% wins and −₹15,714.
+- What the ceiling cannot do is *produce* ₹30,000. At +0.17R and ₹800
+  risk, net is ≈₹19/trade; at the largest size ₹10L can margin, ≈₹5,000
+  on a 50-trade day. ₹30k needs ~5.5× the edge, not more size.
 
 ## 7. Data recording (always on)
 

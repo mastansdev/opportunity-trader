@@ -781,7 +781,24 @@ DAILY_MAX_LOSS_RS = 8000.0
 # reaches this, stop taking new entries -- the day's goal is met,
 # don't hand it back. Same "existing positions still managed
 # normally" semantics as the loss switch above.
-DAILY_PROFIT_TARGET_RS = 50_000.0
+DAILY_PROFIT_TARGET_RS = 30_000.0
+# 2026-07-26: operator set this to Rs 30,000 (was 50,000).
+#
+# READ THIS BEFORE CHANGING IT AGAIN. This is a CEILING, not a target.
+# It can only ever make the bot trade LESS: once realized P&L reaches
+# the number, no new entries open and existing positions are managed to
+# their normal exits. Nothing anywhere makes the bot trade harder,
+# size up, or lower its standards to REACH it. That distinction is the
+# whole reason this is safe -- FINDINGS.md 4 measured what a real
+# target does: a Rs 1,100 per-trade target produced the highest win
+# rate (53.6%) and the worst money (-Rs 15,714), because it capped the
+# winners and left the losers running.
+#
+# What it CANNOT do is produce Rs 30,000. On Rs 10L capital, at the
+# measured +0.17R expectancy and Rs 800 risk, net is about Rs 19 a
+# trade; even at the largest size the margin allows the ceiling is
+# roughly Rs 5,000 on a 50-trade day. Reaching Rs 30,000 needs the
+# EDGE to improve about 5.5x, not the size. See STRATEGY.md 6.
 
 # --- Breakout-quality margin (part of items 8/9: signal quality) ---
 # A structural close must clear the ORB boundary by at least this
