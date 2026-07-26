@@ -34,14 +34,25 @@ from core.logger import decision, warn  # noqa: E402
 from core.universe_builder import fetch_bhavcopy  # noqa: E402
 
 
-def build(days=30, store=None):
+# A weekday with no bhavcopy is nearly always a trading holiday. But if
+# it is within the last few days it might simply be that NSE has not
+# published yet, so those stay retryable instead of being written off.
+RETRY_WINDOW_DAYS = 4
+
+
+def build(days=30, store=None, today=None):
     store = store or DailyStore()
     have = set(store.dates())
-    decision(f"[DAILY] Already stored: {len(have)} day(s).")
+    known_empty = store.no_data_dates()
+    decision(f"[DAILY] Already stored: {len(have)} day(s)."
+             + (f" Known non-trading weekdays: {len(known_empty)}."
+                if known_empty else ""))
 
     added_days = 0
-    day = datetime.now()
+    today = today or datetime.now()
+    day = today
     checked = 0
+    holidays = []
     # Walk back over calendar days, skipping weekends, until we've
     # collected `days` trading days. The 2x cushion covers holidays.
     while added_days < days and checked < days * 2 + 20:
@@ -53,15 +64,28 @@ def build(days=30, store=None):
         if key in have:
             added_days += 1
             continue
+        if key in known_empty:
+            # Already established there is no session for this date --
+            # don't download it again, and don't warn about it again.
+            continue
 
-        rows = fetch_bhavcopy(date=day, folder="data")
+        rows = fetch_bhavcopy(date=day, folder="data", quiet=True)
         if not rows:
-            continue                       # holiday, or a failed download
+            # Old enough that NSE would certainly have published by now?
+            # Then it was a holiday. Record it and stop asking.
+            if (today - day).days > RETRY_WINDOW_DAYS:
+                store.mark_no_data(key)
+                holidays.append(key)
+            continue
         bars = bars_from_bhavcopy(rows, key)
         written = store.upsert_many(bars)
         added_days += 1
         decision(f"[DAILY] {key}: {written} bars stored "
                  f"({len(bars)} EQ scrips in the file).")
+
+    if holidays:
+        decision(f"[DAILY] No session on {', '.join(holidays)} "
+                 f"(trading holiday) -- recorded, won't be retried.")
 
     return store.stats()
 

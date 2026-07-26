@@ -73,6 +73,15 @@ class DailyStore:
             Column("turnover", Float),
             UniqueConstraint("date", "symbol", name="uq_daily_date_symbol"),
         )
+        # Weekdays NSE published no bhavcopy for -- trading holidays,
+        # almost always. Remembered so the backfill stops re-downloading
+        # and re-warning about the same date on every run. (2026-06-26
+        # is the first: a Friday with 06-25 and 06-29 both present.)
+        self.no_data = Table(
+            "no_data_dates", self.md,
+            Column("date", String(10), primary_key=True),
+            Column("note", String(128)),
+        )
         self.md.create_all(self.engine)
 
     # --------------------------------------------------
@@ -124,6 +133,16 @@ class DailyStore:
         """{symbol: [bars]} -- one query per symbol, but the whole point
         is that this runs once before the open, not per tick."""
         return {s: self.history(s, days=days, upto=upto) for s in symbols}
+
+    def mark_no_data(self, date, note="no bhavcopy -- trading holiday?"):
+        """Remember that this weekday has no bhavcopy, so we stop asking."""
+        with self.engine.begin() as conn:
+            stmt = sqlite_insert(self.no_data).values(date=date, note=note)
+            conn.execute(stmt.on_conflict_do_nothing(index_elements=["date"]))
+
+    def no_data_dates(self):
+        with self.engine.begin() as conn:
+            return {r[0] for r in conn.execute(select(self.no_data.c.date))}
 
     def dates(self):
         """Every trading date stored, ascending."""

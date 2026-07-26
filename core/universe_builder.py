@@ -148,18 +148,24 @@ def _num(value):
         return None
 
 
-def fetch_bhavcopy(date=None, folder="data"):
+def fetch_bhavcopy(date=None, folder="data", quiet=False):
     """Download one day's equity bhavcopy. Returns a list of dicts, or
     [] on any failure (never raises -- this is a pre-market convenience,
-    not a trading dependency)."""
+    not a trading dependency).
+
+    quiet=True suppresses the warning. The backfill walks back over past
+    weekdays and a trading holiday simply has no file, which is normal
+    and not worth shouting about -- it decides for itself whether a miss
+    is a holiday or a real problem (see tools/build_daily_history.py)."""
     date = date or datetime.now()
     try:
         from nse import NSE
         with NSE(download_folder=folder) as n:
             path = n.equityBhavcopy(date=date, folder=folder)
     except Exception as exc:
-        warn(f"[UNIVERSE] Bhavcopy fetch failed for "
-             f"{date:%Y-%m-%d} ({exc}). Try an earlier trading day.")
+        if not quiet:
+            warn(f"[UNIVERSE] Bhavcopy fetch failed for "
+                 f"{date:%Y-%m-%d} ({exc}). Try an earlier trading day.")
         return []
 
     rows = []
