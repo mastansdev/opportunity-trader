@@ -324,7 +324,14 @@ def refresh(calendar=None, daily_store=None, force=False):
     except Exception as exc:
         diagnostic(f"[CALENDAR] Could not read inferred holidays: {exc}")
 
+    # "0 from NSE" is ambiguous on its own -- it means either "skipped,
+    # already have this year" or "the download failed". Say which.
+    if n_nse:
+        source = f"{n_nse} fetched from NSE"
+    elif calendar.covers_year():
+        source = "NSE list already held for this year, not re-fetched"
+    else:
+        source = "NSE list NOT available -- weekends only until it is"
     decision(f"[CALENDAR] {calendar.count()} holidays known "
-             f"({n_nse} from NSE, {n_inferred} inferred from missing "
-             f"bhavcopies).")
+             f"({source}; {n_inferred} inferred from missing bhavcopies).")
     return calendar

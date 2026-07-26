@@ -380,22 +380,26 @@ def fetch_filed_results(calendar, days_back=400, known_symbols=None,
                         chunk_days=30, today=None):
     """
     PAST filings, which carry the broadcast timestamp -- the earnings
-    pulse. `broadCastDate` looks like "01-Jul-2026 11:00:51", i.e. a real
-    time of day, which is exactly what we need.
+    pulse.
 
-    FETCHED IN CHUNKS. A single 400-day request came back with just 90
-    rows, all stragglers from defunct companies filing 2018-19 accounts
-    (IL&FSTRANS, Videocon) -- the endpoint clearly caps or paginates a
-    wide window. Month-sized slices get the real volume.
+    SOURCE: NSE's CORPORATE ANNOUNCEMENTS feed, not financial_results.
 
-    Reaches back a year by default so a first run picks up four quarters
-    at once instead of waiting a year to become useful.
+    financial_results looked like the obvious choice and was tried
+    first. It returns almost nothing: 91 rows for a whole year even when
+    walked in 30-day chunks, and every one of them a late filing of
+    2018-19 accounts by a delisted name (IL&FSTRANS, Videocon). Not one
+    was in our 750. Chunking did not help, so the endpoint is simply not
+    a usable history of who reported when.
+
+    corporate-announcements IS that history. Every results filing is
+    broadcast there, tagged with `an_dt` -- a real timestamp like
+    "25-Jun-2026 16:39:17" -- which is exactly the field the pulse needs.
+    The trade-off is that it carries EVERY announcement, so we filter on
+    the subject text (looks_like_results).
     """
     today = _as_date(today) or datetime.now().date()
     stored = 0
-    seen_rows = 0
-    matched = 0
-    no_date = 0
+    seen = matched = no_date = not_results = 0
     sample_keys = []
 
     start = today - timedelta(days=days_back)
@@ -404,56 +408,66 @@ def fetch_filed_results(calendar, days_back=400, known_symbols=None,
         try:
             from nse import NSE
             with NSE(download_folder="data") as n:
-                rows = n.financial_results(
-                    segment="equities", period="quarterly",
+                rows = n.announcements(
+                    index="equities",
                     from_date=datetime.combine(start, datetime.min.time()),
                     to_date=datetime.combine(end, datetime.min.time())) or []
         except Exception as exc:
-            warn(f"[RESULTS] Filings {start}..{end} unavailable ({exc}).")
+            warn(f"[RESULTS] Announcements {start}..{end} unavailable "
+                 f"({exc}).")
             rows = []
 
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            seen_rows += 1
+            seen += 1
             if not sample_keys:
                 sample_keys = sorted(row.keys())
+
             symbol = str(row.get("symbol") or "").strip().upper()
             if not symbol:
                 continue
             if known_symbols and symbol not in known_symbols:
                 continue
+
+            subject = " ".join(str(row.get(k) or "") for k in
+                               ("desc", "attchmntText", "smIndustry",
+                                "subject"))
+            if not looks_like_results(subject):
+                not_results += 1
+                continue
             matched += 1
 
             broadcast = _as_datetime(
-                row.get("broadCastDate") or row.get("broadcastDate")
-                or row.get("filingDate") or row.get("creationDate"))
-            day = (broadcast.date() if broadcast
-                   else _as_date(row.get("broadCastDate")
-                                 or row.get("filingDate")))
+                row.get("an_dt") or row.get("sort_date")
+                or row.get("exchdisstime"))
+            day = broadcast.date() if broadcast else _as_date(
+                row.get("an_dt") or row.get("sort_date"))
             if day is None:
                 no_date += 1
                 continue
+
             if calendar.remember(symbol, day,
-                                 purpose="Quarterly Results (filed)",
-                                 relating_to=row.get("relatingTo") or "",
-                                 broadcast_at=broadcast, source="NSE_FR"):
+                                 purpose=subject.strip()[:200] or
+                                 "Financial Results (announced)",
+                                 broadcast_at=broadcast, source="NSE_ANN"):
                 stored += 1
 
         start = end
 
-    # Explain a zero precisely, because the three causes need three
-    # different fixes and all look identical from the outside.
-    if seen_rows and not matched:
-        warn(f"[RESULTS] NSE returned {seen_rows} filings but NONE were in "
-             f"our universe -- they are stragglers from delisted names. "
-             f"Not a parsing problem.")
-    elif matched and not stored:
-        warn(f"[RESULTS] {matched} filings matched our universe but none "
+    # Explain a zero precisely -- the causes need different fixes and all
+    # look identical from outside.
+    if not seen:
+        warn("[RESULTS] NSE returned no announcements at all for the "
+             "window.")
+    elif not matched:
+        warn(f"[RESULTS] {seen} announcements seen, none were results "
+             f"filings for our universe ({not_results} were other "
+             f"subjects). Keys seen: {sample_keys}")
+    elif not stored:
+        warn(f"[RESULTS] {matched} results announcements matched but none "
              f"could be dated ({no_date} unparseable). Field names have "
              f"probably changed. Keys seen: {sample_keys}")
-    elif not seen_rows:
-        warn("[RESULTS] NSE returned no filings at all for the window.")
     return stored
 
 

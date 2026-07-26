@@ -33,46 +33,76 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.logger import decision, warn  # noqa: E402
 
 
+def _show(title, rows, want):
+    decision("")
+    decision("-" * 62)
+    decision(f"  {title}: {len(rows)} rows")
+    decision("-" * 62)
+    if not rows:
+        decision("  (nothing returned)")
+        return
+    first = rows[0] if isinstance(rows[0], dict) else {}
+    for key in sorted(first):
+        decision(f"      {key:<24} = {str(first[key])[:52]}")
+    decision(f"  Looking for: {want}")
+
+
 def main():
     decision("=" * 62)
-    decision("  RAW RESULTS FEED")
+    decision("  RAW RESULTS FEEDS")
     decision("=" * 62)
+
+    frm = datetime.now() - timedelta(days=30)
+    to = datetime.now()
 
     try:
         from nse import NSE
-        with NSE(download_folder="data") as n:
-            rows = n.financial_results(
-                segment="equities", period="quarterly",
-                from_date=datetime.now() - timedelta(days=400),
-                to_date=datetime.now()) or []
     except Exception as exc:
-        warn(f"  Fetch failed: {exc}")
+        warn(f"  nse library unavailable: {exc}")
         return 1
 
-    decision(f"  Rows returned: {len(rows)}")
-    if not rows:
-        decision("  NSE returned nothing for the last 400 days. Either the "
-                 "endpoint moved or it needs different parameters -- this "
-                 "is NOT a parsing problem.")
-        return 0
+    # 1. corporate announcements -- the feed we actually use
+    try:
+        with NSE(download_folder="data") as n:
+            announcements = n.announcements(
+                index="equities", from_date=frm, to_date=to) or []
+    except Exception as exc:
+        warn(f"  announcements fetch failed: {exc}")
+        announcements = []
+    _show("corporate-announcements (last 30 days)", announcements,
+          "a SYMBOL, a subject mentioning 'results', and an_dt with a "
+          "time of day")
 
-    first = rows[0] if isinstance(rows[0], dict) else {}
-    decision(f"  Field names ({len(first)}):")
-    for key in sorted(first):
-        value = str(first[key])
-        decision(f"      {key:<28} = {value[:56]}")
+    if announcements:
+        results_rows = [
+            r for r in announcements if isinstance(r, dict)
+            and any(m in " ".join(str(r.get(k) or "") for k in
+                                  ("desc", "attchmntText", "subject")).lower()
+                    for m in ("result", "financial statement"))
+        ]
+        decision(f"  Of those, {len(results_rows)} look like results "
+                 f"filings.")
+        for row in results_rows[:5]:
+            decision(f"      {str(row.get('symbol')):<14} "
+                     f"{str(row.get('an_dt')):<22} "
+                     f"{str(row.get('desc'))[:40]}")
+
+    # 2. financial_results -- kept only to show WHY it is not used
+    try:
+        with NSE(download_folder="data") as n:
+            filings = n.financial_results(
+                segment="equities", period="quarterly",
+                from_date=frm, to_date=to) or []
+    except Exception as exc:
+        warn(f"  financial_results fetch failed: {exc}")
+        filings = []
+    _show("financial_results (last 30 days) -- NOT used", filings,
+          "reference only: this endpoint returns ~91 rows a YEAR, all "
+          "late filings by delisted names")
 
     decision("")
-    decision("  Two more rows, raw:")
-    for row in rows[1:3]:
-        decision("      " + json.dumps(row, default=str)[:400])
-
-    decision("")
-    decision("  We are looking for: a SYMBOL field, and a field holding "
-             "the broadcast/filing timestamp WITH a time of day (not just "
-             "a date). If every date field is date-only, the earnings "
-             "pulse cannot be built from this endpoint and we need "
-             "another source.")
+    decision("  Paste this back if the pulse is still empty after a "
+             "refresh.")
     return 0
 
 
