@@ -168,11 +168,14 @@ def test_earnings_pulse_needs_history_before_it_says_anything(results):
 
 
 def test_earnings_pulse_uses_the_MEDIAN_not_the_mean(results):
-    """One result that slipped to 22:00 must not drag the estimate."""
-    for day, hh, mm in [(10, 16, 0), (11, 16, 10), (12, 15, 50),
-                        (13, 22, 0)]:
-        results.remember("HABIT", date(2026, 1, day),
-                         broadcast_at=datetime(2026, 1, day, hh, mm))
+    """One result that slipped to 22:00 must not drag the estimate.
+
+    Four quarters, because observed_times() takes at most one sample per
+    calendar quarter -- a company reports four times a year."""
+    for month, hh, mm in [(1, 16, 0), (4, 16, 10), (7, 15, 50),
+                          (10, 22, 0)]:
+        results.remember("HABIT", date(2026, month, 10),
+                         broadcast_at=datetime(2026, month, 10, hh, mm))
     t = results.typical_time("HABIT")
     assert t["samples"] == 4
     assert t["hhmm"] == "16:05"          # median of 950,960,970,1320
@@ -180,11 +183,63 @@ def test_earnings_pulse_uses_the_MEDIAN_not_the_mean(results):
 
 
 def test_pulse_reads_in_plain_english(results):
-    for day in (10, 11, 12):
-        results.remember("TCS", date(2026, 1, day),
-                         broadcast_at=datetime(2026, 1, day, 16, 0))
+    for month in (1, 4, 7):
+        results.remember("TCS", date(2026, month, 10),
+                         broadcast_at=datetime(2026, month, 10, 16, 0))
     assert "usually reports around 16:00" in results.pulse("TCS")
     assert "3 past results" in results.pulse("TCS")
+
+
+def test_only_ONE_sample_counts_per_quarter(results):
+    """
+    INFY, real data 2026-07-26: fifteen "results" in 400 days, including
+    2026-04-16, 04-23 and 04-24 -- three in one quarter. Those extras are
+    follow-up filings; counting them would weight Q2 four times as
+    heavily as any other quarter.
+    """
+    for day in (16, 23, 24):
+        results.remember("INFY", date(2026, 4, day),
+                         broadcast_at=datetime(2026, 4, day, 16 + day % 3, 0))
+    results.remember("INFY", date(2026, 7, 23),
+                     broadcast_at=datetime(2026, 7, 23, 16, 20))
+
+    assert len(results.observed_times("INFY")) == 2      # Q2 and Q3
+    # ...and the EARLIEST of the April cluster is the one kept
+    assert results.observed_times("INFY")[0] == 17 * 60  # the 16th, 17:00
+
+
+def test_the_earliest_broadcast_of_the_day_wins(results):
+    """Results day carries several documents -- the numbers first, then
+    the presentation and the transcript. The first is when the market
+    learned."""
+    results.remember("X", date(2026, 4, 10),
+                     broadcast_at=datetime(2026, 4, 10, 20, 0))
+    results.remember("X", date(2026, 4, 10),
+                     broadcast_at=datetime(2026, 4, 10, 16, 5))
+    results.remember("X", date(2026, 4, 10),
+                     broadcast_at=datetime(2026, 4, 10, 22, 30))
+    assert results.history_for("X")[0]["broadcast_at"] == \
+        datetime(2026, 4, 10, 16, 5)
+
+
+def test_follow_up_documents_are_not_treated_as_results():
+    """The 15-INFY bug. Each of these contains 'result' but is filed
+    hours or days after the numbers."""
+    for noise in (
+        "Newspaper Publication of Financial Results",
+        "Investor Presentation on Q1 Results",
+        "Transcript of Earnings Call on results",
+        "Audio recording of the results conference call",
+        "Intimation of board meeting for results",
+        "Press Release - Q2 Results",
+        "Corrigendum to financial results",
+    ):
+        assert looks_like_results(noise) is False, noise
+
+    # ...while the filing itself still passes
+    for real in ("Financial Results", "Unaudited Financial Results",
+                 "Audited Financial Statement for the quarter"):
+        assert looks_like_results(real) is True, real
 
 
 def test_events_without_a_time_are_excluded_from_the_pulse(results):

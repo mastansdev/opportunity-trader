@@ -86,9 +86,32 @@ def in_results_season(day=None):
     return day.month in RESULTS_SEASON_MONTHS
 
 
+# ...but "result" appears in a great many announcements that are NOT the
+# filing itself. Caught on the first live run, 2026-07-26: INFY came back
+# with FIFTEEN "results" in 400 days -- a company reports four times a
+# year. The extras are newspaper publications of the results, investor
+# presentations about them, earnings-call transcripts and audio, and
+# board-meeting outcome intimations. Each lands hours or days after the
+# numbers, which is why the spreads were absurd (COFORGE +/-1409 min --
+# a 23-hour "habit").
+#
+# So anything carrying one of these is a FOLLOW-UP document, not the
+# broadcast of the numbers.
+_NOISE_MARKERS = (
+    "newspaper", "publication", "published", "advertisement",
+    "presentation", "transcript", "audio", "video", "recording",
+    "conference call", "earnings call", "analyst", "investor meet",
+    "schedule", "intimation of", "press release", "clarification",
+    "corrigendum", "revised",
+)
+
+
 def looks_like_results(purpose):
+    """True only for the filing that carries the numbers."""
     text = str(purpose or "").lower()
-    return any(marker in text for marker in _RESULT_MARKERS)
+    if not any(marker in text for marker in _RESULT_MARKERS):
+        return False
+    return not any(noise in text for noise in _NOISE_MARKERS)
 
 
 def _as_date(value):
@@ -186,9 +209,23 @@ class ResultsCalendar:
                       broadcast_at=_as_datetime(broadcast_at),
                       source=source)
         update = {k: v for k, v in values.items()
-                  if k not in ("symbol", "results_date") and v}
+                  if k not in ("symbol", "results_date", "broadcast_at")
+                  and v}
         with self.engine.begin() as conn:
             stmt = sqlite_insert(self.events).values(values)
+            if values["broadcast_at"] is not None:
+                # Keep the EARLIEST broadcast of the day. Several
+                # documents get filed on results day -- the numbers
+                # first, then the presentation, the transcript, the
+                # newspaper copy. The first one is when the market
+                # learned; the rest are noise that would drag the
+                # estimate later. COALESCE handles the NULL case: with
+                # nothing stored yet, min(new, new) is just the new one.
+                update["broadcast_at"] = func.min(
+                    func.coalesce(self.events.c.broadcast_at,
+                                  stmt.excluded.broadcast_at),
+                    stmt.excluded.broadcast_at,
+                )
             stmt = (stmt.on_conflict_do_update(
                 index_elements=["symbol", "results_date"], set_=update)
                 if update else
@@ -251,13 +288,26 @@ class ResultsCalendar:
     # --------------------------------------------------
 
     def observed_times(self, symbol):
-        """Past broadcast times for one symbol, as minutes past midnight."""
-        out = []
+        """
+        Past broadcast times for one symbol, minutes past midnight, at
+        most ONE PER CALENDAR QUARTER.
+
+        A company reports four times a year. If the same quarter
+        contributes several samples, they are follow-up filings that
+        slipped through the subject filter -- and they would silently
+        weight that quarter more heavily than the others. Earliest in
+        each quarter wins, for the same reason as in remember().
+        """
+        by_quarter = {}
         for row in self.history_for(symbol):
             at = row.get("broadcast_at")
-            if isinstance(at, datetime):
-                out.append(at.hour * 60 + at.minute)
-        return out
+            if not isinstance(at, datetime):
+                continue
+            key = (at.year, (at.month - 1) // 3)
+            if key not in by_quarter or at < by_quarter[key]:
+                by_quarter[key] = at
+        return [at.hour * 60 + at.minute
+                for at in (by_quarter[k] for k in sorted(by_quarter))]
 
     def typical_time(self, symbol, min_samples=2):
         """
