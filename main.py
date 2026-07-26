@@ -49,6 +49,7 @@ from core.trade_memory import TradeMemory
 from core import corporate_actions
 from config import ENABLE_INDEX_FEED, INDEX_INSTRUMENTS, ENABLE_CANDLE_RECORDING
 from config import ENABLE_STOCK_MEMORY, ENABLE_TRADE_MEMORY
+from config import EARNINGS_CALENDAR
 from core.logger import decision, diagnostic, warn
 from core import state_store
 from core.news_gate import NewsGate
@@ -279,11 +280,52 @@ def main():
         except Exception as exc:
             warn(f"[LEARN] Trade memory unavailable this session: {exc}")
 
+    # ---- Market calendar + results calendar -------------------------
+    # Operator, 2026-07-26: the bot should know trading holidays, and
+    # which stock reports on which date. Both are read ONCE here and
+    # collapsed into plain in-memory structures -- no database touches
+    # the tick path. Both fail open: an unreachable NSE just means the
+    # bot knows nothing extra, which is exactly today's behaviour.
+    earnings_calendar = dict(EARNINGS_CALENDAR)
+    try:
+        from core.market_calendar import refresh as refresh_calendar
+        market_calendar = refresh_calendar()
+        today = datetime.now().date()
+        if not market_calendar.is_trading_day(today):
+            why = market_calendar.reason(today)
+            nxt = market_calendar.next_trading_day(today)
+            warn(f"[CALENDAR] {today} is NOT a trading day ({why}). "
+                 f"Next session: {nxt}. Starting anyway -- no ticks will "
+                 f"arrive; stop with Ctrl-C if this was unintended.")
+    except Exception as exc:
+        warn(f"[CALENDAR] Market calendar unavailable ({exc}).")
+
+    try:
+        from core.results_calendar import refresh as refresh_results
+        results = refresh_results(known_symbols=set(resolved))
+        # Live NSE board meetings OVERLAY the hand-typed config dict --
+        # union, not replacement, so a name typed in by hand is never
+        # lost just because NSE's feed missed it.
+        for day, symbols in results.as_calendar_dict().items():
+            earnings_calendar[day] = set(
+                earnings_calendar.get(day, ())) | set(symbols)
+        reporting_today = earnings_calendar.get(
+            datetime.now().date().isoformat(), ())
+        if reporting_today:
+            decision(f"[RESULTS] {len(reporting_today)} stock(s) report "
+                     f"today -- no entries in them: "
+                     + ", ".join(sorted(reporting_today)[:12])
+                     + ("..." if len(reporting_today) > 12 else ""))
+    except Exception as exc:
+        warn(f"[RESULTS] Results calendar unavailable ({exc}). Falling "
+             f"back to config.EARNINGS_CALENDAR only.")
+
     engine = Engine(
         news_gate=news_gate, portfolio=portfolio, sector_monitor=sector_monitor,
         momentum_universe=momentum_universe, circuit_monitor=circuit_monitor,
         market_data=market_data, candle_recorder=candle_recorder,
         stock_memory=stock_memory, trade_memory=trade_memory,
+        earnings_calendar=earnings_calendar,
     )
 
     (

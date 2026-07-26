@@ -235,6 +235,34 @@ def main():
         })
         rows.append(blank)
 
+    # ---- market calendar + results calendar -------------------------
+    # Both fail open and neither can affect the SUBSCRIBE decision --
+    # they are refreshed here purely because this is the one command
+    # that already runs every morning.
+    try:
+        from core.market_calendar import refresh as refresh_calendar
+        cal = refresh_calendar()
+        nxt = cal.next_trading_day(datetime.now().date())
+        upcoming_holidays = cal.upcoming(days=30)
+        if upcoming_holidays:
+            decision("  Holidays within 30 days: "
+                     + ", ".join(f"{d} ({desc})"
+                                 for d, desc in upcoming_holidays[:4]))
+        decision(f"  Next trading session   : {nxt}")
+    except Exception as exc:
+        warn(f"[MORNING] Market calendar refresh failed ({exc}).")
+
+    try:
+        from core.results_calendar import refresh as refresh_results
+        res = refresh_results(known_symbols=known)
+        today_names = res.symbols_on(datetime.now().date())
+        if today_names:
+            decision(f"  Reporting TODAY ({len(today_names)}): "
+                     + ", ".join(sorted(today_names)[:10])
+                     + ("..." if len(today_names) > 10 else ""))
+    except Exception as exc:
+        warn(f"[MORNING] Results calendar refresh failed ({exc}).")
+
     rows, summary = apply(rows, bhav_index, excluded=excluded, bands=bands,
                           corporate_actions=actions,
                           min_turnover=MIN_TURNOVER_RS)

@@ -218,6 +218,72 @@ class StockMemory:
                 select(func.count()).select_from(self.actions)
             ).scalar_one()
 
+    # ----------------------------------------------------------
+    # HISTORY -- "how many times has this stock done X?"
+    # ----------------------------------------------------------
+    # Operator, 2026-07-26: "how many times stocks are releasing their
+    # results & dividend/buyback/splits announcing, or any other
+    # announcements in memory". The memory was only ever queried for
+    # TODAY; everything it had already stored about the past was
+    # invisible. These are read-only views over the same table -- no new
+    # data, no new fetching, just the ability to look backwards.
+
+    def history_for(self, symbol):
+        """Every fact ever stored for one symbol, oldest ex-date first."""
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                select(self.actions).where(
+                    self.actions.c.symbol == str(symbol).strip().upper()
+                ).order_by(self.actions.c.ex_date)
+            ).all()
+        return [dict(r._mapping) for r in rows]
+
+    def counts_for(self, symbol):
+        """{action_type: n} for one symbol."""
+        from sqlalchemy import func
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                select(self.actions.c.action_type, func.count())
+                .where(self.actions.c.symbol == str(symbol).strip().upper())
+                .group_by(self.actions.c.action_type)
+            ).all()
+        return {r[0]: r[1] for r in rows}
+
+    def event_counts(self):
+        """{action_type: n} across the whole universe."""
+        from sqlalchemy import func
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                select(self.actions.c.action_type, func.count())
+                .group_by(self.actions.c.action_type)
+                .order_by(func.count().desc())
+            ).all()
+        return {r[0]: r[1] for r in rows}
+
+    def busiest_symbols(self, limit=20):
+        """[(symbol, n)] -- who has the most corporate activity on
+        record. Useful mostly as a data-quality check: a name with far
+        more entries than its peers usually means a duplicate feed, not
+        an unusually busy company."""
+        from sqlalchemy import func
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                select(self.actions.c.symbol, func.count())
+                .group_by(self.actions.c.symbol)
+                .order_by(func.count().desc())
+                .limit(limit)
+            ).all()
+        return [(r[0], r[1]) for r in rows]
+
+    def date_range(self):
+        """(earliest ex-date, latest ex-date) or (None, None)."""
+        from sqlalchemy import func
+        with self.engine.begin() as conn:
+            row = conn.execute(select(
+                func.min(self.actions.c.ex_date),
+                func.max(self.actions.c.ex_date))).first()
+        return (row[0], row[1]) if row else (None, None)
+
 
 _default = None
 

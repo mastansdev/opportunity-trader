@@ -207,6 +207,7 @@ class Engine:
     def __init__(self, news_gate=None, portfolio=None, sector_monitor=None,
                  momentum_universe=None, circuit_monitor=None, market_data=None,
                  min_tradable_price=MIN_TRADABLE_PRICE_RS,
+                 earnings_calendar=None,
                  candle_recorder=None,
                  enable_rs_band=None, enable_staged_entry=None,
                  one_trade_per_symbol=None, enable_no_progress=None,
@@ -222,6 +223,11 @@ class Engine:
         # callers (main.py, tools/dashboard_preview.py) never pass
         # this, so production always gets the real config value.
         self.min_tradable_price = min_tradable_price
+        # {"YYYY-MM-DD": {SYMBOL, ...}}. Defaults to config's static dict
+        # so an offline run and every existing test behave exactly as
+        # before; main.py passes a merged live+static calendar.
+        self.earnings_calendar = (EARNINGS_CALENDAR if earnings_calendar
+                                  is None else earnings_calendar)
 
         self.orb_engine = OrbEngine()
         self.candle_engine = CandleEngine()
@@ -1501,9 +1507,17 @@ class Engine:
         # deliberate human override, untouched here. Silent skip,
         # same "not eligible today" convention as the other checks
         # in this method.
+        # 2026-07-26: the calendar is now INJECTED. config's hand-typed
+        # EARNINGS_CALENDAR remains the default so nothing changes for
+        # tests or an offline run, but main.py overlays the live NSE
+        # board-meeting calendar (core/results_calendar.py) on top of it
+        # -- a hand-maintained dict goes stale the moment nobody updates
+        # it. Still a plain dict lookup here; the tick path never touches
+        # a database.
         candle_date = effective_time.date() if effective_time is not None else None
         if candle_date is not None \
-                and symbol in EARNINGS_CALENDAR.get(candle_date.isoformat(), ()):
+                and symbol in self.earnings_calendar.get(
+                    candle_date.isoformat(), ()):
             return
 
         # STOCK MEMORY (2026-07-25) -- the bot's own knowledge of what is
