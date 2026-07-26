@@ -8,6 +8,8 @@ own.
 
 from datetime import datetime
 
+import pytest
+
 from dashboard.state import DashboardState, _is_circuit_locked, _is_plausible_move
 
 
@@ -1189,3 +1191,231 @@ def test_no_label_map_when_the_panel_is_unavailable(tmp_path):
     state._daily_store = False
     dt = state._build_daily_trend({})
     assert "labels" not in dt          # JS falls back to no badge
+
+
+# ==================================================
+# SEATS / RS / ORB / ROTATION  (2026-07-26)
+# ==================================================
+# POST_MONDAY_TODO F asked for peak concurrency and could not answer
+# it. All four of these surface data the engine already computes and
+# discards -- none of it is new instrumentation, and none of it gates.
+
+from dashboard.state import _is_rotation, _orb_fields, _peak_concurrency
+
+
+def _ctrade(symbol, entry_h, entry_m, exit_h, exit_m, reason="TARGET",
+            rel_strength=None):
+    return {"symbol": symbol, "direction": "LONG", "qty": 10,
+            "entry_price": 100.0, "exit_price": 101.0,
+            "entry_time": datetime(2026, 7, 27, entry_h, entry_m),
+            "exit_time": datetime(2026, 7, 27, exit_h, exit_m),
+            "exit_reason": reason, "entry_reason": "ORB",
+            "initial_stop": 98.0, "pnl": 10.0,
+            "rel_strength": rel_strength}
+
+
+# -- peak concurrency: an interval sweep, not a running counter -----
+
+def test_peak_concurrency_finds_the_true_overlap():
+    """Three trades that overlap two-at-a-time must report 2, not 3."""
+    closed = [_ctrade("A", 9, 30, 10, 0),
+              _ctrade("B", 9, 45, 10, 30),     # overlaps A
+              _ctrade("C", 11, 0, 11, 30)]     # alone
+    peak, at = _peak_concurrency({}, closed)
+    assert peak == 2
+    assert at == "09:45:00"
+
+
+def test_peak_concurrency_counts_still_open_positions():
+    closed = [_ctrade("A", 9, 30, 15, 0)]
+    open_pos = {"B": {"entry_time": datetime(2026, 7, 27, 10, 0)},
+                "C": {"entry_time": datetime(2026, 7, 27, 10, 5)}}
+    peak, _ = _peak_concurrency(open_pos, closed)
+    assert peak == 3
+
+
+def test_a_seat_freed_and_refilled_in_the_same_second_is_not_doubled():
+    """Exits are applied before entries at the same instant."""
+    same = datetime(2026, 7, 27, 10, 0)
+    closed = [{"entry_time": datetime(2026, 7, 27, 9, 30), "exit_time": same},
+              {"entry_time": same, "exit_time": datetime(2026, 7, 27, 11, 0)}]
+    peak, _ = _peak_concurrency({}, closed)
+    assert peak == 1
+
+
+def test_peak_concurrency_without_timestamps_is_none_not_a_guess():
+    assert _peak_concurrency({}, []) == (None, None)
+
+
+def test_peak_concurrency_ignores_unusable_timestamps():
+    closed = [{"entry_time": "not a datetime", "exit_time": None}]
+    peak, _ = _peak_concurrency({}, closed)
+    assert peak in (None, 0)
+
+
+# -- the seats panel -------------------------------------------------
+
+def test_seats_reports_holding_cap_and_peak():
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine(open_positions={"A": _position()})
+    engine.enable_staged_entry = True
+    engine._staged_position_cap = lambda when: 6
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    seats = state._build_seats({"A": _position()},
+                               [_ctrade("B", 9, 30, 9, 45)])
+    assert seats["holding"] == 1
+    assert seats["cap"] == 6
+    assert seats["max_seats"] == 10
+    assert seats["peak_today"] == 2
+
+
+def test_seats_says_the_cap_is_binding_when_the_book_filled():
+    """The whole question: is the staged cap what stopped the next
+    entry, or the gates upstream?"""
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine()
+    engine._staged_position_cap = lambda when: 3
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    closed = [_ctrade("A", 9, 30, 11, 0), _ctrade("B", 9, 31, 11, 0),
+              _ctrade("C", 9, 32, 11, 0)]
+    assert state._build_seats({}, closed)["cap_is_binding"] is True
+
+
+def test_seats_says_the_gates_are_the_limit_when_it_never_filled():
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine()
+    engine._staged_position_cap = lambda when: 10
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    seats = state._build_seats({}, [_ctrade("A", 9, 30, 11, 0)])
+    assert seats["cap_is_binding"] is False
+
+
+def test_seats_fails_open_when_the_cap_cannot_be_read():
+    """A missing engine internal must cost a field, not the session."""
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine()
+    engine._staged_position_cap = lambda when: 1 / 0
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    seats = state._build_seats({}, [])
+    assert seats["cap"] is None
+    assert seats["cap_is_binding"] is False
+
+
+def test_seats_counts_rotations(tmp_path):
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine()
+    engine._staged_position_cap = lambda when: 10
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    closed = [_ctrade("A", 9, 30, 10, 0, reason="ROTATED_OUT"),
+              _ctrade("B", 9, 31, 10, 1, reason="TARGET")]
+    assert state._build_seats({}, closed)["rotations_today"] == 1
+
+
+def test_seats_appears_in_the_snapshot():
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine()
+    engine._staged_position_cap = lambda when: 10
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    state.refresh()
+    assert "seats" in state.get_snapshot()
+
+
+# -- rotation detection ----------------------------------------------
+
+def test_rotation_is_matched_loosely():
+    """The exact string has changed once already."""
+    assert _is_rotation("ROTATED_OUT") is True
+    assert _is_rotation("rotation") is True
+    assert _is_rotation("ROTATE") is True
+    assert _is_rotation("TARGET") is False
+    assert _is_rotation(None) is False
+
+
+# -- ORB fields ------------------------------------------------------
+
+def test_orb_fields_measure_the_breakout_for_a_long():
+    out = _orb_fields((110.0, 100.0), entry_price=111.0, direction="LONG")
+    assert out["orb_high"] == 110.0
+    assert out["orb_low"] == 100.0
+    assert out["orb_width_pct"] == 10.0
+    assert out["breakout_pct"] == pytest.approx(0.91, abs=0.01)
+
+
+def test_orb_fields_measure_the_breakout_for_a_short():
+    """A short breaks the range LOW, so the margin is measured there."""
+    out = _orb_fields((110.0, 100.0), entry_price=99.0, direction="SHORT")
+    assert out["breakout_pct"] == pytest.approx(1.0, abs=0.01)
+
+
+def test_orb_fields_flag_a_paper_thin_breakout():
+    """SONACOMS cleared a Rs 734 high by Rs 1.50 on 2026-07-24."""
+    out = _orb_fields((734.0, 720.0), entry_price=735.5, direction="LONG")
+    assert out["breakout_pct"] == pytest.approx(0.20, abs=0.01)
+
+
+def test_orb_fields_are_all_none_without_a_range():
+    out = _orb_fields(None, 100.0, "LONG")
+    assert set(out.values()) == {None}
+
+
+def test_orb_range_reads_the_engines_own_state():
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine(orb_ranges={"A": {"high": 110.0, "low": 100.0}})
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    assert state._orb_range("A") == (110.0, 100.0)
+
+
+def test_orb_range_is_none_for_an_incomplete_range():
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine(orb_ranges={"A": {"high": 110.0}})
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    assert state._orb_range("A") is None
+
+
+def test_orb_range_fails_open_on_a_broken_engine():
+    class _Boom:
+        def export_state(self):
+            raise RuntimeError("nope")
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine()
+    engine.orb_engine = _Boom()
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    assert state._orb_range("A") is None
+
+
+# -- relative strength reaches the tables ----------------------------
+
+def test_rel_strength_is_carried_on_open_positions():
+    """The ONE input with measured evidence -- 14.5% -> 39% win rate
+    across its quintiles -- and it was displayed nowhere until now."""
+    loader = _loader({"A": "IT"})
+    pos = dict(_position(), rel_strength=1.234)
+    engine = _FakeEngine(open_positions={"A": pos},
+                         orb_ranges={"A": {"high": 110.0, "low": 100.0}})
+    state = DashboardState(engine, _FakeMarketData(latest_prices={"A": 111.0}),
+                           loader)
+    row = state._build_open_positions({"A": pos})[0]
+    assert row["rel_strength"] == 1.23
+    assert row["orb_high"] == 110.0
+    assert row["breakout_pct"] is not None
+
+
+def test_rel_strength_is_none_on_a_position_that_predates_the_field():
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine(open_positions={"A": _position()})
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    assert state._build_open_positions({"A": _position()})[0]["rel_strength"] \
+        is None
+
+
+def test_closed_trades_carry_rel_strength_and_the_rotation_flag():
+    loader = _loader({"A": "IT", "B": "IT"})
+    closed = [_ctrade("A", 9, 30, 10, 0, reason="ROTATED_OUT",
+                      rel_strength=2.5),
+              _ctrade("B", 9, 31, 10, 1, reason="TARGET")]
+    engine = _FakeEngine(closed_positions=closed)
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    rows = {r["symbol"]: r for r in state._build_closed_positions(closed)}
+    assert rows["A"]["rel_strength"] == 2.5
+    assert rows["A"]["rotated_out"] is True
+    assert rows["B"]["rotated_out"] is False

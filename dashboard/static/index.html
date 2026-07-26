@@ -235,6 +235,31 @@
   .btn-refresh:hover { border-color: var(--accent, #4c8bf5); color: #fff; }
   .btn-refresh.spinning { opacity: 0.6; pointer-events: none; }
 
+  /* -- 2026-07-26 seats strip / RS / ORB columns -- */
+  .seats-strip {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
+    padding: 8px 12px; margin-bottom: 10px; border-radius: 8px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    font-size: 12px; color: var(--text-dim);
+  }
+  .seats-strip b { color: var(--text); }
+  .seat-pips { display: inline-flex; gap: 3px; }
+  .seat { width: 11px; height: 16px; border-radius: 3px; display: inline-block; }
+  .seat-filled { background: var(--blue); }
+  .seat-open   { background: transparent; border: 1px solid var(--border); }
+  .seat-locked { background: transparent; border: 1px dashed var(--border); opacity: 0.45; }
+  .seat-verdict { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; cursor: help; }
+  .seat-verdict.binding { color: var(--amber); border: 1px solid rgba(245,158,11,0.4); }
+  .seat-verdict.loose   { color: var(--text-dim); border: 1px solid var(--border); }
+
+  .rs-band { color: var(--green); font-weight: 600; }
+  .rs-weak { color: var(--text-dim); }
+  .rs-hot  { color: var(--amber); font-weight: 600; }
+  .orb-range { color: var(--text-dim); font-size: 12px; }
+  .orb-ok   { color: var(--green); font-size: 11px; }
+  .orb-thin { color: var(--amber); font-size: 11px; }
+  .rot-mark { color: var(--blue); cursor: help; }
+
   /* Inline daily-trend badge, shown next to every stock name.
      Deliberately small and monochrome-ish: it is CONTEXT sitting
      beside the number you are actually reading, not a signal. */
@@ -359,12 +384,15 @@
       <h2>POSITIONS <span id="positionsCount" class="pos-count"></span></h2>
       <button class="btn-exit-all btn-sm" id="exitAllBtn">EXIT ALL</button>
     </div>
+    <div class="seats-strip" id="seatsStrip"></div>
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th>S.No</th><th>Symbol</th><th>Direction</th><th>Qty</th><th>Entry Time</th>
             <th>Entry Price</th><th>CMP</th><th>MTM</th><th>Stop</th><th>Target</th>
+            <th title="Relative strength vs the market at entry — the one input with measured evidence behind it">RS%</th>
+            <th title="Opening range 09:15–09:30, and how far past it the entry filled">ORB range</th>
             <th>Reason</th><th></th>
           </tr>
         </thead>
@@ -493,6 +521,7 @@
             <tr>
               <th>S.No</th><th>Symbol</th><th>Direction</th><th>Qty</th><th>Sector</th>
               <th>Entry Time</th><th>Entry Price</th><th>Exit Price</th><th>Stop</th><th>Target</th>
+              <th title="Relative strength vs the market at entry">RS%</th>
               <th>Reason</th><th>Exit Time</th><th>Exit Reason</th><th>Holding (min)</th>
               <th>Gross PnL</th><th>Charges</th><th>Net PnL</th>
             </tr>
@@ -737,6 +766,71 @@ const TREND_LABEL = {
   DOWNTREND: "Downtrend", STRONG_DOWN: "Stepping down",
 };
 
+// -- Relative strength vs the market at entry (2026-07-26) ---------
+// The ONE input with measured evidence: win rate rose 14.5% -> 39%
+// across its quintiles. core/engine.py has stamped it on every
+// position since 2026-07-24 and it was displayed nowhere.
+// The configured band is 0.4%-5.0%; outside it is flagged, not because
+// it is wrong but because it means a rule changed or a manual trade
+// bypassed the gate.
+function rsCell(rs) {
+  if (rs === null || rs === undefined) return "—";
+  const a = Math.abs(rs);
+  const cls = a < 0.4 ? "rs-weak" : (a > 5.0 ? "rs-hot" : "rs-band");
+  const tip = a < 0.4 ? "below the 0.4% band — barely stronger than the market"
+            : (a > 5.0 ? "above the 5% band — already extended when entered"
+                       : "inside the 0.4%–5.0% band the bot trades");
+  return `<span class="${cls}" title="${tip}">${rs >= 0 ? "+" : ""}${rs.toFixed(2)}%</span>`;
+}
+
+// -- The opening range this entry broke ----------------------------
+// Answers "why is this position here?" without opening the log.
+// breakout_pct is how far PAST the boundary the fill landed --
+// SONACOMS cleared a Rs 734 high by Rs 1.50 (0.2%) on 2026-07-24,
+// which is what BREAKOUT_MARGIN_PCT now exists to reject.
+function orbCell(r) {
+  if (r.orb_high == null || r.orb_low == null) return "—";
+  const b = r.breakout_pct;
+  const cls = b == null ? "" : (b < 0.05 ? "orb-thin" : "orb-ok");
+  const by = b == null ? "" :
+    ` <span class="${cls}" title="cleared the range boundary by ${b.toFixed(2)}%">+${b.toFixed(2)}%</span>`;
+  return `<span class="orb-range" title="09:15–09:30 range, ${r.orb_width_pct != null ? r.orb_width_pct.toFixed(2) + "% wide" : ""}">${fmtNum(r.orb_low)}–${fmtNum(r.orb_high)}</span>${by}`;
+}
+
+// -- Staged seats (2026-07-26) -------------------------------------
+// POST_MONDAY_TODO F: "peak concurrent positions... If peak
+// concurrency never hits 10, the staged caps aren't binding and the
+// gates upstream are." The engine computed the live cap on every tick
+// and discarded it; now you can just read it.
+function renderSeats(s) {
+  const el = document.getElementById("seatsStrip");
+  if (!s) { el.innerHTML = ""; return; }
+
+  const cap = s.cap;
+  const capText = cap === 0 ? `no new entries (after ${s.no_entry_after})`
+                            : `cap ${cap != null ? cap : "—"}`;
+  // One box per seat: filled = held now, allowed = inside the current
+  // staged cap, locked = a seat the clock has not released yet.
+  let pips = "";
+  for (let i = 0; i < (s.max_seats || 10); i++) {
+    const cls = i < s.holding ? "seat-filled"
+              : (cap != null && i < cap ? "seat-open" : "seat-locked");
+    pips += `<span class="seat ${cls}"></span>`;
+  }
+
+  const verdict = s.peak_today == null ? ""
+    : (s.cap_is_binding
+        ? `<span class="seat-verdict binding" title="the book filled to the cap — the staged limit is what stopped the next entry">cap IS binding</span>`
+        : `<span class="seat-verdict loose" title="the book never filled — the upstream gates (top-20, top-8 sectors, RS band) are what limit trade count, not the staged seats">cap never reached — gates upstream are the limit</span>`);
+
+  el.innerHTML = `
+    <span class="seat-pips" title="filled / open now / not yet released">${pips}</span>
+    <span class="seat-text"><b>${s.holding}</b> held · ${capText} · max ${s.max_seats}</span>
+    <span class="seat-text">peak today <b>${s.peak_today != null ? s.peak_today : "—"}</b>${s.peak_at ? ` at ${s.peak_at}` : ""}</span>
+    ${s.rotations_today ? `<span class="seat-text">rotations <b>${s.rotations_today}</b></span>` : ""}
+    ${verdict}`;
+}
+
 // The inline badge that sits next to EVERY stock name on this page.
 // Operator, 2026-07-26: "i asked to display the trend of the stock
 // (upward, down, neutral) next to stock name".
@@ -941,6 +1035,9 @@ function render(snap) {
   // -- Daily Trend (observation only) --
   renderDailyTrend(snap.daily_trend);
 
+  // -- Staged seats: is the cap binding, or the gates upstream? --
+  renderSeats(snap.seats);
+
   // -- My Book: exposure by sector + sector P&L + long/short score --
   const book = snap.book_analytics || { exposure: [], sector_pnl: [], long_open: 0, short_open: 0, long_realized_net: 0, short_realized_net: 0 };
   document.getElementById("longShortScore").innerHTML =
@@ -1005,10 +1102,12 @@ function render(snap) {
           <td class="${pnlClass(r.pnl)}">${fmtINR(r.pnl)}</td>
           <td>${fmtINR(r.stop)}</td>
           <td>${r.fixed_target != null ? fmtINR(r.fixed_target) : "—"}</td>
+          <td>${rsCell(r.rel_strength)}</td>
+          <td>${orbCell(r)}</td>
           <td>${escapeHtml(r.entry_reason)}</td>
           <td>${IS_OPERATOR ? `<button class="btn-sell btn-sm" onclick="sell('${r.symbol}')">EXIT</button>` : ""}</td>
         </tr>`).join("")
-    : `<tr><td colspan="12" class="no-rows">No open positions</td></tr>`;
+    : `<tr><td colspan="14" class="no-rows">No open positions</td></tr>`;
 
   // -- closed positions --
   // Same columns as Open Positions (S.No, Symbol, Direction, Entry
@@ -1032,15 +1131,16 @@ function render(snap) {
           <td>${fmtINR(r.exit_price)}</td>
           <td>${fmtINR(r.initial_stop)}</td>
           <td>${r.fixed_target != null ? fmtINR(r.fixed_target) : "—"}</td>
+          <td>${rsCell(r.rel_strength)}</td>
           <td>${escapeHtml(r.entry_reason)}</td>
           <td>${escapeHtml(r.exit_time)}</td>
-          <td>${escapeHtml(r.exit_reason)}</td>
+          <td>${escapeHtml(r.exit_reason)}${r.rotated_out ? ` <span class="rot-mark" title="seat freed by ROTATION — a stronger breakout took it, the trade did not fail">⇄</span>` : ""}</td>
           <td>${fmtHoldingMinutes(r.holding_seconds)}</td>
           <td class="${pnlClass(r.pnl)}">${fmtINR(r.pnl)}</td>
           <td style="color:var(--text-dim)">${fmtINR(r.charges)}</td>
           <td class="${pnlClass(r.net_pnl)}"><strong>${fmtINR(r.net_pnl)}</strong></td>
         </tr>`).join("")
-    : `<tr><td colspan="17" class="no-rows">No closed positions yet</td></tr>`;
+    : `<tr><td colspan="18" class="no-rows">No closed positions yet</td></tr>`;
 
   // -- risk filters --
   const risk = snap.risk_filters || { panic_sectors: [], blocked_symbols: [], frozen_symbols: [], circuit_flagged_symbols: [] };

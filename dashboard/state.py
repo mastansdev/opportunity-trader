@@ -118,6 +118,7 @@ from config import (
     MARKET_BREADTH_REFRESH_SECONDS,
     DAILY_TREND_PANEL_ENABLED, DAILY_TREND_WINDOW_DAYS,
     DAILY_TREND_REFRESH_SECONDS, DAILY_TREND_BROKE_LIMIT,
+    MAX_OPEN_POSITIONS, STAGED_NO_ENTRY_AFTER,
 )
 
 from trading.charges import round_trip_charges
@@ -132,6 +133,86 @@ def _fmt_time(value):
     if value is None:
         return None
     return value.strftime("%H:%M:%S")
+
+
+def _is_rotation(exit_reason):
+    """
+    Was this seat freed by ROTATION rather than by the trade itself?
+
+    core/engine.py rotates the weakest holder out when a stronger
+    breakout needs its seat. The exit reason has always recorded it;
+    nothing ever counted it -- so POST_MONDAY_TODO F's "did rotation
+    fire at all?" was unanswerable. Matched loosely because the exact
+    string has changed once already.
+    """
+    return "ROTAT" in str(exit_reason or "").upper()
+
+
+def _peak_concurrency(open_positions, closed_positions):
+    """
+    The most positions ever held AT ONCE today, and when.
+
+    A classic interval sweep over (entry, exit) pairs: +1 at every
+    entry, -1 at every exit, walk in time order, remember the high
+    water mark. Ties are ordered exits-before-entries so a seat freed
+    and refilled in the same second isn't double-counted.
+
+    Returns (peak, "HH:MM:SS") or (None, None) when there are no
+    usable timestamps -- never a guess.
+    """
+    events = []
+    for record in list(closed_positions):
+        entry, exit_ = record.get("entry_time"), record.get("exit_time")
+        if isinstance(entry, datetime):
+            events.append((entry, 1))
+        if isinstance(exit_, datetime):
+            events.append((exit_, -1))
+    for record in open_positions.values():
+        entry = record.get("entry_time")
+        if isinstance(entry, datetime):
+            events.append((entry, 1))
+
+    if not events:
+        return (len(open_positions) or None), None
+
+    # -1 before +1 at the same instant.
+    events.sort(key=lambda e: (e[0], e[1]))
+    running, peak, peak_at = 0, 0, None
+    for when, delta in events:
+        running += delta
+        if running > peak:
+            peak, peak_at = running, when
+    return peak, _fmt_time(peak_at)
+
+
+def _orb_fields(orb, entry_price, direction):
+    """
+    The opening range this trade broke, and by how much.
+
+    `breakout_pct` is how far beyond the range boundary the entry was
+    filled -- the "did it clear with conviction, or by one paise?"
+    number. SONACOMS (2026-07-24) cleared a Rs 734 high by Rs 1.50:
+    0.2%, which is noise, and is exactly what BREAKOUT_MARGIN_PCT now
+    exists to reject. Seeing it per position is how you'd notice the
+    margin is set wrong.
+
+    All None when the range is unknown. Never guessed.
+    """
+    if not orb:
+        return {"orb_high": None, "orb_low": None, "orb_width_pct": None,
+                "breakout_pct": None}
+    high, low = orb
+    width_pct = ((high - low) / low * 100.0) if low else None
+    if direction == "SHORT":
+        breakout = ((low - entry_price) / low * 100.0) if low else None
+    else:
+        breakout = ((entry_price - high) / high * 100.0) if high else None
+    return {
+        "orb_high": _round_or_none(high),
+        "orb_low": _round_or_none(low),
+        "orb_width_pct": _round_or_none(width_pct),
+        "breakout_pct": _round_or_none(breakout),
+    }
 
 
 def _round_or_none(value, places=2):
@@ -328,6 +409,7 @@ class DashboardState:
             "book_analytics": self._build_book_analytics(
                 open_positions, closed_positions
             ),
+            "seats": self._build_seats(open_positions, closed_positions),
             "daily_trend": self._build_daily_trend(open_positions),
             "open_positions": self._build_open_positions(open_positions),
             "closed_positions": self._build_closed_positions(closed_positions),
@@ -687,6 +769,60 @@ class DashboardState:
         }
 
     # --------------------------------------------------
+    # SEATS  (2026-07-26)
+    # --------------------------------------------------
+
+    def _build_seats(self, open_positions, closed_positions):
+        """
+        Are the staged caps actually binding, or are the gates upstream?
+
+        POST_MONDAY_TODO F asks for exactly this and could not answer it:
+        "peak concurrent positions... If peak concurrency never hits 10,
+        the staged caps aren't binding and the gates upstream are."
+        `core/engine.py::_staged_position_cap()` computes the live cap on
+        every single tick and throws it away.
+
+        PEAK IS RECONSTRUCTED, NOT COUNTED. A running max would need a
+        counter inside the entry path -- i.e. a change to trading code,
+        and it would reset on every restart. Instead this sweeps the
+        entry/exit timestamps we already hold and computes the true
+        maximum overlap. Exact, restart-proof, and read-only.
+
+        Fails open: any missing piece degrades a field to None, never
+        raises. Nothing here is consulted by the engine.
+        """
+        holding = len(open_positions)
+        cap, no_entry_after = None, None
+        try:
+            now = datetime.now()
+            cap = self.engine._staged_position_cap(now)
+            no_entry_after = STAGED_NO_ENTRY_AFTER
+        except Exception:                   # noqa: BLE001 -- fail open
+            cap = None
+
+        peak, peak_at = _peak_concurrency(open_positions, closed_positions)
+
+        # "Binding" means the book was actually FULL at some point: the
+        # cap is what stopped the next entry, not the gates upstream.
+        binding = (peak is not None and cap is not None and peak >= cap
+                   and cap > 0)
+
+        return {
+            "holding": holding,
+            "cap": cap,
+            "max_seats": MAX_OPEN_POSITIONS,
+            "peak_today": peak,
+            "peak_at": peak_at,
+            "no_entry_after": no_entry_after,
+            "staged_enabled": bool(getattr(self.engine,
+                                           "enable_staged_entry", False)),
+            "cap_is_binding": binding,
+            "rotations_today": sum(
+                1 for r in closed_positions
+                if _is_rotation(r.get("exit_reason"))),
+        }
+
+    # --------------------------------------------------
     # DAILY TREND  (2026-07-26)
     # --------------------------------------------------
 
@@ -905,9 +1041,39 @@ class DashboardState:
                 "fixed_target": fixed_target,
                 "rr": _rr(direction, position["entry_price"], last_price, initial_stop),
                 "entry_reason": position.get("entry_reason"),
+                # 2026-07-26 -- RELATIVE STRENGTH vs the market at the
+                # moment of entry. This is the ONE input with measured
+                # evidence behind it (win rate rose 14.5% -> 39% across
+                # its quintiles), core/engine.py has stamped it on every
+                # position since the 2026-07-24 revamp, and until now it
+                # was visible nowhere. None on a restored position that
+                # predates the field -- never back-filled with a guess.
+                "rel_strength": _round_or_none(
+                    position.get("rel_strength")),
+                # The opening range this entry actually broke. Answers
+                # "why is this position here?" without opening the log.
+                **_orb_fields(self._orb_range(symbol),
+                              position["entry_price"], direction),
             })
 
         return sorted(rows, key=lambda r: r["entry_time"] or "")
+
+    def _orb_range(self, symbol):
+        """The 09:15-09:30 high/low for one symbol, or None. Read-only
+        and fail-open -- the ORB engine is the engine's own, and a
+        missing range must cost a column, not the session."""
+        try:
+            state = self.engine.orb_engine.export_state() or {}
+            entry = state.get(symbol)
+            if not isinstance(entry, dict):
+                return None
+            high = entry.get("high", entry.get("orb_high"))
+            low = entry.get("low", entry.get("orb_low"))
+            if high is None or low is None:
+                return None
+            return (float(high), float(low))
+        except Exception:                   # noqa: BLE001 -- fail open
+            return None
 
     def _build_closed_positions(self, closed_positions):
         rows = []
@@ -936,6 +1102,11 @@ class DashboardState:
                 "initial_stop": initial_stop,
                 "fixed_target": record.get("fixed_target"),
                 "rr": _rr(direction, record["entry_price"], record["exit_price"], initial_stop),
+                # See _build_open_positions() -- the one measured input.
+                "rel_strength": _round_or_none(record.get("rel_strength")),
+                # Was this seat freed by rotation rather than by the
+                # trade? Recorded since 2026-07-24, never surfaced.
+                "rotated_out": _is_rotation(record.get("exit_reason")),
                 "pnl": round(pnl, 2),
                 # Transaction cost estimate + real net-of-cost P&L
                 # (2026-07-24) -- see trading/charges.py.
