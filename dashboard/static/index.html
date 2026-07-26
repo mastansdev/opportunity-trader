@@ -235,6 +235,19 @@
   .btn-refresh:hover { border-color: var(--accent, #4c8bf5); color: #fff; }
   .btn-refresh.spinning { opacity: 0.6; pointer-events: none; }
 
+  /* Inline daily-trend badge, shown next to every stock name.
+     Deliberately small and monochrome-ish: it is CONTEXT sitting
+     beside the number you are actually reading, not a signal. */
+  .tbadge { font-size: 11px; letter-spacing: -1px; margin-left: 4px; cursor: help; vertical-align: middle; }
+  .tb-up2   { color: #15803d; }
+  .tb-up    { color: var(--green); }
+  .tb-flat  { color: var(--text-dim); }
+  .tb-down  { color: var(--red); }
+  .tb-down2 { color: #991b1b; }
+  html.light .tb-up2 { color: #166534; }
+  html.light .tb-down2 { color: #7f1d1d; }
+  .tb-broke { color: var(--amber); font-size: 10px; margin-left: 2px; cursor: help; }
+
   /* -- 2026-07-26 daily trend panel -- */
   .trend-bar { display: flex; height: 26px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); margin-bottom: 10px; }
   .trend-seg { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #fff; min-width: 0; white-space: nowrap; }
@@ -553,7 +566,7 @@ const dirBadge = (d) => `<span class="badge ${d === 'SHORT' ? 'short' : 'long'}"
 // PAPER mode only -- see trading/trade_controller.py's docstring.
 const glRow = (r, side) => `<tr>
   <td>${r.s_no}</td>
-  <td><strong>${escapeHtml(r.symbol)}</strong></td>
+  <td>${symbolCell(r.symbol)}</td>
   <td>${escapeHtml(r.sector || "—")}</td>
   <td>${fmtNum(r.open)}</td>
   <td>${fmtNum(r.high)}</td>
@@ -724,17 +737,59 @@ const TREND_LABEL = {
   DOWNTREND: "Downtrend", STRONG_DOWN: "Stepping down",
 };
 
+// The inline badge that sits next to EVERY stock name on this page.
+// Operator, 2026-07-26: "i asked to display the trend of the stock
+// (upward, down, neutral) next to stock name".
+//
+// Filled from snap.daily_trend.labels once a refresh and held in a
+// module-level map so every table can look a symbol up without the
+// server resending 544 records a second.
+let TREND_LABELS = {};
+let TREND_BROKE = {};
+
+const TREND_BADGE = {
+  STRONG_UP:   { mark: "▲▲", cls: "tb-up2",   text: "stepping up — higher highs day on day" },
+  UPTREND:     { mark: "▲",  cls: "tb-up",    text: "uptrend — higher highs and higher lows" },
+  RANGE:       { mark: "▬",  cls: "tb-flat",  text: "range-bound — no clear daily structure" },
+  DOWNTREND:   { mark: "▼",  cls: "tb-down",  text: "downtrend — lower highs and lower lows" },
+  STRONG_DOWN: { mark: "▼▼", cls: "tb-down2", text: "stepping down — lower lows day on day" },
+};
+
+// symbol -> the little arrow. Returns "" when we have no daily history
+// for that name, which is normal for a recent listing -- an empty space
+// is honest, a fake "neutral" is not.
+function trendBadge(symbol) {
+  const label = TREND_LABELS[symbol];
+  if (!label) return "";
+  const b = TREND_BADGE[label];
+  if (!b) return "";
+  const broke = TREND_BROKE[symbol];
+  const brokeMark = broke ? `<span class="tb-broke" title="${broke === "UP" ? "uptrend JUST BROKE — failed high, then took out the prior low" : "downtrend JUST BROKE — failed low, then took out the prior high"}">⚡</span>` : "";
+  return `<span class="tbadge ${b.cls}" title="${b.text}">${b.mark}</span>${brokeMark}`;
+}
+
+// Symbol cell with its daily trend attached. Use this everywhere a
+// stock name is printed.
+function symbolCell(symbol) {
+  return `<strong>${escapeHtml(symbol)}</strong> ${trendBadge(symbol)}`;
+}
+
 function renderDailyTrend(dt) {
   const body = document.getElementById("trendBody");
   const asOf = document.getElementById("trendAsOf");
   const win = document.getElementById("trendWindow");
 
   if (!dt || !dt.available) {
+    TREND_LABELS = {};
+    TREND_BROKE = {};
     asOf.textContent = "";
     win.textContent = "";
     body.innerHTML = `<span class="empty-note">${escapeHtml((dt && dt.reason) || "no daily history")}</span>`;
     return;
   }
+
+  TREND_LABELS = dt.labels || {};
+  TREND_BROKE = dt.broke_map || {};
 
   asOf.textContent = `as of ${dt.as_of || "—"} · ${fmtNum(dt.analysed)} stocks`;
   win.textContent = `${dt.window}-bar structure · ${dt.history_days} days stored`;
@@ -747,14 +802,16 @@ function renderDailyTrend(dt) {
     return `<div class="trend-seg ${k}" style="width:${pct}%" title="${TREND_LABEL[k]}: ${counts[k]}">${pct > 7 ? counts[k] : ""}</div>`;
   }).join("");
 
+  // The legend doubles as the key for the inline badges next to every
+  // stock name elsewhere on the page, so it shows the same arrows.
   const legend = TREND_ORDER.map(k =>
-    `<span><span class="trend-dot trend-seg ${k}"></span>${TREND_LABEL[k]} <b>${fmtNum(counts[k] || 0)}</b></span>`
-  ).join("");
+    `<span><span class="trend-dot trend-seg ${k}"></span><span class="tbadge ${TREND_BADGE[k].cls}">${TREND_BADGE[k].mark}</span> ${TREND_LABEL[k]} <b>${fmtNum(counts[k] || 0)}</b></span>`
+  ).join("") + `<span><span class="tb-broke">⚡</span> structure just broke <b>${fmtNum(dt.broke_total || 0)}</b></span>`;
 
   // Open positions against the structure they were entered into.
   const rows = (dt.positions || []).map((r, i) => `<tr>
       <td>${i + 1}</td>
-      <td><strong>${escapeHtml(r.symbol)}</strong></td>
+      <td>${symbolCell(r.symbol)}</td>
       <td>${escapeHtml(r.direction || "")}</td>
       <td>${escapeHtml(TREND_LABEL[r.structure] || r.structure || "—")}</td>
       <td class="align-${r.alignment || "NEUTRAL"}">${r.alignment || "—"}</td>
@@ -939,7 +996,7 @@ function render(snap) {
     ? openRows.map((r, i) => `
         <tr>
           <td>${i + 1}</td>
-          <td><strong>${escapeHtml(r.symbol)}</strong></td>
+          <td>${symbolCell(r.symbol)}</td>
           <td>${dirBadge(r.direction)}</td>
           <td>${fmtNum(r.qty)}</td>
           <td>${escapeHtml(r.entry_time)}</td>
@@ -966,7 +1023,7 @@ function render(snap) {
     ? closedRows.map((r, i) => `
         <tr>
           <td>${i + 1}</td>
-          <td><strong>${escapeHtml(r.symbol)}</strong></td>
+          <td>${symbolCell(r.symbol)}</td>
           <td>${dirBadge(r.direction)}</td>
           <td>${fmtNum(r.qty)}</td>
           <td>${escapeHtml(r.sector)}</td>
@@ -993,7 +1050,7 @@ function render(snap) {
   document.getElementById("blockedSymbols").innerHTML = risk.blocked_symbols.length
     ? risk.blocked_symbols.map(b => `
         <div class="risk-row">
-          <span><strong>${escapeHtml(b.symbol)}</strong> ${dirBadge(b.direction)}</span>
+          <span>${symbolCell(b.symbol)} ${dirBadge(b.direction)}</span>
           <span class="reason">${escapeHtml(b.reason)}</span>
         </div>`).join("")
     : `<span class="empty-note">Nothing blocked today</span>`;

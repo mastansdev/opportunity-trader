@@ -1143,3 +1143,49 @@ def test_daily_trend_never_gates_anything(tmp_path):
     source = inspect.getsource(engine_module)
     assert "trend_structure" not in source
     assert "daily_trend" not in source
+
+
+# -- inline trend badge next to every stock name (2026-07-26) --
+# Operator: "i asked to display the trend of the stock (upward, down,
+# neutral) next to stock name". The browser needs a label for ANY
+# symbol it prints -- open positions, top 50 gainers/losers, closed
+# trades, blocked names -- so the snapshot carries a compact map.
+
+def test_snapshot_carries_a_compact_label_map_for_every_symbol(tmp_path):
+    state = _daily_state(tmp_path, ["PARAS", "FALLER"],
+                         _up_bars() + _down_bars())
+    dt = state._build_daily_trend({})
+    assert dt["labels"] == {"PARAS": "STRONG_UP", "FALLER": "STRONG_DOWN"}
+
+
+def test_the_full_records_are_not_sent_over_the_wire(tmp_path):
+    """544 full records every second is ~10x the bytes for information
+    the browser only uses to pick an arrow."""
+    state = _daily_state(tmp_path, ["PARAS"], _up_bars())
+    assert "by_symbol" not in state._build_daily_trend({})
+
+
+def test_broke_map_only_carries_names_that_actually_broke(tmp_path):
+    bars = _up_bars("PARAS", n=7)
+    bars.append(_daily_bar("2026-07-21", "PARAS", high=105, low=80))
+    state = _daily_state(tmp_path, ["PARAS", "FALLER"],
+                         bars + _down_bars())
+    dt = state._build_daily_trend({})
+    assert dt["broke_map"] == {"PARAS": "UP"}
+
+
+def test_label_map_survives_the_cache(tmp_path):
+    """The badge must keep working on cached refreshes -- i.e. all but
+    one refresh in every 15 minutes."""
+    state = _daily_state(tmp_path, ["PARAS"], _up_bars())
+    state._build_daily_trend({})
+    state._daily_store = None            # any recompute would fail
+    assert state._build_daily_trend({})["labels"] == {"PARAS": "STRONG_UP"}
+
+
+def test_no_label_map_when_the_panel_is_unavailable(tmp_path):
+    loader = _loader({"TCS": "IT"})
+    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader)
+    state._daily_store = False
+    dt = state._build_daily_trend({})
+    assert "labels" not in dt          # JS falls back to no badge

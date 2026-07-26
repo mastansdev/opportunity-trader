@@ -728,18 +728,32 @@ class DashboardState:
         if (self._daily_trend_cache is not None
                 and now - self._daily_trend_built_at
                 < DAILY_TREND_REFRESH_SECONDS):
-            cached = dict(self._daily_trend_cache)
-            # Positions change intraday even though the structure
-            # doesn't, so re-map the position rows off the cached
-            # per-symbol labels rather than serving a stale book.
-            cached["positions"] = self._trend_rows_for_positions(
-                open_positions, cached.get("by_symbol") or {})
-            return cached
+            built = self._daily_trend_cache
+        else:
+            built = self._compute_daily_trend(open_positions)
+            self._daily_trend_cache = built
+            self._daily_trend_built_at = now
 
-        built = self._compute_daily_trend(open_positions)
-        self._daily_trend_cache = built
-        self._daily_trend_built_at = now
-        return built
+        out = dict(built)
+        # Positions change intraday even though the structure does not,
+        # so the book is always re-mapped off the cached per-symbol
+        # labels rather than served stale.
+        if out.get("available"):
+            out["positions"] = self._trend_rows_for_positions(
+                open_positions, built.get("by_symbol") or {})
+            # `by_symbol` stays on the CACHE (the re-map above needs the
+            # full records) but is replaced on the WIRE by a compact
+            # {symbol: label} map. The dashboard refreshes every second
+            # and 544 full records a second is ~10x the bytes for
+            # information the browser only uses to pick an arrow.
+            out["labels"] = {s: r["structure"]
+                             for s, r in (built.get("by_symbol")
+                                          or {}).items()}
+            out["broke_map"] = {s: r["broke"]
+                                for s, r in (built.get("by_symbol")
+                                             or {}).items() if r["broke"]}
+            out.pop("by_symbol", None)
+        return out
 
     def _compute_daily_trend(self, open_positions):
         store = self._daily_trend_store()
