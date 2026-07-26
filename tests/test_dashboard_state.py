@@ -1221,7 +1221,7 @@ def test_peak_concurrency_finds_the_true_overlap():
     closed = [_ctrade("A", 9, 30, 10, 0),
               _ctrade("B", 9, 45, 10, 30),     # overlaps A
               _ctrade("C", 11, 0, 11, 30)]     # alone
-    peak, at = _peak_concurrency({}, closed)
+    peak, at, _when = _peak_concurrency({}, closed)
     assert peak == 2
     assert at == "09:45:00"
 
@@ -1230,7 +1230,7 @@ def test_peak_concurrency_counts_still_open_positions():
     closed = [_ctrade("A", 9, 30, 15, 0)]
     open_pos = {"B": {"entry_time": datetime(2026, 7, 27, 10, 0)},
                 "C": {"entry_time": datetime(2026, 7, 27, 10, 5)}}
-    peak, _ = _peak_concurrency(open_pos, closed)
+    peak, _, _when = _peak_concurrency(open_pos, closed)
     assert peak == 3
 
 
@@ -1239,17 +1239,17 @@ def test_a_seat_freed_and_refilled_in_the_same_second_is_not_doubled():
     same = datetime(2026, 7, 27, 10, 0)
     closed = [{"entry_time": datetime(2026, 7, 27, 9, 30), "exit_time": same},
               {"entry_time": same, "exit_time": datetime(2026, 7, 27, 11, 0)}]
-    peak, _ = _peak_concurrency({}, closed)
+    peak, _, _when = _peak_concurrency({}, closed)
     assert peak == 1
 
 
 def test_peak_concurrency_without_timestamps_is_none_not_a_guess():
-    assert _peak_concurrency({}, []) == (None, None)
+    assert _peak_concurrency({}, []) == (None, None, None)
 
 
 def test_peak_concurrency_ignores_unusable_timestamps():
     closed = [{"entry_time": "not a datetime", "exit_time": None}]
-    peak, _ = _peak_concurrency({}, closed)
+    peak, _, _when = _peak_concurrency({}, closed)
     assert peak in (None, 0)
 
 
@@ -1519,3 +1519,61 @@ def test_gate_funnel_appears_in_the_snapshot():
     state = _funnel_state(_gate_snapshot())
     state.refresh()
     assert "gate_funnel" in state.get_snapshot()
+
+
+def test_binding_is_measured_against_the_cap_AT_THE_PEAK():
+    """Caught while previewing this panel. The staged cap ramps
+    3 -> 6 -> 10 through the morning and drops to 0 after 15:00, so
+    measuring a 09:40 peak of 3 against the CURRENT cap reported 'not
+    binding' every single afternoon -- the exact opposite of the
+    truth."""
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine()
+
+    def cap_at(when):
+        return 3 if when.hour < 10 else 0        # 0 = past no-entry time
+    engine._staged_position_cap = cap_at
+
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    state._clock = lambda: datetime(2026, 7, 27, 16, 0)   # evening
+    closed = [_ctrade("A", 9, 30, 11, 0), _ctrade("B", 9, 31, 11, 0),
+              _ctrade("C", 9, 32, 11, 0)]
+    seats = state._build_seats({}, closed)
+    assert seats["peak_today"] == 3
+    assert seats["cap"] == 0                     # correct for right now
+    assert seats["cap_is_binding"] is True       # correct for the peak
+
+
+def test_binding_is_false_when_the_book_never_filled_its_cap():
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine()
+    engine._staged_position_cap = lambda when: 10
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    seats = state._build_seats({}, [_ctrade("A", 9, 30, 11, 0)])
+    assert seats["cap_is_binding"] is False
+
+
+def test_the_clock_is_injectable_for_the_demo_preview():
+    loader = _loader({"A": "IT"})
+    engine = _FakeEngine()
+    seen = []
+    engine._staged_position_cap = lambda when: seen.append(when) or 6
+    state = DashboardState(engine, _FakeMarketData(), loader)
+    state._clock = lambda: datetime(2026, 7, 27, 10, 30)
+    state._build_seats({}, [])
+    assert seen[0] == datetime(2026, 7, 27, 10, 30)
+
+
+def test_demo_flag_reaches_the_snapshot():
+    loader = _loader({"A": "IT"})
+    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader,
+                           demo=True)
+    state.refresh()
+    assert state.get_snapshot()["demo"] is True
+
+
+def test_demo_is_off_by_default():
+    loader = _loader({"A": "IT"})
+    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader)
+    state.refresh()
+    assert state.get_snapshot()["demo"] is False

@@ -227,6 +227,18 @@
   }
   .paused-banner.show { display: block; }
 
+  /* Demo mode (tools/dashboard_preview.py --demo). Deliberately loud:
+     a screenshot of a demo run is otherwise indistinguishable from a
+     real session. */
+  .demo-banner {
+    display: none; background: rgba(239,68,68,0.14);
+    border: 1px solid rgba(239,68,68,0.55); color: var(--red);
+    border-radius: 8px; padding: 10px 14px; font-size: 12.5px;
+    font-weight: 700; margin-bottom: 14px; text-align: center;
+    letter-spacing: 0.3px;
+  }
+  .demo-banner.show { display: block; }
+
   /* -- 2026-07-24 dashboard revamp -- */
   .pos-count { font-size: 12px; font-weight: 600; color: var(--text-dim); margin-left: 8px; letter-spacing: 0.3px; }
   .gl-head-right { display: flex; align-items: center; gap: 12px; }
@@ -351,6 +363,11 @@
 </header>
 
 <main>
+
+  <div class="demo-banner" id="demoBanner">
+    DEMO DATA — synthetic ticks driving the real engine, for layout review only.
+    Every price, P&amp;L and gate rejection on this page is INVENTED. Not a real session.
+  </div>
 
   <div class="paused-banner" id="pausedBanner">
     <span>New entries are PAUSED — the bot will not open any positions until you resume.</span>
@@ -1074,6 +1091,7 @@ function render(snap) {
   document.getElementById("updatedAt").textContent = "Updated " + (snap.updated_at || "—");
 
   document.getElementById("pausedBanner").classList.toggle("show", !!snap.entries_paused);
+  document.getElementById("demoBanner").classList.toggle("show", !!snap.demo);
 
   const cap = snap.capital || {};
   const openPnl = (snap.open_positions || []).reduce((sum, r) => sum + (r.pnl || 0), 0);

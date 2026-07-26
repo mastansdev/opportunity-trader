@@ -157,7 +157,9 @@ def _peak_concurrency(open_positions, closed_positions):
     water mark. Ties are ordered exits-before-entries so a seat freed
     and refilled in the same second isn't double-counted.
 
-    Returns (peak, "HH:MM:SS") or (None, None) when there are no
+    Returns (peak, "HH:MM:SS", datetime) -- the raw datetime as well,
+    because the caller has to ask what the staged cap WAS at that
+    moment, not what it is now. (None, None, None) when there are no
     usable timestamps -- never a guess.
     """
     events = []
@@ -173,7 +175,7 @@ def _peak_concurrency(open_positions, closed_positions):
             events.append((entry, 1))
 
     if not events:
-        return (len(open_positions) or None), None
+        return (len(open_positions) or None), None, None
 
     # -1 before +1 at the same instant.
     events.sort(key=lambda e: (e[0], e[1]))
@@ -182,7 +184,7 @@ def _peak_concurrency(open_positions, closed_positions):
         running += delta
         if running > peak:
             peak, peak_at = running, when
-    return peak, _fmt_time(peak_at)
+    return peak, _fmt_time(peak_at), peak_at
 
 
 def _orb_fields(orb, entry_price, direction):
@@ -293,7 +295,7 @@ class DashboardState:
 
     def __init__(self, engine, market_data, master_loader,
                  portfolio=None, sector_monitor=None, get_feed_alive=None,
-                 index_monitor=None):
+                 index_monitor=None, demo=False):
         self.engine = engine
         self.market_data = market_data
         self.master_loader = master_loader
@@ -308,6 +310,21 @@ class DashboardState:
         # derive from its own read-only inputs). None if not wired
         # -- system health just omits the field rather than guess.
         self.get_feed_alive = get_feed_alive
+
+        # 2026-07-26 -- tools/dashboard_preview.py --demo drives the
+        # REAL engine with synthetic ticks so panels can be reviewed
+        # outside market hours. The prices are invented, so the page
+        # must say so unmistakably: a screenshot of a demo run is
+        # otherwise indistinguishable from a real session, and this
+        # project has already been burned once by a number that looked
+        # real and was not. main.py never passes this.
+        self.demo = bool(demo)
+
+        # Wall clock, injectable. tools/dashboard_preview.py --demo
+        # replays a synthetic 09:15-09:56 morning, and reading the real
+        # evening clock there would show "cap 0 -- no new entries",
+        # which is true of now and false of the session on screen.
+        self._clock = datetime.now
 
         self._lock = threading.Lock()
         self._snapshot = {"ready": False}
@@ -396,6 +413,7 @@ class DashboardState:
 
         return {
             "ready": True,
+            "demo": self.demo,
             "updated_at": datetime.now().strftime("%H:%M:%S"),
             "capital": self._build_capital(open_positions),
             "advances": breadth["advances"],
@@ -842,19 +860,33 @@ class DashboardState:
         """
         holding = len(open_positions)
         cap, no_entry_after = None, None
+        now = self._clock()
         try:
-            now = datetime.now()
             cap = self.engine._staged_position_cap(now)
             no_entry_after = STAGED_NO_ENTRY_AFTER
         except Exception:                   # noqa: BLE001 -- fail open
             cap = None
 
-        peak, peak_at = _peak_concurrency(open_positions, closed_positions)
+        peak, peak_at, peak_when = _peak_concurrency(
+            open_positions, closed_positions)
 
-        # "Binding" means the book was actually FULL at some point: the
+        # "Binding" means the book was FULL at some point -- the staged
         # cap is what stopped the next entry, not the gates upstream.
-        binding = (peak is not None and cap is not None and peak >= cap
-                   and cap > 0)
+        #
+        # Compared against the cap IN FORCE AT THE PEAK, not the cap
+        # right now. Those differ constantly: the cap ramps 3 -> 6 -> 10
+        # through the morning and drops to 0 after 15:00, so measuring
+        # a 09:40 peak of 3 against the current cap would report "not
+        # binding" every afternoon, which is the exact opposite of the
+        # truth. Caught while previewing this panel.
+        binding = False
+        if peak is not None:
+            try:
+                cap_then = self.engine._staged_position_cap(
+                    peak_when if peak_when is not None else now)
+                binding = bool(cap_then) and peak >= cap_then
+            except Exception:               # noqa: BLE001 -- fail open
+                binding = False
 
         return {
             "holding": holding,

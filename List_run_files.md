@@ -168,6 +168,21 @@ Largely superseded by the SUBSCRIBE column.
 | `py tools/inspect_results_feed.py` | earnings pulse is empty — shows NSE's raw fields |
 | `py tools/verify_master_database.py` | check every security ID against the live broker |
 | `py tools/dashboard_preview.py` | open the dashboard outside market hours (weekends, after 15:30) |
+| `py tools/dashboard_preview.py --demo` | **see every panel populated** with no broker and no market — synthetic ticks through the real engine |
+
+### `py tools/dashboard_preview.py --demo`
+The one to use when you just want to **look** at the dashboard.
+
+Drives the **real** engine with invented prices on real universe
+symbols: real ORB detection, real gates, real ATR sizing, real gate log.
+Positions, seats, the gate funnel and the daily-trend badges all
+populate. No Dhan credentials needed.
+
+A loud red **DEMO DATA** banner sits at the top of the page for as long
+as it runs — a screenshot of a demo session is otherwise
+indistinguishable from a real one.
+
+Open http://127.0.0.1:8000 and Ctrl+C to stop.
 
 ---
 
@@ -191,7 +206,7 @@ automatically.
 py -m pytest -q
 ```
 
-734 tests. Run after any code change — if this isn't green, don't trade.
+739 tests. Run after any code change — if this isn't green, don't trade.
 
 ---
 
