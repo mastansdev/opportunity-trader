@@ -21,6 +21,16 @@ wrong without them:
 | after a long weekend, "yesterday's close" is silently 3 days old — every gap and %-move measured against the wrong bar | `previous_trading_day()` returns the real one |
 | starts on a holiday, subscribes 545 symbols, waits forever for ticks | warns you at startup |
 
+**Fetched once a year, not every morning.** NSE publishes the whole
+year's list in December, so re-downloading it on the other 250 sessions
+is pointless traffic and one more thing that can fail at 08:45. The
+download is skipped once the current year is held, with a December
+look-ahead for the next year. Unplanned closures are still caught — a
+weekday with no bhavcopy gets inferred automatically.
+
+**Holiday = no trading.** The bot now exits on a holiday rather than
+starting a feed that will never tick.
+
 **Two independent sources**, so this doesn't depend on a website being
 up on the morning it matters:
 
@@ -47,6 +57,12 @@ with their purpose, so the bot now pulls the real thing.
 
 It's a **union, not a replacement** — anything you typed in by hand
 survives even if NSE's feed misses it.
+
+**Refreshed seasonally, not daily.** Results cluster into four windows —
+Q1 lands in Jul–Aug, Q2 in Oct–Nov, Q3 in Jan–Feb, Q4 plus the annual
+audit in Apr–May. So the refresh runs **daily in season, weekly out of
+season**. Not *never*: a company can move its date, and a straggler
+filing still carries a timestamp worth having.
 
 Still a plain dictionary lookup on the tick path. No database is touched
 while trading.
@@ -93,6 +109,33 @@ minutes before it usually reports."*
 there's real timing history, we can measure whether reporting-day
 mornings actually behave like ordinary mornings — and change the rule on
 evidence rather than on the idea sounding good.
+
+---
+
+## 3b. Dividends do not block trading
+
+Worth recording, because I got this wrong. I had put DIVIDEND in the
+price-adjusting set — the same bucket as a stock split — so seven liquid
+large-caps were being refused for a whole session over this:
+
+| Stock | Dividend | % of price |
+|---|---|---|
+| TATACAP | ₹0.57 | **0.17%** |
+| CRISIL | ₹10.00 | **0.23%** |
+| PERSISTENT | ₹18.00 | 0.35% |
+| DLF | ₹8.00 | 1.24% |
+
+Against a normal 2–3% daily range, all of that is noise. A split is a
+different animal — JLHL's 2:10 read as −80%.
+
+So dividends are now **informational**: remembered, shown in the
+reports, never a veto. Splits, bonuses, rights and demergers still block
+unconditionally.
+
+The one exception kept is `DIVIDEND_BLOCK_PCT` (5%) — a *special*
+dividend can be 20% of the share price, which genuinely rescales it like
+a split. Nothing you'll see in practice comes close. Set it to `None` to
+turn even that off.
 
 ---
 
