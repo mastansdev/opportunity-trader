@@ -338,6 +338,7 @@ def fetch_filed_results(calendar, days_back=400, known_symbols=None):
         return 0
 
     stored = 0
+    skipped_no_date = 0
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -351,12 +352,23 @@ def fetch_filed_results(calendar, days_back=400, known_symbols=None):
                else _as_date(row.get("broadCastDate")
                              or row.get("filingDate")))
         if day is None:
+            skipped_no_date += 1
             continue
         if calendar.remember(symbol, day,
                              purpose="Quarterly Results (filed)",
                              relating_to=row.get("relatingTo") or "",
                              broadcast_at=broadcast, source="NSE_FR"):
             stored += 1
+
+    # Loudly explain a silent zero. NSE renames these fields from time to
+    # time, and a filing whose date we cannot parse contributes nothing
+    # to the earnings pulse -- which would otherwise just look like "no
+    # data yet" forever.
+    if rows and not stored:
+        sample = sorted(rows[0].keys()) if isinstance(rows[0], dict) else []
+        warn(f"[RESULTS] NSE returned {len(rows)} filings but none could "
+             f"be stored ({skipped_no_date} had no parseable date). The "
+             f"field names have probably changed. Keys seen: {sample}")
     return stored
 
 
@@ -364,13 +376,30 @@ def refresh(calendar=None, known_symbols=None, days_ahead=45,
             days_back=400):
     """One full refresh. Never raises."""
     calendar = calendar or ResultsCalendar()
-    upcoming = fetch_board_meetings(calendar, days_ahead, known_symbols)
-    past = fetch_filed_results(calendar, days_back, known_symbols)
-    stats = calendar.stats()
+
+    # Count ROWS, before and after. remember() returns True for every
+    # valid call including updates, so counting calls overstated the
+    # result badly: the first live run reported "+639 scheduled" when it
+    # had actually stored 296 rows -- NSE lists several board-meeting
+    # entries per company and they collapse on UNIQUE(symbol, date).
+    before = calendar.stats()
+    fetch_board_meetings(calendar, days_ahead, known_symbols)
+    mid = calendar.stats()
+    fetch_filed_results(calendar, days_back, known_symbols)
+    after = calendar.stats()
+
     decision(
-        f"[RESULTS] {stats['events']} result events for "
-        f"{stats['symbols']} symbols; {stats['with_time']} carry an "
-        f"observed broadcast time. (+{upcoming} scheduled, +{past} filed "
-        f"this run.)"
+        f"[RESULTS] {after['events']} result events for "
+        f"{after['symbols']} symbols; {after['with_time']} carry an "
+        f"observed broadcast time. (+{mid['events'] - before['events']} "
+        f"new scheduled, +{after['events'] - mid['events']} new filed, "
+        f"+{after['with_time'] - before['with_time']} new timings.)"
     )
+    if after["with_time"] == 0:
+        decision(
+            "[RESULTS] No broadcast timings yet -- the earnings pulse "
+            "cannot say anything until past filings carry timestamps. "
+            "Run tools/inspect_results_feed.py to see what NSE is "
+            "actually returning."
+        )
     return calendar

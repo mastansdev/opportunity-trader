@@ -50,6 +50,7 @@ Author : H&M Opportunity Trader
 """
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
@@ -68,6 +69,60 @@ PRICE_ADJUSTING = {"SPLIT", "BONUS", "RIGHTS", "DEMERGER", "DIVIDEND"}
 # Everything else is context: it may explain volatility, but the price
 # scale is unchanged.
 INFORMATIONAL = {"EARNINGS", "BOARD_MEETING", "AGM", "BUYBACK", "OTHER"}
+
+# A SPLIT / BONUS / RIGHTS / DEMERGER always rescales the price by a
+# large factor (2:10, 1:1 -- never 0.2%), and the ratio text is a
+# nightmare to parse reliably. Those always block, no arithmetic.
+#
+# A DIVIDEND is different, and this is the 2026-07-26 correction. It
+# reduces the reference price by exactly the rupee amount, which is
+# usually TINY:
+#
+#     CRISIL      Rs 10.00 on Rs 4,347   = 0.23%
+#     TATACAP     Rs  0.57 on Rs   342   = 0.17%
+#     PERSISTENT  Rs 18.00 on Rs 5,200   = 0.35%
+#     DLF         Rs  8.00 on Rs   645   = 1.24%
+#     WIPRO       Rs  2.00 on Rs   177   = 1.13%
+#
+# Blocking CRISIL for the day over 0.23% -- inside the noise of any
+# normal 2-3% daily range -- is not caution, it is throwing away a
+# liquid large-cap for nothing. All seven of the above were blocked on
+# 2026-07-26. DLF and WIPRO genuinely matter against a 0.4% stop; the
+# other five do not.
+#
+# So a dividend blocks only when it is MATERIAL relative to the share
+# price. Above this, the unadjusted previous close is misleading enough
+# to distort the %-move the bot ranks on.
+MIN_DIVIDEND_DISTORTION_PCT = 1.0
+
+# Actions whose materiality we can compute (needs the rupee amount and
+# the price). Everything else in PRICE_ADJUSTING blocks unconditionally.
+_MEASURABLE = {"DIVIDEND"}
+
+_AMOUNT_RE = re.compile(
+    r"(?:rs|re|inr)\.?\s*([0-9]+(?:[0-9,]*)(?:\.[0-9]+)?)", re.IGNORECASE
+)
+
+
+def parse_amount(detail):
+    """
+    Pull the rupee figure out of an exchange detail string:
+
+        "Dividend - Rs 5.20 Per Share"        -> 5.20
+        "Interim Dividend - Rs 10  Per Share" -> 10.0
+        "Dividend - Re 0.57 Per Share"        -> 0.57
+
+    Returns None when there is no parseable amount -- and the caller
+    then treats the action as material, because an unmeasurable
+    distortion must never be assumed to be small.
+    """
+    match = _AMOUNT_RE.search(str(detail or ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
 
 
 def _utcnow():
@@ -165,12 +220,28 @@ class StockMemory:
             ).all()
         return [dict(r._mapping) for r in rows]
 
-    def price_distorting_symbols(self, on_date=None, window_days=1):
+    def price_distorting_symbols(self, on_date=None, window_days=1,
+                                 price_lookup=None,
+                                 min_pct=MIN_DIVIDEND_DISTORTION_PCT):
         """
         The set the engine actually needs: every symbol whose PRICE SCALE
-        is being changed around `on_date`. A %-move computed for one of
-        these against an unadjusted previous close is meaningless -- this
-        is the JLHL case, and the direct answer to "know before trading".
+        is being changed MATERIALLY around `on_date`. A %-move computed
+        for one of these against an unadjusted previous close is
+        meaningless -- this is the JLHL case, and the direct answer to
+        "know before trading".
+
+        price_lookup: optional callable symbol -> last close. When given,
+        a DIVIDEND is only counted if it is at least `min_pct` of the
+        share price (see MIN_DIVIDEND_DISTORTION_PCT for why, with real
+        numbers). Splits, bonuses, rights and demergers always count.
+
+        WITHOUT a price_lookup the behaviour is unchanged -- every
+        price-adjusting action blocks. That keeps every existing caller
+        and test working, and means the conservative path is the default.
+
+        FAIL-CLOSED, unlike most of this codebase: if the amount cannot
+        be parsed or the price is unknown, the action IS counted. An
+        unmeasurable distortion must never be assumed to be a small one.
 
         Returned as {symbol: [reasons]} so the log can say WHY.
         """
@@ -188,10 +259,54 @@ class StockMemory:
         out = {}
         for r in rows:
             d = dict(r._mapping)
-            out.setdefault(d["symbol"], []).append(
-                f"{d['action_type']}"
-                + (f" ({d['detail']})" if d.get("detail") else "")
-            )
+            reason = (f"{d['action_type']}"
+                      + (f" ({d['detail']})" if d.get("detail") else ""))
+
+            if price_lookup is not None and d["action_type"] in _MEASURABLE:
+                pct = self._distortion_pct(d, price_lookup)
+                if pct is not None and pct < min_pct:
+                    continue                 # immaterial -- trade it
+                if pct is not None:
+                    reason += f" -- {pct:.2f}% of price"
+
+            out.setdefault(d["symbol"], []).append(reason)
+        return out
+
+    @staticmethod
+    def _distortion_pct(action, price_lookup):
+        """How much of the share price this action removes, as a
+        percentage. None when it cannot be determined -- the caller then
+        treats it as material."""
+        amount = parse_amount(action.get("detail"))
+        if amount is None or amount <= 0:
+            return None
+        try:
+            price = price_lookup(action["symbol"])
+        except Exception:
+            return None
+        if not price or price <= 0:
+            return None
+        return amount / price * 100.0
+
+    def immaterial_symbols(self, on_date=None, window_days=1,
+                           price_lookup=None,
+                           min_pct=MIN_DIVIDEND_DISTORTION_PCT):
+        """
+        The mirror of the above: actions we are DELIBERATELY ignoring
+        because they are too small to matter. Exists so the decision is
+        visible in the log rather than silent -- a stock quietly not
+        being blocked is exactly the kind of thing that should be
+        auditable.
+        """
+        if price_lookup is None:
+            return {}
+        blocked = self.price_distorting_symbols(
+            on_date, window_days, price_lookup=price_lookup, min_pct=min_pct)
+        everything = self.price_distorting_symbols(on_date, window_days)
+        out = {}
+        for symbol, reasons in everything.items():
+            if symbol not in blocked:
+                out[symbol] = reasons
         return out
 
     def all_symbols_with_facts(self, on_date=None, window_days=1):

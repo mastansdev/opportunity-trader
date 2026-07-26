@@ -164,6 +164,26 @@ def fetch_bse(memory, days_ahead=30, known_symbols=None):
     return stored
 
 
+def _daily_close_lookup():
+    """symbol -> last stored daily close, or None if the daily store is
+    unavailable. Built once per refresh and cached in a dict, so the
+    materiality check does not hit SQLite once per action."""
+    try:
+        from core.daily_store import DailyStore
+        store = DailyStore()
+        cache = {}
+
+        def lookup(symbol):
+            if symbol not in cache:
+                bars = store.history(symbol, days=1)
+                cache[symbol] = bars[-1]["close"] if bars else None
+            return cache[symbol]
+
+        return lookup
+    except Exception:
+        return None
+
+
 def refresh(memory=None, known_symbols=None, days_ahead=30):
     """
     One full refresh of the stock memory. Call at startup and, ideally,
@@ -177,7 +197,17 @@ def refresh(memory=None, known_symbols=None, days_ahead=30):
     n_bse = fetch_bse(memory, days_ahead, known_symbols)
 
     today = datetime.now().date()
-    distorting = memory.price_distorting_symbols(today)
+
+    # Materiality (2026-07-26). A dividend shifts the reference price by
+    # the rupee amount, which is usually a fraction of a percent -- on
+    # 2026-07-26 this rule was blocking CRISIL for 0.23% and TATACAP for
+    # 0.17%, both well inside a normal day's range. Last close comes from
+    # the daily-candle store; if it is unavailable, price_lookup stays
+    # None and EVERY price-adjusting action blocks, exactly as before.
+    price_lookup = _daily_close_lookup()
+
+    distorting = memory.price_distorting_symbols(today,
+                                                 price_lookup=price_lookup)
     if distorting:
         decision(
             "[MEMORY] Price-distorting corporate actions in effect around "
@@ -188,6 +218,17 @@ def refresh(memory=None, known_symbols=None, days_ahead=30):
         )
     else:
         diagnostic("[MEMORY] No price-distorting corporate actions today.")
+
+    # Say out loud what we chose to IGNORE. A stock quietly not being
+    # blocked is exactly the kind of decision that should be auditable.
+    ignored = memory.immaterial_symbols(today, price_lookup=price_lookup)
+    if ignored:
+        decision(
+            "[MEMORY] Too small to matter, still tradeable: "
+            + ", ".join(f"{s} ({'; '.join(r)})" for s, r in
+                        sorted(ignored.items())[:12])
+            + ("..." if len(ignored) > 12 else "")
+        )
 
     decision(
         f"[MEMORY] Stock memory refreshed: {n_nse} new from NSE, "
