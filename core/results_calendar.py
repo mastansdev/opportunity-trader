@@ -77,6 +77,22 @@ _RESULT_MARKERS = ("result", "financial statement", "unaudited",
 # So the refresh runs DAILY in season and WEEKLY out of season. Not
 # "never": a company can and does move its date, and a straggler filing
 # still carries a broadcast timestamp worth having for the pulse.
+# Some companies simply have no habit. Real data, 2026-07-26, all of
+# them genuine "Outcome of Board Meeting" filings:
+#
+#     TCS       15:57 15:52 15:50 15:55 15:52   spread   7 min  <- habit
+#     ASIANPAINT 14:11 15:05 13:58 14:06        spread  67 min  <- habit
+#     COFORGE   21:54 16:10 23:35 16:58         spread 445 min  <- none
+#
+# A median of 17:06 for COFORGE is arithmetically true and completely
+# useless. So typical_time() carries a `reliable` flag rather than
+# leaving every caller to eyeball the spread and decide for itself.
+#
+# Two hours: wide enough to tolerate a board meeting running long,
+# narrow enough that "stop trading 30 minutes before" would still be
+# in the right part of the day.
+RELIABLE_SPREAD_MINUTES = 120
+
 RESULTS_SEASON_MONTHS = {1, 2, 4, 5, 7, 8, 10, 11}
 OFF_SEASON_REFRESH_DAYS = 7
 
@@ -109,7 +125,11 @@ _RESULT_CATEGORIES = ("outcome of board meeting", "financial result",
 _EXCLUDED_CATEGORIES = ("shareholders meeting", "update", "analyst",
                         "investor", "press release", "newspaper",
                         "presentation", "transcript", "certificate",
-                        "trading window", "disclosure under")
+                        "trading window", "disclosure under",
+                        # Exchange queries and the company's replies.
+                        # NESCO carried three, ACI two -- filed days
+                        # after the numbers, at any hour.
+                        "clarification", "reply to")
 
 # Follow-up documents, checked against the whole text as a backstop.
 _NOISE_MARKERS = (
@@ -370,7 +390,9 @@ class ResultsCalendar:
         spread = max(times) - min(times)
         return dict(minutes=median,
                     hhmm=f"{median // 60:02d}:{median % 60:02d}",
-                    samples=len(times), spread_minutes=spread)
+                    samples=len(times), spread_minutes=spread,
+                    reliable=(spread <= RELIABLE_SPREAD_MINUTES
+                              and len(times) >= 3))
 
     def pulse(self, symbol, min_samples=2):
         """One plain-English line, or None."""
@@ -379,6 +401,10 @@ class ResultsCalendar:
             n = len(self.observed_times(symbol))
             return (f"no timing history yet ({n} observed)" if n
                     else "no timing history yet")
+        if not t["reliable"]:
+            return (f"NO reliable pattern -- {t['samples']} past results "
+                    f"spread over {t['spread_minutes']} min "
+                    f"(median {t['hhmm']}, do not rely on it)")
         return (f"usually reports around {t['hhmm']} "
                 f"({t['samples']} past results, spread "
                 f"{t['spread_minutes']} min)")

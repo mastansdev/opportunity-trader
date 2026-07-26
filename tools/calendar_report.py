@@ -129,10 +129,24 @@ def main():
              for s in {r["symbol"] for r in results.upcoming(days=14)}]
     timed = [(s, t) for s, t in timed if t]
     if timed:
-        decision("  Habitual reporting times (from our own history):")
-        for symbol, t in sorted(timed, key=lambda kv: -kv[1]["samples"])[:12]:
+        reliable = [(s, t) for s, t in timed if t["reliable"]]
+        vague = [(s, t) for s, t in timed if not t["reliable"]]
+
+        decision(f"  RELIABLE reporting times ({len(reliable)} of "
+                 f"{len(timed)} with history):")
+        for symbol, t in sorted(reliable,
+                                key=lambda kv: kv[1]["spread_minutes"])[:15]:
             decision(f"      {symbol:<14} ~{t['hhmm']}  "
-                     f"({t['samples']} past, +/-{t['spread_minutes']}min)")
+                     f"({t['samples']} past, spread {t['spread_minutes']}min)")
+        if not reliable:
+            decision("      (none yet -- needs 3+ results within a "
+                     "2-hour spread)")
+        if vague:
+            decision(f"  No usable pattern ({len(vague)}): "
+                     + ", ".join(s for s, _ in sorted(
+                         vague, key=lambda kv: -kv[1]["spread_minutes"])[:12]))
+            decision("  (these file at genuinely inconsistent hours -- "
+                     "the median is arithmetically true and useless)")
     elif stats["with_time"] == 0:
         decision("  No timing history yet -- it accumulates one quarter at "
                  "a time. Nothing to do but keep running the morning tool.")

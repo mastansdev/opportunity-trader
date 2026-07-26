@@ -499,3 +499,56 @@ def test_empty_input_is_not_results():
     from core.results_calendar import is_results_announcement
     assert is_results_announcement("", "") is False
     assert is_results_announcement(None, None) is False
+
+
+# ===============================================================
+# Reliability -- some companies genuinely have no habit
+# ===============================================================
+
+def test_exchange_clarifications_are_not_results():
+    """NESCO carried three, ACI two. The exchange queries a filing days
+    later and the company replies -- at any hour."""
+    from core.results_calendar import is_results_announcement
+    assert is_results_announcement(
+        "Clarification - Financial Results",
+        "The Exchange has sought clarification") is False
+    assert is_results_announcement(
+        "Reply to Clarification- Financial results",
+        "The Exchange had sought clarification") is False
+
+
+def test_a_tight_pattern_is_reliable(results):
+    """TCS: 15:57 15:52 15:50 15:55 15:52 -- a 7-minute spread."""
+    for month, hh, mm in [(1, 15, 50), (4, 15, 55), (7, 15, 52),
+                          (10, 15, 57)]:
+        results.remember("TCS", date(2026, month, 10),
+                         broadcast_at=datetime(2026, month, 10, hh, mm))
+    t = results.typical_time("TCS")
+    assert t["reliable"] is True
+    assert t["spread_minutes"] == 7
+    assert "usually reports around" in results.pulse("TCS")
+
+
+def test_a_scattered_pattern_is_NOT_reliable(results):
+    """COFORGE: 21:54 16:10 23:35 16:58, all genuine board-meeting
+    outcomes. A median of 17:06 is arithmetically true and useless."""
+    for month, hh, mm in [(1, 21, 54), (4, 16, 10), (7, 23, 35),
+                          (10, 16, 58)]:
+        results.remember("COFORGE", date(2026, month, 10),
+                         broadcast_at=datetime(2026, month, 10, hh, mm))
+    t = results.typical_time("COFORGE")
+    assert t["reliable"] is False
+    assert t["spread_minutes"] > 120
+    assert "NO reliable pattern" in results.pulse("COFORGE")
+    assert "do not rely on it" in results.pulse("COFORGE")
+
+
+def test_two_samples_is_never_reliable_however_tight(results):
+    """Two quarters cannot establish a habit, even if identical."""
+    for month in (1, 4):
+        results.remember("THIN", date(2026, month, 10),
+                         broadcast_at=datetime(2026, month, 10, 16, 0))
+    t = results.typical_time("THIN")
+    assert t["samples"] == 2
+    assert t["spread_minutes"] == 0
+    assert t["reliable"] is False
