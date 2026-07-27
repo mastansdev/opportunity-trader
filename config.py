@@ -923,6 +923,36 @@ MAX_TICK_JUMP_PCT = 0.20     # >20% in one tick/minute = reject
 # validated across many REAL days instead of one scraped log.
 ENABLE_CANDLE_RECORDING = True
 
+# Last minute-bucket the recorder will accept, 2026-07-27.
+#
+# EVIDENCE, from that day's own recording (data/backtest_candles.db):
+#
+#   minute   bars  o=h=l=c
+#   15:28     688        2      <- normal
+#   15:29     134      134      <- ALL flat, single-price artifacts
+#   15:40..    32       32      <- post-market, every one flat
+#
+# Sixty-seven one-minute "moves" bigger than 4% exist in that file and
+# every single one is at or after 15:29. CARTRADE "fell" 11% at 15:50.
+# TBZ "fell" 7.7% at 15:52 on ZERO volume. MARKSANS shows one bar at
+# 15:29 of 246.95 after trading 263-265 all afternoon -- it never
+# happened, and it was reported to the operator as a real price move
+# before anyone looked at the bar.
+#
+# Cause is two-fold and neither is fixable downstream:
+#   1. core/candle_engine.py only closes a candle when a tick lands in
+#      the NEXT bucket. After 15:30 there are no more real ticks, so
+#      the final minutes get closed -- much later -- by post-market
+#      snapshot prices from a different session.
+#   2. The post-close/auction window prints at prices that have no
+#      relationship to continuous trading.
+#
+# Anything recorded from 15:29 onward is therefore not a candle, and a
+# backtest that reads to end-of-day will trade these ghosts. The cost
+# of the cutoff is one minute of real data; the cost of not having it
+# is silently wrong numbers, which already happened once.
+RECORDER_LAST_MINUTE = "15:28"
+
 # Daily REALIZED-loss kill switch: once the session's realized P&L
 # (sum over closed trades, partial exits included) is at or below
 # -DAILY_MAX_LOSS_RS, no new structural entries for the rest of the

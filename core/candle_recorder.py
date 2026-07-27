@@ -27,8 +27,22 @@ Author : H&M Opportunity Trader
 """
 
 import threading
+from datetime import time as dtime
 
+from config import RECORDER_LAST_MINUTE
 from core.logger import decision, warn
+
+
+def _parse_hhmm(value):
+    hour, minute = value.split(":")
+    return dtime(int(hour), int(minute))
+
+
+# Last bucket we will accept. See config.RECORDER_LAST_MINUTE for the
+# evidence -- in short, every bar at or after 15:29 on 2026-07-27 was a
+# single-price artifact or a post-market print, and all 67 of that
+# file's >4% one-minute "moves" live there.
+RECORDER_LAST_MINUTE_T = _parse_hhmm(RECORDER_LAST_MINUTE)
 
 
 class CandleRecorder:
@@ -40,6 +54,7 @@ class CandleRecorder:
         self._store = store
         self._broken = False
         self._written = 0
+        self._dropped_after_close = 0
 
     def _get_store(self):
         if self._store is None:
@@ -59,6 +74,15 @@ class CandleRecorder:
             t = closed_candle.get("time")
             if t is None:
                 return
+
+            # End-of-session guard, 2026-07-27. The candle is judged by
+            # its OWN bucket time, not by wall clock -- a 15:20 candle
+            # that only closes at 15:45 is still a real 15:20 candle,
+            # and a 15:50 candle is junk no matter when it arrives.
+            if t.time() > RECORDER_LAST_MINUTE_T:
+                self._dropped_after_close += 1
+                return
+
             minute = t.strftime("%Y-%m-%dT%H:%M")
             row = dict(
                 date=t.strftime("%Y-%m-%d"),
@@ -108,4 +132,10 @@ class CandleRecorder:
             decision(
                 f"[RECORDER] Session candles saved: {self._written} bars "
                 f"(last flush {n})."
+            )
+        if self._dropped_after_close:
+            decision(
+                f"[RECORDER] Dropped {self._dropped_after_close} bars timed "
+                f"after {RECORDER_LAST_MINUTE} -- post-close prints, not "
+                f"real candles. This is expected, not an error."
             )

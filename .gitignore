@@ -23,6 +23,7 @@ data/bse_lag_snapshot_*.json
 
 # Databases (regenerated; keep the repo light)
 data/*.db
+data/*.db.bak_*
 *.db-journal
 data/entries_paused.flag
 data/universe_review.csv

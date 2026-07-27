@@ -1,0 +1,40 @@
+EVERY TRADE -- 2026-07-27
+
+symbol        in        out         entry     exit   qty  min   gross   chg     net   rank@in   RS@in   dayhigh    close  missed%  entry by            exit by
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+AUBANK      09:23:09  09:27:44    1046.00  1039.40   135    4    -891    97    -988    59/678   1.31%   1062.00  1013.10     2.2%  STRUCTURAL_LONG_BR  TRAILING_STOP
+CAPLIPOINT  09:26:10  09:32:42    2591.40  2597.00    46    6     258    89     168     1/680   4.42%   2651.90  2483.00     2.1%  STRUCTURAL_LONG_BR  TRAILING_STOP
+CMLL        10:39:31  10:41:27     614.50   618.05   325    2   1,154   118   1,036     1/652  14.82%    623.55   523.25     0.9%  MANUAL_BUY_DASHBOA  MANUAL_EXIT
+BLUESTONE   10:41:00  10:41:51     812.70   817.95   246    0   1,292   118   1,173    18/641   3.49%    828.85   779.00     1.3%  STRUCTURAL_LONG_BR  MANUAL_EXIT
+SENCO       10:41:19  10:48:36     417.00   422.80   479    7   2,778   118   2,660     3/641   7.70%    429.85   383.70     1.7%  MANUAL_BUY_DASHBOA  MANUAL_EXIT
+ACUTAAS     10:51:49  10:56:33    3462.00  3436.10    57    5  -1,476   116  -1,593     7/630   5.79%   3471.40  3251.90     1.0%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+CREDITACC   10:52:27  10:57:52    1608.00  1607.00   124    5    -124   117    -241   232/617   0.45%   1613.70  1518.60     0.4%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+LAURUSLABS  10:51:44  11:00:30    1681.60  1681.60   118    9       0   117    -117    18/630   3.47%   1734.00  1609.00     3.1%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+SWIGGY      10:45:00  11:09:06     264.23   261.57   756   24  -2,011   117  -2,128    15/630   3.81%    264.46   251.50     1.1%  STRUCTURAL_LONG_BR  TRAILING_STOP
+LATENTVIEW  11:04:04  11:11:02     318.20   316.80   628    7    -879   117    -997     7/614   5.01%    321.10   296.40     1.4%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+AWFIS       11:04:19  11:12:32     289.50   288.00   690    8  -1,035   117  -1,152     6/614   5.31%    295.00   273.90     2.4%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+CARTRADE    11:03:56  11:18:26    2893.40  2892.90    69   15     -34   118    -152     3/608   7.21%   3015.00  2658.00     4.2%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+BLUESTONE   12:44:52  12:49:07     816.25   810.00   245    5  -1,531   117  -1,648    41/620   2.84%    828.85   779.00     2.3%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+MAYURUNIQ   12:45:31  12:50:01     830.00   825.50   240    5  -1,080   117  -1,197     9/610   4.81%    836.15   794.00     1.3%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+WSTCSTPAPR  12:44:33  12:51:07     586.10   585.75   341    7    -119   118    -237    15/620   4.06%    590.00   553.45     0.7%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+ATUL        12:45:01  12:51:54    6786.50  6764.50    29    6    -638   116    -754    37/610   2.91%   6838.00  6490.00     1.1%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+DPABHUSHAN  12:45:07  12:53:01    1402.10  1398.25   142    8    -547   117    -664    25/610   3.55%   1444.80  1342.00     3.3%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+INDIGO      12:45:43  12:53:12    5214.50  5217.50    38    8     114   117      -3   115/610   1.49%   5242.50  5000.00     0.5%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+ETERNAL     12:44:57  12:53:35     295.20   295.40   677    9     135   118      18    13/620   4.41%    296.85   280.00     0.5%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+CARTRADE    12:44:22  12:58:49    2958.80  2964.50    67   14     382   117     265     1/620   9.58%   3015.00  2658.00     1.7%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+DBL         12:45:57  13:12:28     438.70   439.10   455   27     182   118      64    12/610   4.49%    444.90   420.70     1.3%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+LAURUSLABS  13:42:19  13:50:19    1717.50  1718.30   116    8      93   117     -25     9/589   5.56%   1734.00  1609.00     0.9%  MANUAL_BUY_DASHBOA  TRAILING_STOP
+MARKSANS    13:08:03  13:52:42     260.70   261.40   767   44     537   118     419    16/609   3.92%    265.45   246.95     1.5%  STRUCTURAL_LONG_BR  TRAILING_STOP
+TBZ         14:59:03  14:59:58     274.15   281.00   729    0   4,994   119   4,875     5/640   7.40%    283.00   259.00     0.7%  STRUCTURAL_LONG_BR  MANUAL_EXIT
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL   24 trades   gross Rs 1,551   charges Rs 2,770   NET Rs -1,219
+        winners 9   losers 15   avg hold 9.7 min
+
+BY EXIT    your manual exits   4  net Rs     9,744
+           bot trailing stop  20  net Rs   -10,962
+BY ENTRY   bot chose           6  net Rs     3,520
+           you chose          18  net Rs    -4,738
+
+rank@in  = where the stock ranked among all 630+ by move-from-open, at the minute of entry
+RS@in    = how much it was beating the market median by, at entry
+missed%  = how much further it ran above the exit price, to its day high
