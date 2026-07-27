@@ -37,3 +37,44 @@ def _isolate_trade_log(tmp_path, monkeypatch):
     monkeypatch.setattr(
         trade_logger, "TRADE_LOG_PATH", os.path.join(str(tmp_path), "trade_log.csv")
     )
+
+
+# Mechanisms that config.py may switch OFF in production, but whose
+# CODE still has to be tested.
+#
+# 2026-07-27: eight strategy gates were disabled in config.py at once
+# (shorts, rotation, sector gate, still-trending, the early-momentum
+# door, the no-progress timer, one-trade-per-symbol, reentry-block).
+# Twenty-four tests went red -- not because anything broke, but
+# because they assert what those mechanisms DO, and the mechanisms
+# were now short-circuiting on a production flag.
+#
+# That coupling is the real bug: a test of "does the sector gate
+# reject a weak sector" should never depend on whether we happen to
+# be running the sector gate this week. Otherwise every strategy
+# decision silently deletes test coverage, and the suite goes quiet
+# exactly when it is most needed.
+#
+# So tests exercise every mechanism; config decides which ones the
+# live bot actually uses. A test that wants a mechanism OFF still
+# monkeypatches it off itself, and that still wins -- this fixture
+# only sets the starting state.
+_MECHANISMS_ON_FOR_TESTS = (
+    "ENABLE_SHORT_TRADES",
+    "ENABLE_SLOT_ROTATION",
+    "ENABLE_SECTOR_STRENGTH_GATE",
+    "ENABLE_STILL_TRENDING",
+    "ENABLE_EARLY_MOMENTUM_ENTRY",
+    "ENABLE_NO_PROGRESS_EXIT",
+    "ONE_TRADE_PER_SYMBOL_PER_DAY",
+    "BLOCK_REENTRY_AFTER_STOPOUT",
+)
+
+
+@pytest.fixture(autouse=True)
+def _mechanisms_enabled_for_tests(monkeypatch):
+    import core.engine as engine_module
+
+    for name in _MECHANISMS_ON_FOR_TESTS:
+        if hasattr(engine_module, name):
+            monkeypatch.setattr(engine_module, name, True)

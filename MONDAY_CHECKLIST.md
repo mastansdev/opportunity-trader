@@ -25,13 +25,21 @@ News is advisory; it never blocks trading.
 py main.py
 ```
 
+> **Corrected 2026-07-27.** This table used to say "both 0 = exchanges
+> blocking." That was wrong and it cost time today. The old line counted
+> only NEWLY STORED facts, so **0 new is the normal answer on every
+> restart after the first** — the same rows are simply already held. The
+> log now prints FETCHED and NEW separately. Judge it on **fetched**.
+> Zero fetched always comes with a `[CORP_ACTIONS] ... fetch failed`
+> warning; if there is no warning, nothing is wrong.
+
 ### 3. Read the startup block — these six lines matter
 
 | Line | Normal | Red flag |
 |---|---|---|
 | `[MASTER_LOADER] Loaded 750 symbols` | 750 | anything less |
 | `Universe resolved: 750 symbols` | 750 | large drop |
-| `[MEMORY] Stock memory refreshed: N new from NSE, M from BSE` | **any N or M > 0** | **both 0** = exchanges blocking; splits/dividends won't be known |
+| `[MEMORY] Stock memory refreshed: NSE X fetched / N new, BSE Y fetched / M new` | **any X or Y > 0** | **X and Y both 0** = exchanges blocking |
 | `[MEMORY] Price-distorting corporate actions ... will NOT be traded` | a short list, or "none today" | a huge list (>30) = suspect bad parsing |
 | `[LEARN] Trade memory active — N past trades remembered` | 0 today (first session) | — |
 | `[RECORDER] Recording this session's candles` | present | missing = no data collected, **restart** |

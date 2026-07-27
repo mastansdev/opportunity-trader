@@ -419,6 +419,25 @@ ORB_STOP_BUFFER_PCT = 0.2
 # and it stands independently of TOP_N_MOMENTUM_MODE below (a
 # stop-out in the new fixed-bracket mode is just as much "this
 # breakout already failed today" as a trailing-stop-out was).
+# DISABLED 2026-07-27, same reasoning as ONE_TRADE_PER_SYMBOL_PER_DAY
+# above: this rule and that one together meant a single stop-out
+# permanently retired a stock for the day. CAPLIPOINT was refused at
+# 09:32:42 ("stopped out once today -- no repeat attempts") in the
+# strongest tape of the month, four minutes after being trailed out
+# at +0.22%. The stop-out was caused by a 0.4% trail floor, not by
+# the setup failing. Punishing the stock for our exit is backwards.
+#
+# REVERTED to True 2026-07-27, operator's decision, same session, and
+# for the same reason as ONE_TRADE_PER_SYMBOL_PER_DAY above: the case
+# for removing it was intraday reasoning, and the system is moving to
+# multi-day MTF holds where a stop-out means something different.
+# Re-assess against MTF, do not remove on the old argument.
+#
+# NOTE: the load_entry_blocks() filter added today still stands and is
+# still correct -- it only drops restored blocks when this flag is
+# OFF, so with the flag back ON nothing is dropped. It exists so that
+# turning the rule off in future actually turns it off, instead of
+# leaving yesterday's saved blocks silently enforcing a dead rule.
 BLOCK_REENTRY_AFTER_STOPOUT = True
 
 # ----------------------------------------------------------
@@ -518,7 +537,14 @@ MIN_ATR_CANDLES = 5
 # test whether the bigger size behaves. Paired with the Rs 200,000
 # notional cap below so the full Rs 2,000 risk actually gets used
 # (at a 1% stop, qty wants 100 x risk = Rs 200k of notional).
-RISK_PER_TRADE_RS = 800.0
+# APPLIED 2026-07-27. The comment block above has said Rs 2,000 since
+# 2026-07-24; the value said 800.0 and nobody moved it. Rs 800 on
+# Rs 10L of capital is 0.08% risk per trade -- roughly 15x smaller
+# than standard position sizing (0.5-2%), which is how a flat Rs 117
+# of charges came to eat 14.7% of everything risked. Paired with the
+# 1.0% stop floor below, Rs 2,000 / 1% = exactly the Rs 200,000
+# notional cap, which is what that cap was sized for.
+RISK_PER_TRADE_RS = 2000.0
 
 # Initial stop distance, in ATR multiples, from entry.
 # 2026-07-24 (evening) WIDENED from 1.5x to 2.5x after the operator's
@@ -592,7 +618,14 @@ ATR_TRAIL_ACTIVATION_MULT = 1.0
 # not on noise. This floor applies to BOTH the initial stop and the
 # trailing distance, so neither can ever be razor-thin regardless of
 # how small the raw ATR reads.
-MIN_STOP_DISTANCE_PCT = 0.004
+# APPLIED 2026-07-27. The comment above has said 1.0% since
+# 2026-07-24 ("a Rs 600 stock now has Rs 6 of room, not 50 paise");
+# the value said 0.004 and nobody moved it. Live proof on 2026-07-27:
+# CAPLIPOINT entered 09:26:10, trailed out 09:32:42 at +0.22% in an
+# 88/100 bullish tape -- a winner closed by the trail floor after six
+# minutes. Across 61 sessions the 0.4% floor put 75% of all exits on
+# the stop and left 8 trades out of 1,957 still open at the bell.
+MIN_STOP_DISTANCE_PCT = 0.01
 
 # Hard ceiling on notional exposure (qty * entry_price) for any ONE
 # trade, regardless of what the risk/ATR formula computes. Backstop
@@ -674,7 +707,13 @@ TREND_RANK_REFRESH_SECONDS = 5   # recompute the leaderboard at most this often
 # Strength = %change in the trade's own favour (gainers for longs,
 # losers for shorts), so a winning runner is never the weakest and is
 # never rotated out -- only stalling laggards are.
-ENABLE_SLOT_ROTATION = True
+# DISABLED 2026-07-27. The clearest single defect in the system.
+# Across 61 sessions rotation fired 293 times for GROSS -Rs 8,509 --
+# negative BEFORE charges -- and -Rs 42,734 after. It was not evicting
+# laggards for winners; it was closing positions at a loss and paying
+# Rs 117 for the privilege, 293 times. MULTIDAY_FINDINGS.md section 2.
+# It is also a rule we invented, not a market fact.
+ENABLE_SLOT_ROTATION = False
 ROTATION_MIN_STRENGTH_EDGE = 0.004   # challenger must lead by >0.4% move
 
 # ==========================================================
@@ -692,6 +731,25 @@ ROTATION_MIN_STRENGTH_EDGE = 0.004   # challenger must lead by >0.4% move
 #      gave a 53.6% win rate and -Rs15,714). No targets.
 #   4. 30% base hit rate at 2:1 payoff = -0.1R. Selection has to
 #      do the work; volume of trades only adds cost.
+
+# --- LONG ONLY --------------------------------------------
+# 2026-07-27, operator's decision, and the best-evidenced change
+# in the whole file.
+#
+# Across 61 replayed sessions (MULTIDAY_FINDINGS.md section 1):
+#
+#     LONG    922 trades   gross +Rs 65,546   (+Rs 71/trade)
+#     SHORT  1035 trades   gross  +Rs 2,450   (+Rs  2/trade)
+#
+# Shorts were 53% of everything the bot did and 3.6% of the gross.
+# Rs 2,450 across 1,035 trades is indistinguishable from zero, and
+# roughly Rs 121,000 of charges were paid to collect it. This is not
+# a threshold to re-tune -- continuation on the short side is noise
+# at this timeframe, so the direction is switched off entirely.
+#
+# Enforced in core/engine.py's _try_structural_entry, before any
+# other gate, so a short signal costs nothing to refuse.
+ENABLE_SHORT_TRADES = False
 
 # --- Relative-strength BAND selection ---------------------
 # Trade only breakouts whose move-vs-market sits inside this band:
@@ -715,7 +773,13 @@ RS_BAND_MAX = 0.050      # <= +5.0% (beyond this = exhausted)
 # in the BOTTOM part. Position 1.0 = at the day's high, 0.0 = at the low.
 # Generous by design (0.65) -- this is a "not rolling over" check, not a
 # "must be at the exact high" check.
-ENABLE_STILL_TRENDING = True
+# DISABLED 2026-07-27. POST_MONDAY_TODO.md section B lists this rule's
+# status as "CONTRADICTED on 2026-07-24" and it has never been
+# validated since. It is one of twelve entry gates, none of which the
+# 61-session corpus supports, and together they produced 2 trades on a
+# day the operator correctly read as strongly bullish. Off until it
+# earns its place in a replay, not before.
+ENABLE_STILL_TRENDING = False
 STILL_TRENDING_MIN_POSITION = 0.65
 
 # The flat ceiling stays ONLY as a blow-off guard, raised well clear of
@@ -727,10 +791,24 @@ MAX_ABS_MOVE_PCT = 0.12
 # Never fill all 10 seats in the opening minute (2026-07-24: 11 of
 # 27 entries fired in the single 09:34 minute). Ramp with the day.
 ENABLE_STAGED_ENTRY = True
+# REMOVED 2026-07-27 (operator): "does the market work as per your
+# rule and give 2 opportunities before 10, 5 after 10, 10 before 12?"
+# It does not. The ladder was listed in POST_MONDAY_TODO.md section B
+# as "reasoning only" -- never measured, never validated -- and on
+# 2026-07-27 it meant a strongly bullish tape (88/100) produced two
+# trades before 10:00 and nothing after, because both early seats
+# were spent by 09:26 and the ladder capped the rest.
+#
+# The ladder was built for ONE real problem: on 2026-07-24, 11 of 27
+# entries fired inside the single 09:34 minute. That problem is real,
+# but a time ladder is the wrong tool -- it throttles the whole day to
+# fix one minute. MAX_OPEN_POSITIONS still caps total exposure, which
+# is what actually protects margin.
+#
+# Now a single flat limit for the whole session. Opportunity decides
+# the timing, not the clock.
 STAGED_POSITION_LIMITS = [
-    ("10:00", 3),    # before 10:00 -> max 3 concurrent
-    ("11:00", 6),    # before 11:00 -> max 6
-    ("15:00", 10),   # before 15:00 -> max 10
+    ("15:29", 10),   # one limit, all day
 ]
 # No fresh entries after this. Set to 15:00 (2026-07-25): the earlier
 # 14:00 cutoff threw away the afternoon, and on 2026-07-24 the two BEST
@@ -741,13 +819,45 @@ STAGED_NO_ENTRY_AFTER = "15:00"
 # --- One trade per stock per day --------------------------
 # A symbol gets ONE attempt per direction per day. Kills the
 # whipsaw churn (CHENNPETRO traded 9x, CORONA 6x on 2026-07-24).
+#
+# RELAXED 2026-07-27. The churn it was built to stop was a symptom of
+# a 0.4% stop inside normal noise -- CHENNPETRO was re-entered 9 times
+# because it was stopped out 9 times, not because re-entry is wrong.
+# With the stop at 1.0% and the no-progress timer off, the churn cause
+# is treated directly, and a permanent same-day ban on the day's
+# strongest stock is a bigger cost than the churn ever was: on
+# 2026-07-27 it locked out CAPLIPOINT at 09:32 in an 88/100 bullish
+# tape, for the rest of the session.
+#
+# REVERTED to True 2026-07-27, operator's decision, same session.
+# The churn this stops is real (CHENNPETRO 9x, CORONA 6x) and the
+# argument for removing it was built on INTRADAY behaviour. The system
+# is moving to MTF multi-day holds, where the whole premise changes: a
+# position held for days is not re-entered anyway, and a stop-out on a
+# multi-day trade is a far stronger signal than a stop-out on a
+# six-minute one. Stays ON until it is assessed against MTF holding,
+# not removed on intraday reasoning that no longer applies.
 ONE_TRADE_PER_SYMBOL_PER_DAY = True
 
 # --- No-progress exit -------------------------------------
 # Dead money: a position that hasn't reached +NO_PROGRESS_R of its
 # risk within the window isn't working -- close it and free the
 # slot (BHARTIARTL squatted a seat until 15:10 doing nothing).
-ENABLE_NO_PROGRESS_EXIT = True
+#
+# DISABLED 2026-07-27. This rule is expressed as a fraction of R, so
+# raising RISK_PER_TRADE_RS silently raises the bar it demands: at
+# Rs 800 risk it asked for Rs 400 of profit in 30 minutes, at Rs 2,000
+# it asks for Rs 1,000. Replayed over the 61 sessions with risk at
+# Rs 2,000 it went from closing 10% of all trades to closing 41% of
+# them -- it became the single largest exit reason in the system,
+# killing trades before they could work. On the first 3 sessions,
+# turning it off moved the result from -Rs 15,706 to +Rs 10,376.
+#
+# Three sessions is not proof. But a rule that changes its own
+# strictness when an unrelated setting moves is broken by design: if
+# it comes back, it comes back as an absolute rupee number or an ATR
+# multiple, never as a fraction of R.
+ENABLE_NO_PROGRESS_EXIT = False
 NO_PROGRESS_MINUTES = 30
 NO_PROGRESS_R = 0.5
 
@@ -775,7 +885,12 @@ ENABLE_CANDLE_RECORDING = True
 # 2026-07-24 (evening) LEVER 2: raised Rs 10,000 -> Rs 20,000 to
 # keep the same "10 full stops = done for the day" logic now that
 # each stop risks Rs 2,000 instead of Rs 1,000.
-DAILY_MAX_LOSS_RS = 8000.0
+# RAISED 2026-07-27 alongside RISK_PER_TRADE_RS. This halt was sized
+# as "a day that has hit 10 stops has said enough" -- 10 x Rs 800.
+# At Rs 2,000 risk the same Rs 8,000 is only FOUR stops, which on a
+# 40% win rate would halt the bot before 10:30 on most mornings.
+# Kept at 10 stops: 10 x Rs 2,000.
+DAILY_MAX_LOSS_RS = 20000.0
 
 # The operator's own item-5 number: once the session's realized P&L
 # reaches this, stop taking new entries -- the day's goal is met,
@@ -1231,7 +1346,10 @@ ENABLE_ORB_EXCHANGE_RECONCILE = True
 # that sector, from circuit_monitor's existing REST snapshot. A LONG
 # needs its sector among the top N gainers; a SHORT among the top N
 # losers. Fail-open: no snapshot / too few symbols priced -> no gate.
-ENABLE_SECTOR_STRENGTH_GATE = True
+# DISABLED 2026-07-27. POST_MONDAY_TODO.md section B: "never
+# measured." A top-8-of-90 sector cut removes roughly 90% of the
+# universe on a rule with no evidence behind it at all.
+ENABLE_SECTOR_STRENGTH_GATE = False
 SECTOR_STRENGTH_TOP_N = 8        # how many leading sectors qualify each side
 SECTOR_STRENGTH_MIN_SYMBOLS = 3  # a sector needs this many priced names to rank
 SECTOR_STRENGTH_REFRESH_SECONDS = 10
@@ -1248,7 +1366,23 @@ SECTOR_STRENGTH_REFRESH_SECONDS = 10
 # range can trade from ~09:20 instead of ~09:31, but ONLY for names
 # that clear a deliberately higher bar: leading sector + strong relative
 # strength. Everything else still waits for the full 09:30 range.
-ENABLE_EARLY_MOMENTUM_ENTRY = True
+# DISABLED 2026-07-27, on two independent findings from the same day.
+#
+# 1. It is FIRST-COME, NOT RANKED. Two seats, no comparison between
+#    candidates. On 2026-07-27 AUBANK (09:23:09) and CAPLIPOINT
+#    (09:26:10) took both seats simply by triggering first; CMLL's
+#    early range had only finished forming at 09:20. Both trades were
+#    closed inside seven minutes. This is the "clock-order was the
+#    original sin" problem that was fixed for the main entry path and
+#    never fixed here.
+#
+# 2. It buys straight into the opening burst. Bucketing all 1,957
+#    replayed trades by how far the stock moved in its first five
+#    minutes: a 3-4% burst averaged -Rs 78/trade, 4-5% averaged
+#    -Rs 176 at a 24.5% win rate, against +Rs 105 for the 2-3% band.
+#    279 trades in stocks that ripped 3%+ at the open lost Rs 26,972.
+#    Operator's own observation, 2026-07-27, confirmed in the data.
+ENABLE_EARLY_MOMENTUM_ENTRY = False
 EARLY_ORB_END = "09:20"           # first 5 minutes forms the early range
 EARLY_ENTRY_MIN_RS = 0.010        # needs >= +1.0% vs market (vs 0.6% normally)
 EARLY_ENTRY_MAX_POSITIONS = 2     # at most this many early trades per day

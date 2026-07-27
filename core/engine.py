@@ -57,6 +57,7 @@ import time as time_module
 from datetime import datetime, time as dtime
 
 from config import (
+    ENABLE_SHORT_TRADES,
     LAYER1_FIXED_QTY, ORB_STOP_BUFFER_PCT, BLOCK_REENTRY_AFTER_STOPOUT,
     TOP_N_MOMENTUM_MODE, FIXED_TARGET_RS, FIXED_STOP_LOSS_RS,
     SQUARE_OFF_TIME, FROZEN_PRICE_STREAK_CANDLES,
@@ -184,6 +185,35 @@ EXIT_REASON_NO_PROGRESS = "NO_PROGRESS"
 # failed signal) and never appears in _exit() at all -- see
 # _maybe_partial_exit()'s own bookkeeping.
 EXIT_REASON_PARTIAL_PROFIT = "PARTIAL_PROFIT_ATR"
+
+# 2026-07-27, operator-found live on SWIGGY: the bot's stop is checked
+# ONLY against tick prices that actually arrive --
+# core/trailing_stop.py's is_hit() is `price <= stop`. But the Dhan
+# WebSocket sends periodic SNAPSHOTS, not every trade (already proven
+# on this project for the ORB range: ZENTEC seen 1784.20 vs a real
+# 1792.00, which is why ENABLE_ORB_EXCHANGE_RECONCILE exists). So a
+# dip THROUGH the stop between two snapshots is never seen, and the
+# position stays open carrying a loss it was supposed to have cut.
+#
+# The operator watched exactly this happen: SWIGGY traded below its
+# stop on TradingView, no tick in our feed showed it, the bot held on.
+#
+# This is not a small bug. It means RISK_PER_TRADE_RS is not actually
+# enforced -- it is the risk we take IF the feed happens to catch the
+# breach, and unbounded if it does not. Every replay in this project
+# assumes stops fill at the stop price.
+#
+# The reconciliation that catches it is in _check_missed_stop(): the
+# exchange's own day LOW/HIGH (already polled every ~3s by
+# core/circuit_monitor.py for all 693 symbols) can only move one way,
+# so if it extends past our stop AFTER we entered, the breach is ours
+# and we missed it.
+#
+# Tagged distinctly from TRAILING_STOP on purpose -- these need to be
+# COUNTED. How often the feed skips a stop, and by how much, decides
+# whether MTF overnight holding is safe at all: a missed stop squared
+# off at 15:15 is a bad day, a missed stop carried overnight is not.
+EXIT_REASON_MISSED_STOP = "MISSED_STOP_RECONCILED"
 
 
 class Engine:
@@ -1577,6 +1607,17 @@ class Engine:
         # reserved for those).
         # ==========================================================
 
+        # LONG-ONLY MODE (2026-07-27, operator's decision).
+        # Measured over 61 replayed sessions: SHORT was 1,035 trades
+        # (53% of everything the bot did) for Rs 2,450 of GROSS profit
+        # -- statistically indistinguishable from zero -- and about
+        # Rs 121,000 of charges paid to collect it. See
+        # MULTIDAY_FINDINGS.md section 1. Continuation on the short
+        # side is noise at this timeframe, so the whole direction is
+        # switched off rather than re-tuned.
+        if direction == SHORT and not ENABLE_SHORT_TRADES:
+            return
+
         # Trade WITH the tape, never against it (item 1). A one-sided
         # market blocks the fighting direction entirely.
         regime = self._market_regime()
@@ -2133,6 +2174,15 @@ class Engine:
             "atr_extreme": price if stop_mode == STOP_MODE_ATR_TRAILING else None,
             "atr_stop": stop_seed if stop_mode == STOP_MODE_ATR_TRAILING else None,
             "atr_value": None,
+            # Missed-stop reconciliation (EXIT_REASON_MISSED_STOP).
+            # The exchange's own day extreme AS IT STOOD at entry. A
+            # day low only ever falls and a day high only ever rises,
+            # so if this extends past our stop later, that move
+            # happened AFTER we bought and the tick feed skipped it.
+            # None when circuit_monitor isn't wired in (every existing
+            # test, the replay bench) -- the check then fails open and
+            # behaves exactly as before.
+            "exchange_extreme_at_entry": self._exchange_extreme(symbol),
             # "Dynamic position building" scale-out, config.py's
             # ENABLE_PARTIAL_EXIT block (test rig, off by default) --
             # guards _maybe_partial_exit() from re-firing on a
@@ -2160,9 +2210,91 @@ class Engine:
 
     # --------------------------------------------------
 
+    def _exchange_extreme(self, symbol):
+        """The exchange's own day LOW for a long-side view / day HIGH
+        for a short-side one, from circuit_monitor's REST snapshot.
+
+        Returns (low, high) or None when there is no monitor wired in
+        or no row for this symbol yet. Never raises -- this is a
+        safety net, and a safety net that can throw is worse than no
+        safety net at all."""
+        if self.circuit_monitor is None:
+            return None
+        try:
+            row = self.circuit_monitor.get_snapshot().get(symbol)
+        except Exception:                               # noqa: BLE001
+            return None
+        if not row:
+            return None
+        low, high = row.get("low"), row.get("high")
+        if not low or not high or low <= 0 or high <= 0:
+            return None
+        return (float(low), float(high))
+
+    def _check_missed_stop(self, symbol, price, tick_time):
+        """Did the stock trade through our stop without the tick feed
+        ever showing us? See EXIT_REASON_MISSED_STOP at the top of this
+        file for why this is necessary.
+
+        Fails OPEN in every uncertain case -- no snapshot, no stop, no
+        baseline -- because a false exit is a real loss, while a missed
+        catch only leaves us where we already were.
+        """
+        position = self.open_positions.get(symbol)
+        if position is None:
+            return False
+
+        baseline = position.get("exchange_extreme_at_entry")
+        now = self._exchange_extreme(symbol)
+        if baseline is None or now is None:
+            return False
+
+        stop = self._live_stop_price(symbol, position)
+        if stop is None:
+            return False
+
+        direction = position.get("direction", LONG)
+        if direction == LONG:
+            # day low can only fall; a fall after entry is ours
+            if now[0] >= baseline[0] or now[0] > stop:
+                return False
+            breached, gap = now[0], stop - now[0]
+        else:
+            if now[1] <= baseline[1] or now[1] < stop:
+                return False
+            breached, gap = now[1], now[1] - stop
+
+        warn(
+            f"[MISSED_STOP] {symbol} {direction} traded to {breached:.2f}, "
+            f"through a stop of {stop:.2f} (by {gap:.2f}), and no tick in "
+            f"our feed showed it. Exiting now at {price:.2f} -- this fill "
+            f"is WORSE than the stop by design; the alternative was "
+            f"holding a position we had already decided to cut."
+        )
+        self._exit(symbol, price, EXIT_REASON_MISSED_STOP, tick_time)
+        return True
+
+    def _live_stop_price(self, symbol, position):
+        """The stop actually in force right now, whichever of the
+        three stop mechanisms owns this position."""
+        if position.get("stop_mode") == STOP_MODE_ATR_TRAILING:
+            return position.get("atr_stop")
+        if position.get("fixed_target") is not None:
+            return position.get("initial_stop")
+        try:
+            return self.trailing_stop.get_stop(symbol)
+        except Exception:                               # noqa: BLE001
+            return None
+
     def _check_trailing_stop(self, symbol, price, tick_time):
         position = self.open_positions.get(symbol)
         if position is None:
+            return
+
+        # Reconcile against the exchange's own extreme BEFORE the
+        # normal tick check. If the feed skipped a breach, this exits
+        # and the tick check below has nothing left to do.
+        if self._check_missed_stop(symbol, price, tick_time):
             return
 
         # Old fixed-bracket trades (any position opened before the
@@ -2748,13 +2880,53 @@ class Engine:
             for symbol, directions in self.entry_blocked.items()
         }
 
+    # A restored block whose RULE is now switched off must not outlive
+    # the rule. 2026-07-27: BLOCK_REENTRY_AFTER_STOPOUT was set False
+    # mid-session and the bot restarted -- but AUBANK and CAPLIPOINT had
+    # already been blocked before the restart, the blocks were in the
+    # state snapshot, and the read at _try_structural_entry consults
+    # entry_blocked directly without checking the flag. Both of the
+    # day's strongest names stayed locked out by a rule that was no
+    # longer in force.
+    #
+    # Matched on the reason TEXT written by _block_entry, because that
+    # is what the snapshot actually stores. Only the stop-out and
+    # circuit-proximity reasons are droppable: corporate-action, news
+    # and sector blocks are facts about the stock, not strategy
+    # choices, and they survive regardless.
+    _STOPOUT_BLOCK_MARKERS = (
+        "stopped out once today",
+        "flagged near its circuit limit once today",
+    )
+
     def load_entry_blocks(self, blocks):
         """Restores from a snapshot produced by export_entry_blocks().
         Overwrites, never merges -- same reasoning as every other
-        load_state() in this codebase."""
-        self.entry_blocked = {
-            symbol: dict(directions) for symbol, directions in blocks.items()
-        }
+        load_state() in this codebase.
+
+        Stop-out blocks are dropped on the way in when
+        BLOCK_REENTRY_AFTER_STOPOUT is off, so a disabled rule cannot
+        keep enforcing itself through yesterday's saved state."""
+        restored, dropped = {}, 0
+        for symbol, directions in blocks.items():
+            kept = {}
+            for direction, reason in directions.items():
+                if not BLOCK_REENTRY_AFTER_STOPOUT and any(
+                    marker in str(reason)
+                    for marker in self._STOPOUT_BLOCK_MARKERS
+                ):
+                    dropped += 1
+                    continue
+                kept[direction] = reason
+            if kept:
+                restored[symbol] = kept
+        self.entry_blocked = restored
+        if dropped:
+            decision(
+                f"[STATE] Dropped {dropped} stop-out entry block(s) -- "
+                f"BLOCK_REENTRY_AFTER_STOPOUT is off, so they no longer "
+                f"apply."
+            )
 
     # --------------------------------------------------
 

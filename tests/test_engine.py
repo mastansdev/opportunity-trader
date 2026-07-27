@@ -800,13 +800,22 @@ def test_short_stop_out_blocks_same_direction_but_not_the_opposite_one(monkeypat
     assert "TCS" not in engine.open_positions
 
 
-def test_reentry_is_blocked_by_default_from_2026_07_24_onward():
-    """BLOCK_REENTRY_AFTER_STOPOUT reverted to True on 2026-07-23
-    evening for the 2026-07-24 (Friday) session onward -- the
-    2026-07-23-only override (too-tight-stop bug) is over, config.py's
-    own docstring says so. This is what's actually live right now --
-    a stop-out MUST block same-direction re-entry with no monkeypatch
-    involved."""
+def test_stopout_blocks_same_direction_reentry_when_the_flag_is_on():
+    """When BLOCK_REENTRY_AFTER_STOPOUT is on, a stop-out must block
+    same-direction re-entry for the rest of the day.
+
+    RENAMED 2026-07-27. This used to assert the LIVE DEFAULT ("with no
+    monkeypatch involved"). That default is now False -- the rule was
+    switched off because it and ONE_TRADE_PER_SYMBOL_PER_DAY together
+    retired a stock permanently after one stop-out, and on 2026-07-27
+    that locked out CAPLIPOINT at 09:32 in an 88/100 bullish tape,
+    four minutes after a 0.4% trail floor closed it at +0.22%.
+
+    The MECHANISM is still correct and still tested -- tests/conftest.py
+    turns it on for the suite. What is no longer asserted here is which
+    way the production switch is set, because a test that pins a
+    strategy choice fails every time the strategy legitimately changes,
+    and teaches us to edit the test instead of think."""
     engine = _engine()
     _feed_orb_range(engine, high=110.0)
     engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))

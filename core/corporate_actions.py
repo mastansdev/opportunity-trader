@@ -89,8 +89,16 @@ def _first(row, *keys):
 
 
 def fetch_nse(memory, days_ahead=30, known_symbols=None):
-    """Forthcoming NSE equity corporate actions -> memory. Returns how
-    many NEW facts were stored."""
+    """Forthcoming NSE equity corporate actions -> memory.
+
+    Returns (fetched, stored). BOTH numbers, because reporting only
+    `stored` made the startup line ambiguous: 2026-07-27 08:30 stored 19
+    new facts, and every restart after that printed "0 new from NSE, 0
+    new from BSE" simply because the same rows were already held.
+    MONDAY_CHECKLIST.md read that as "exchanges blocking" and the
+    operator was told, wrongly, that the memory was dead. A real failure
+    prints a [CORP_ACTIONS] warning and returns (0, 0); a healthy repeat
+    run returns (150, 0). Those must not look identical."""
     stored = 0
     try:
         from nse import NSE
@@ -102,7 +110,7 @@ def fetch_nse(memory, days_ahead=30, known_symbols=None):
             ) or []
     except Exception as exc:
         warn(f"[CORP_ACTIONS] NSE fetch failed (bot continues): {exc}")
-        return 0
+        return (0, 0)
 
     for row in rows:
         try:
@@ -122,7 +130,7 @@ def fetch_nse(memory, days_ahead=30, known_symbols=None):
                 stored += 1
         except Exception:
             continue                        # one bad row never stops the rest
-    return stored
+    return (len(rows), stored)
 
 
 def fetch_bse(memory, days_ahead=30, known_symbols=None):
@@ -139,7 +147,7 @@ def fetch_bse(memory, days_ahead=30, known_symbols=None):
             ) or []
     except Exception as exc:
         warn(f"[CORP_ACTIONS] BSE fetch failed (bot continues): {exc}")
-        return 0
+        return (0, 0)
 
     for row in rows:
         try:
@@ -161,7 +169,7 @@ def fetch_bse(memory, days_ahead=30, known_symbols=None):
                 stored += 1
         except Exception:
             continue
-    return stored
+    return (len(rows), stored)
 
 
 def _daily_close_lookup():
@@ -193,8 +201,8 @@ def refresh(memory=None, known_symbols=None, days_ahead=30):
         from core.stock_memory import default_memory
         memory = default_memory()
 
-    n_nse = fetch_nse(memory, days_ahead, known_symbols)
-    n_bse = fetch_bse(memory, days_ahead, known_symbols)
+    got_nse, n_nse = fetch_nse(memory, days_ahead, known_symbols)
+    got_bse, n_bse = fetch_bse(memory, days_ahead, known_symbols)
 
     today = datetime.now().date()
 
@@ -230,8 +238,15 @@ def refresh(memory=None, known_symbols=None, days_ahead=30):
             + ("..." if len(ignored) > 12 else "")
         )
 
+    # FETCHED and NEW are both printed. "0 new" on its own is ambiguous
+    # -- it is the normal answer on any restart after the first, and it
+    # is also what a dead feed looks like. "150 fetched, 0 new" is
+    # healthy; "0 fetched, 0 new" is the one to worry about, and it is
+    # always accompanied by a [CORP_ACTIONS] warning above.
+    healthy = "" if (got_nse or got_bse) else "  <-- NOTHING FETCHED, see warnings above"
     decision(
-        f"[MEMORY] Stock memory refreshed: {n_nse} new from NSE, "
-        f"{n_bse} new from BSE, {memory.count()} facts known in total."
+        f"[MEMORY] Stock memory refreshed: NSE {got_nse} fetched / "
+        f"{n_nse} new, BSE {got_bse} fetched / {n_bse} new. "
+        f"{memory.count()} facts known in total.{healthy}"
     )
     return n_nse + n_bse
