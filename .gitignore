@@ -16,6 +16,11 @@ data/dashboard_token.txt
 # by accident on 2026-07-27 (data/nse_cookies_requests.json).
 data/*cookies*.json
 
+# Scratch files from live investigation -- downloaded filings, one-off
+# snapshots. Regenerable, sometimes many MB, never source.
+data/_test_*.pdf
+data/bse_lag_snapshot_*.json
+
 # Databases (regenerated; keep the repo light)
 data/*.db
 *.db-journal
