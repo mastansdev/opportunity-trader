@@ -354,6 +354,32 @@
   </div>
 
   <!-- ============ Top Gainers / Top Losers -- right below Open Positions ============ -->
+  <!-- ============ LIVE ANNOUNCEMENTS, 2026-07-27 ============
+       main.py used to read the results calendar ONCE at startup and
+       never again. Canara Bank filed around noon that day; at 13:50 the
+       bot still had no idea. TMB did 98% of its volume and its entire
+       +12.1% after 13:00. NSE publishes in about one second -- the whole
+       delay was our own polling.
+  ============================================================= -->
+  <div class="panel" style="margin-top:14px;">
+    <div class="panel-head-row">
+      <h2>Filed Today <span class="gl-refresh-note">announcements as they land</span></h2>
+      <div class="gl-head-right">
+        <span class="empty-note" id="annCount"></span>
+        <span class="empty-note" id="annPolled"></span>
+      </div>
+    </div>
+    <div id="annError" class="empty-note" style="display:none;margin-bottom:8px;"></div>
+    <div class="table-wrap table-wrap-scroll" style="max-height:280px;">
+      <table>
+        <thead>
+          <tr><th>Filed</th><th>Symbol</th><th>Kind</th><th style="width:55%">Subject</th><th>Seen</th><th></th></tr>
+        </thead>
+        <tbody id="annRows"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ============ SHORTLIST, 2026-07-27 ============
        Operator: "as a human i cannot read all 750/960/1500 stocks
        daily, i created bot to trade beside me not replacing me."
@@ -576,6 +602,26 @@ const glRow = (r, side) => `<tr>
         ? `<button class="btn-buy btn-sm" onclick="manualBuy('${r.symbol}')">BUY</button>`
         : `<button class="btn-short btn-sm" onclick="manualShort('${r.symbol}')">SHORT</button>`)
       : ""}</td>
+</tr>`;
+// ---- Live announcements -------------------------------------------
+// KIND is classified from the SUBJECT LINE only -- "results filed", not
+// "results were good". On 2026-07-27 both KFINTECH (+9.2%) and ACUTAAS
+// (a loss for us) filed results the same week and nothing in the subject
+// separated them. Colour marks the category, never a recommendation.
+const ANN_KIND = {
+  RESULTS:    "sl-news",  ORDER_WIN: "sl-up",    APPROVAL: "sl-up",
+  DEAL:       "sl-news",  FUND_RAISE: "sl-chip", PAYOUT:   "sl-chip",
+  RATING:     "sl-chip",  GOVERNANCE: "sl-chip"
+};
+const annRow = (r) => `<tr>
+  <td><strong>${escapeHtml(r.filed_at || "—")}</strong>${
+      (typeof r.minutes_ago === "number")
+        ? `<div class="empty-note">${Math.round(r.minutes_ago)}m ago</div>` : ""}</td>
+  <td><strong>${escapeHtml(r.symbol)}</strong></td>
+  <td><span class="sl-chip ${ANN_KIND[r.kind] || "sl-chip"}">${escapeHtml((r.kind||"").replace(/_/g," "))}</span></td>
+  <td style="font-size:12px;">${escapeHtml(r.subject || "")}</td>
+  <td class="empty-note">${escapeHtml(r.seen_at || "")}</td>
+  <td>${IS_OPERATOR ? `<button class="btn-buy btn-sm" onclick="manualBuy('${r.symbol}')">BUY</button>` : ""}</td>
 </tr>`;
 // ---- Shortlist ----------------------------------------------------
 // Each reason is its own chip so the eye can land on the one that
@@ -867,6 +913,27 @@ function render(snap) {
   // -- Top gainers / losers (replaces the old ORB watchlist, 2026-07-23) --
   const gl = snap.gainers_losers || { gainers: [], losers: [] };
   document.getElementById("glUpdatedAt").textContent = gl.built_at ? `As of ${gl.built_at} IST` : "";
+  // ---- Live announcements ----
+  const ann = s.announcements || {};
+  const annRowsData = ann.rows || [];
+  document.getElementById("annRows").innerHTML = annRowsData.length
+    ? annRowsData.map(annRow).join("")
+    : `<tr><td colspan="6" class="empty-note">${
+        ann.available === false
+          ? "Announcement watcher is not running &mdash; the shortlist is falling back to the results calendar."
+          : "Nothing filed yet today."}</td></tr>`;
+  document.getElementById("annCount").textContent =
+    ann.count_today ? `${ann.count_today} filed today` : "";
+  document.getElementById("annPolled").textContent =
+    ann.last_poll_at ? `checked ${ann.last_poll_at}` : "";
+  // A feed that has gone down must SAY so. "No news" and "we cannot see
+  // the news" must never look the same while money is on the screen.
+  const annErr = document.getElementById("annError");
+  if (ann.error) {
+    annErr.style.display = "";
+    annErr.innerHTML = `<span class="sl-chip sl-down">feed error</span> ${escapeHtml(ann.error)}`;
+  } else { annErr.style.display = "none"; }
+
   // ---- Shortlist ----
   const sl = s.shortlist || {};
   const slRows = sl.rows || [];

@@ -117,6 +117,7 @@ from config import (
     SANITY_BAND_MULTIPLE, CIRCUIT_LOCK_TOLERANCE_PCT,
     MARKET_BREADTH_REFRESH_SECONDS,
     SHORTLIST_REFRESH_SECONDS, SHORTLIST_COUNT,
+    ANNOUNCEMENT_PANEL_COUNT,
 )
 
 from core.logger import warn
@@ -206,7 +207,7 @@ class DashboardState:
 
     def __init__(self, engine, market_data, master_loader,
                  portfolio=None, sector_monitor=None, get_feed_alive=None,
-                 index_monitor=None):
+                 index_monitor=None, announcement_watcher=None):
         self.engine = engine
         self.market_data = market_data
         self.master_loader = master_loader
@@ -257,7 +258,13 @@ class DashboardState:
         # closing top 20, only 12 were top 20 at 09:30. TMB sat at rank
         # 95 at noon and closed 2nd, with 98% of its volume after 13:00.
         # A frozen list cannot contain it.
-        self._shortlist = ShortlistBuilder()
+        # core/announcement_watcher.py -- optional. When absent the
+        # shortlist falls back to the results calendar, which knows the
+        # DATE a company reports but not that it filed twenty minutes
+        # ago. Both panels degrade rather than break.
+        self.announcement_watcher = announcement_watcher
+        self._shortlist = ShortlistBuilder(
+            announcement_watcher=announcement_watcher)
         self._shortlist_cache = None
         self._shortlist_built_at = 0.0
 
@@ -323,6 +330,7 @@ class DashboardState:
             "universe_size": breadth["universe_size"],
             "gainers_losers": gainers_losers,
             "shortlist": self._build_shortlist(),
+            "announcements": self._build_announcements(),
             "market_intelligence": self._build_market_intelligence(
                 breadth, gainers_losers, performance
             ),
@@ -705,6 +713,27 @@ class DashboardState:
         self._shortlist_cache = result
         self._shortlist_built_at = now
         return result
+
+    def _build_announcements(self):
+        """Today's filings as they land. No throttle -- the watcher keeps
+        its own list in memory and this is a dict copy, so reading it on
+        every refresh costs nothing and the panel stays current.
+
+        `available: False` is deliberately different from an empty list.
+        "Nothing filed yet" and "we cannot see the news" must never look
+        the same to someone deciding whether to buy."""
+        if self.announcement_watcher is None:
+            return {"available": False, "rows": [], "count_today": 0,
+                    "note": "watcher not running"}
+        try:
+            snap = self.announcement_watcher.snapshot(
+                limit=ANNOUNCEMENT_PANEL_COUNT)
+            snap["available"] = True
+            return snap
+        except Exception as e:
+            warn(f"[NEWS] Panel build failed: {e}")
+            return {"available": False, "rows": [], "count_today": 0,
+                    "note": f"error: {e}"}
 
     def _build_open_positions(self, open_positions):
         rows = []

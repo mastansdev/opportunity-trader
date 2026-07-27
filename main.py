@@ -48,6 +48,11 @@ from core.stock_memory import StockMemory
 from core.trade_memory import TradeMemory
 from core import corporate_actions
 from config import ENABLE_INDEX_FEED, INDEX_INSTRUMENTS, ENABLE_CANDLE_RECORDING
+from config import (
+    ENABLE_ANNOUNCEMENT_WATCHER, ANNOUNCEMENT_POLL_SECONDS,
+    ANNOUNCEMENT_LOOKBACK_HOURS,
+)
+from core.announcement_watcher import AnnouncementWatcher
 from config import ENABLE_STOCK_MEMORY, ENABLE_TRADE_MEMORY
 from config import EARNINGS_CALENDAR
 from core.logger import decision, diagnostic, warn
@@ -366,10 +371,34 @@ def main():
     ) if ENABLE_INDEX_FEED else None
     index_ids = index_monitor.index_security_ids() if index_monitor else set()
 
+    # Live announcements, 2026-07-27 (core/announcement_watcher.py).
+    # Before this, the results calendar was refreshed ONCE at startup and
+    # never again -- Canara Bank filed around noon and at 13:50 the bot
+    # still had no idea. TMB did 98% of its volume and its whole +12.1%
+    # after 13:00 that same day. A once-a-day read cannot see any of it.
+    #
+    # Own daemon thread, never the tick path. Its output feeds two
+    # readers: the shortlist (a stock that filed 20 minutes ago jumps to
+    # the top with the reason attached) and the dashboard panel.
+    announcement_watcher = None
+    if ENABLE_ANNOUNCEMENT_WATCHER:
+        try:
+            announcement_watcher = AnnouncementWatcher(
+                known_symbols=set(resolved),
+                poll_seconds=ANNOUNCEMENT_POLL_SECONDS,
+                lookback_hours=ANNOUNCEMENT_LOOKBACK_HOURS,
+            )
+            announcement_watcher.start()
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[NEWS] Announcement watcher unavailable ({exc}). "
+                 f"The shortlist will fall back to the results calendar.")
+            announcement_watcher = None
+
     dashboard_state = DashboardState(
         engine, market_data, master_loader,
         portfolio=portfolio, sector_monitor=sector_monitor,
         index_monitor=index_monitor,
+        announcement_watcher=announcement_watcher,
         get_feed_alive=lambda: (
             feed_state["thread"].is_alive() if feed_state["thread"] else None
         ),
@@ -722,6 +751,8 @@ def main():
         # in the replay store even on a mid-session Ctrl+C.
         if candle_recorder is not None:
             candle_recorder.close()
+        if announcement_watcher is not None:
+            announcement_watcher.stop(timeout=3)
         decision("Shutdown complete.")
 
 

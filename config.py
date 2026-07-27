@@ -917,6 +917,28 @@ NO_PROGRESS_R = 0.5
 ENABLE_TICK_SANITY = True
 MAX_TICK_JUMP_PCT = 0.20     # >20% in one tick/minute = reject
 
+# --- Live announcements (core/announcement_watcher.py) ----
+# main.py used to refresh the results calendar exactly ONCE, at startup,
+# and never again. On a day when 68 companies report, the bot learned
+# about a 12:12 filing the following morning. Canara Bank filed around
+# noon on 2026-07-27; at 13:50 the bot still had no idea.
+#
+# The exchange is not the slow part. tools/watch_results.py measured the
+# gap between NSE publishing and us seeing it at about ONE SECOND. The
+# entire delay was our own polling.
+#
+# 60s. NSE's announcements endpoint returns the whole recent window on
+# every call, so this is one modest request a minute, on its own daemon
+# thread, never on the tick path. Faster buys little -- the operator
+# still has to read the row and decide.
+ENABLE_ANNOUNCEMENT_WATCHER = True
+ANNOUNCEMENT_POLL_SECONDS = 60
+# How far back each poll looks. Generous on purpose: a restart at 14:00
+# must not lose the morning's filings, and re-seeing a row we already
+# know costs nothing (deduped on symbol + timestamp).
+ANNOUNCEMENT_LOOKBACK_HOURS = 8
+ANNOUNCEMENT_PANEL_COUNT = 25
+
 # --- Shortlist panel (core/shortlist.py) ------------------
 # The dashboard panel that answers "which of these 689 deserve thirty
 # seconds of my attention, and WHY". Operator, 2026-07-27: "as a human

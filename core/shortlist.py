@@ -121,10 +121,16 @@ class ShortlistBuilder:
     """
 
     def __init__(self, daily_db=DAILY_DB, results_db=RESULTS_DB,
-                 memory_db=MEMORY_DB):
+                 memory_db=MEMORY_DB, announcement_watcher=None):
         self.daily_db = daily_db
         self.results_db = results_db
         self.memory_db = memory_db
+        # core/announcement_watcher.py, wired 2026-07-27. The calendar
+        # says a company reports TODAY; this says it filed 20 MINUTES
+        # AGO. TMB's move began after 13:00 and 98% of its volume came
+        # with it -- a calendar entry could never have told the operator
+        # to look right then.
+        self.announcement_watcher = announcement_watcher
         self._lock = threading.Lock()
         self._loaded_for = None      # date string the cache belongs to
         self._normals = {}           # symbol -> (median_vol, median_turnover, ma50)
@@ -235,6 +241,17 @@ class ShortlistBuilder:
             conn.close()
         return dict(out)
 
+    def _news_for(self, symbol):
+        """Today's newest announcement for one symbol, or None. Wrapped
+        because the watcher is optional and must never be able to break
+        the panel."""
+        if self.announcement_watcher is None:
+            return None
+        try:
+            return self.announcement_watcher.for_symbol(symbol)
+        except Exception:                                  # noqa: BLE001
+            return None
+
     # ------------------------------------------------------------
     # RANKING -- fast, every refresh
     # ------------------------------------------------------------
@@ -277,6 +294,22 @@ class ShortlistBuilder:
                 why.append(f"up {move:.1f}%")
             elif move <= -MIN_MOVE_PCT:
                 why.append(f"DOWN {move:.1f}%")
+
+            # --- reason: something was FILED today, and how long ago ---
+            # Ranked above the calendar deliberately. "Reports today" is
+            # a date; "filed 20 minutes ago" is the thing that is moving
+            # the price while the operator is looking at the screen.
+            news = self._news_for(symbol)
+            if news:
+                mins = news.get("minutes_ago")
+                when = (f"{mins:.0f}m ago" if isinstance(mins, (int, float))
+                        else (news.get("filed_at") or "today"))
+                why.append(f"FILED {news['kind'].replace('_', ' ')} {when}")
+                score += 6.0
+                # Still fresh enough that the market is probably still
+                # digesting it. Beyond an hour it is just "today's news".
+                if isinstance(mins, (int, float)) and mins <= 30:
+                    score += 2.0
 
             for days, _purpose in sorted(self._results.get(symbol, [])):
                 if days == 0:
