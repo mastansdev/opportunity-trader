@@ -25,11 +25,33 @@ from datetime import datetime, timedelta
 
 import pytest
 
+import core.announcement_watcher as watcher_module
 from core.announcement_watcher import AnnouncementWatcher, classify
+
+# Pinned wall clock. Mid-afternoon on a real trading day, so "20 minutes
+# ago" is still the same day.
+#
+# These tests were written on 2026-07-27 using datetime.now() directly,
+# and three of them failed the moment the clock passed midnight IST: a
+# filing "20 minutes ago" became 23:45 YESTERDAY, which the watcher
+# correctly drops. Written hours after criticising exactly this bug in
+# tests/test_orb_reconcile_time_guard.py, which fails for one second a
+# night for the same reason. A test that depends on when it runs is not
+# a test.
+NOW = datetime(2026, 7, 27, 14, 30, 0)
+
+
+@pytest.fixture(autouse=True)
+def _pinned_clock(monkeypatch):
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+    monkeypatch.setattr(watcher_module, "datetime", _Clock)
 
 
 def _row(symbol, subject, when=None, body=""):
-    when = when or datetime.now()
+    when = when or NOW
     return {"symbol": symbol, "desc": subject, "attchmntText": body,
             "an_dt": when.strftime("%d-%b-%Y %H:%M:%S")}
 
@@ -161,7 +183,7 @@ def test_how_long_ago_it_was_filed_is_computed():
     """'Filed 20 minutes ago' is the fact that matters. TMB's move began
     after 13:00 -- a calendar date could never have said to look then."""
     w = _watcher([_row("TMB", "Financial Results",
-                       when=datetime.now() - timedelta(minutes=20))])
+                       when=NOW - timedelta(minutes=20))])
     r = w.poll_once()[0]
     assert 19 <= r["minutes_ago"] <= 22
 
@@ -175,7 +197,7 @@ def test_symbols_outside_our_universe_are_dropped():
 
 def test_yesterdays_filing_is_not_shown_as_today():
     w = _watcher([_row("TMB", "Financial Results",
-                       when=datetime.now() - timedelta(days=1))])
+                       when=NOW - timedelta(days=1))])
     assert w.poll_once() == []
 
 
@@ -234,7 +256,7 @@ def test_a_fresh_filing_lifts_the_stock_up_the_shortlist(tmp_path):
     from core.shortlist import ShortlistBuilder
 
     w = _watcher([_row("TMB", "Financial Results",
-                       when=datetime.now() - timedelta(minutes=10))])
+                       when=NOW - timedelta(minutes=10))])
     w.poll_once()
 
     b = ShortlistBuilder(daily_db=str(tmp_path / "a.db"),
@@ -288,7 +310,7 @@ def test_snapshot_is_json_safe():
 
 
 def test_newest_filing_is_listed_first():
-    now = datetime.now()
+    now = NOW
     w = _watcher([_row("OLD", "Financial Results", when=now - timedelta(hours=3)),
                   _row("NEW", "Financial Results", when=now - timedelta(minutes=2))])
     w.poll_once()
