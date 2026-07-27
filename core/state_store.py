@@ -59,7 +59,8 @@ STATE_PATH = os.path.join("data", "session_state.json")
 
 
 def save(orb_ranges, open_positions, trailing_stops=None, portfolio=None,
-         entry_blocks=None, momentum_universe=None, path=STATE_PATH):
+         entry_blocks=None, momentum_universe=None,
+         orb_unreliable=None, path=STATE_PATH):
     """
     orb_ranges     : dict symbol -> {"high":, "low":, "complete":}
     open_positions : dict symbol -> {"security_id":, "qty":, "entry_price":,
@@ -71,11 +72,35 @@ def save(orb_ranges, open_positions, trailing_stops=None, portfolio=None,
                       core.engine.Engine.export_entry_blocks())
     momentum_universe : dict {"long": [...], "short": [...]} (optional --
                       core.momentum_universe.MomentumUniverse.export_state())
+    orb_unreliable : list of symbols whose feed went dark INSIDE their own
+                      opening-range window (optional -- core.market_data
+                      .MarketData.export_orb_unreliable())
 
     Optional params default to {} so existing callers keep
     working. Written atomically (write to a temp file, then
     replace) so a crash mid-write never leaves a half-written,
     corrupt state file behind.
+
+    WHY orb_unreliable IS SAVED (added 2026-07-27, operator-found)
+    -------------------------------------------------------------
+    A symbol whose feed goes quiet during 09:15-09:30 has an opening
+    range built from incomplete data -- it may have missed the real
+    high or low entirely (the SONACOMS incident). MarketData flags it
+    and the engine then refuses STRUCTURAL entries in it for the rest
+    of the session. Correct behaviour.
+
+    But the flag lived only in memory. On 2026-07-27:
+
+        09:16  TBZ went stale INSIDE its own ORB window -- range
+               flagged unreliable; structural entries skipped for it
+               today.
+        14:59  PAPER BUY TBZ qty=729 @ 274.15 (STRUCTURAL_LONG_BREAKOUT)
+
+    Two restarts in between wiped the flag, and the bot took the exact
+    trade it had already ruled out that morning -- on a range built
+    around a gap in the feed. It happened to make money, which is
+    worse than losing: a rule that silently stops applying is not a
+    rule, and a profit from one is not evidence of anything.
     """
     payload = {
         "date": datetime.now().date().isoformat(),
@@ -85,6 +110,7 @@ def save(orb_ranges, open_positions, trailing_stops=None, portfolio=None,
         "portfolio": portfolio or {},
         "entry_blocks": entry_blocks or {},
         "momentum_universe": momentum_universe or {},
+        "orb_unreliable": sorted(orb_unreliable or []),
     }
 
     directory = os.path.dirname(path)
@@ -133,3 +159,28 @@ def load(path=STATE_PATH, today=None):
         payload.get("entry_blocks") or {},
         payload.get("momentum_universe") or {},
     )
+
+
+def load_orb_unreliable(path=STATE_PATH, today=None):
+    """Symbols whose feed went dark inside their own opening-range
+    window earlier today. Empty list if there's no usable state.
+
+    A SEPARATE function rather than a seventh element of load()'s
+    tuple, deliberately: eight call sites unpack that tuple by
+    position, one of them being main.py's restart path. Widening it
+    would mean touching every one of them to add a flag, and the
+    restart path is the last thing that should be broken while fixing
+    a restart bug. Additive is safer than elegant here.
+
+    Same day-check as load(): a flag from yesterday means nothing."""
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    today = today or datetime.now().date().isoformat()
+    if payload.get("date") != today:
+        return []
+    return list(payload.get("orb_unreliable") or [])

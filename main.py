@@ -290,6 +290,20 @@ def main():
         saved_entry_blocks,
         saved_momentum_universe,
     ) = state_store.load()
+    # The "feed went dark inside this symbol's own opening range" flag
+    # (core/market_data.py). Restored SEPARATELY from the tuple above --
+    # see state_store.load_orb_unreliable() for why. Without this, a
+    # restart forgot which ranges were untrustworthy and the bot took
+    # structural entries it had already refused that morning (TBZ,
+    # 2026-07-27: flagged 09:16, bought 14:59).
+    saved_orb_unreliable = state_store.load_orb_unreliable()
+    if saved_orb_unreliable:
+        market_data.load_orb_unreliable(saved_orb_unreliable)
+        decision(
+            f"[STATE] Restored {len(saved_orb_unreliable)} symbol(s) whose "
+            f"opening range is unreliable -- no structural entries in them "
+            f"today."
+        )
     if saved_orb_ranges:
         engine.orb_engine.load_state(saved_orb_ranges)
     if saved_positions:
@@ -670,6 +684,7 @@ def main():
                     portfolio.export_state(),
                     engine.export_entry_blocks(),
                     momentum_universe.export_state(),
+                    orb_unreliable=market_data.export_orb_unreliable(),
                 )
 
             time.sleep(1)
@@ -692,6 +707,7 @@ def main():
             portfolio.export_state(),
             engine.export_entry_blocks(),
             momentum_universe.export_state(),
+            orb_unreliable=market_data.export_orb_unreliable(),
         )
         # Dashboard first (it's the fastest to stop and has no open
         # network connections to Dhan to worry about), then the feed.

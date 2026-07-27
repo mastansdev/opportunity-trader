@@ -54,7 +54,7 @@ Author : H&M Opportunity Trader
 """
 
 import time as time_module
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 
 from config import (
     ENABLE_SHORT_TRADES,
@@ -131,6 +131,19 @@ def _parse_hhmm(value):
 # ORB_WINDOW_END_T) -- ties the block to the market's own timeline,
 # not system clock drift.
 SQUARE_OFF_T = _parse_hhmm(SQUARE_OFF_TIME)
+
+# How long after the opening-range window closes the exchange reconcile
+# may still run. The quote it reads carries the DAY high/low, which only
+# equals the opening range for a few minutes after 09:30. In normal
+# running the reconcile fires within seconds of the window closing (TBZ:
+# window closed 09:30:16, reconciled 09:30:16). This grace exists only
+# for a slow first snapshot, not for restarts. See
+# _reconcile_orb_once() for the full incident.
+ORB_RECONCILE_GRACE_MINUTES = 5
+_ORB_RECONCILE_DEADLINE_T = (
+    datetime.combine(datetime.today(), ORB_WINDOW_END_T)
+    + timedelta(minutes=ORB_RECONCILE_GRACE_MINUTES)
+).time()
 
 # 2026-07-24 revamp -- no FRESH structural entries after this time
 # (existing positions still fully managed). See config.LAST_ENTRY_TIME's
@@ -492,8 +505,17 @@ class Engine:
                             symbol, position, closed_candle
                         )
                     elif position.get("fixed_target") is None:
+                        # reference_price = this candle's CLOSE, so the
+                        # minimum-distance floor is measured against where
+                        # the market actually is, not against the wick.
+                        # See trailing_stop.update_on_candle_close's
+                        # docstring: without it the stop ratchets up to
+                        # touching distance and every position exits at
+                        # breakeven within minutes (2026-07-27, LAURUSLABS
+                        # bought and sold at 1681.60).
                         new_stop = self.trailing_stop.update_on_candle_close(
-                            symbol, closed_candle["low"], closed_candle["high"]
+                            symbol, closed_candle["low"], closed_candle["high"],
+                            reference_price=closed_candle["close"],
                         )
                         if new_stop is not None:
                             diagnostic(f"[TRAIL] {symbol} stop -> {new_stop:.2f}")
@@ -925,6 +947,42 @@ class Engine:
         if symbol in self._orb_reconciled or self.circuit_monitor is None:
             return
         if not self.orb_engine.is_complete(symbol):
+            return
+
+        # TIME GUARD, added 2026-07-27 -- operator-found live on TBZ.
+        #
+        # The quote we widen from carries the exchange's DAY high/low. At
+        # 09:30 that IS the opening range, so the reconcile is correct.
+        # One minute later it is not: it is the day's range so far, and
+        # widening the "opening range" to it is simply wrong.
+        #
+        # `self._orb_reconciled` is an in-memory set, so it is EMPTY
+        # after a restart -- and the bot then re-reconciled all 689
+        # symbols against a day high that had been running for an hour.
+        # TBZ, from that day's log:
+        #
+        #   09:30:16  [ORB_FIX] TBZ 263.80/260.84 -> 263.80/260.39  correct
+        #   10:36:10  [ORB_FIX] TBZ 263.80/260.39 -> 270.00/260.39  WRONG
+        #
+        # 263.80 is what the exchange itself shows for 09:15-09:30. The
+        # 10:36 pass -- one minute after a restart -- dragged the range
+        # high up by Rs 6.20 to wherever the stock had since traded.
+        #
+        # The consequence is worse than one bad number: after any
+        # restart past 09:30, EVERY symbol's breakout level becomes its
+        # running day high, so the bot stops looking for opening-range
+        # breaks and starts demanding fresh day highs. That is a much
+        # harder bar, and it is why so little fired after the 10:35
+        # restart that day. TBZ eventually entered at 274.15 instead of
+        # around 264.
+        #
+        # ORB ranges are restored from core/state_store.py on restart
+        # (the startup line reports "689 ORB range(s)"), already
+        # reconciled from the first pass -- so skipping here loses
+        # nothing and protects what is already correct.
+        now_t = datetime.now().time()
+        if now_t > _ORB_RECONCILE_DEADLINE_T:
+            self._orb_reconciled.add(symbol)     # never try again today
             return
 
         info = (self.circuit_monitor.get_snapshot() or {}).get(symbol)

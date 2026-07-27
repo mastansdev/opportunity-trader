@@ -189,6 +189,39 @@ class MarketData:
     def get_orb_window_unreliable_count(self):
         return len(self._orb_window_stale_symbols)
 
+    # --------------------------------------------------
+    # Restart persistence (core/state_store.py)
+    #
+    # Added 2026-07-27, operator-found. This flag used to live only in
+    # memory, so a restart forgot it. On 2026-07-27:
+    #
+    #   09:16  TBZ went stale INSIDE its own ORB window -- range
+    #          flagged unreliable; structural entries skipped today.
+    #   14:59  PAPER BUY TBZ (STRUCTURAL_LONG_BREAKOUT)
+    #
+    # Two restarts wiped the flag and the bot took the trade it had
+    # already refused, on a range built around a hole in the feed. It
+    # made money, which is the worst outcome -- a rule that quietly
+    # stops applying looks fine until the day it doesn't.
+    # --------------------------------------------------
+
+    def export_orb_unreliable(self):
+        """Plain sorted list, safe to json.dump directly."""
+        return sorted(self._orb_window_stale_symbols)
+
+    def load_orb_unreliable(self, symbols):
+        """Restores from a snapshot produced by export_orb_unreliable().
+
+        MERGES rather than overwrites -- unlike every other load_state()
+        in this codebase, and deliberately so. This flag is one-way: a
+        symbol that was unreliable at 09:16 is still unreliable at
+        14:59, and anything flagged since the snapshot was written is
+        equally real. Union is the only safe direction; dropping either
+        set would re-open the hole this exists to close."""
+        if not symbols:
+            return
+        self._orb_window_stale_symbols.update(symbols)
+
     def _in_warmup(self):
         return (_time.monotonic() - self._started_at) < FEED_WARMUP_GRACE_SECONDS
 

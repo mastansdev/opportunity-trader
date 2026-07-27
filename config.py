@@ -696,7 +696,33 @@ MAX_OPEN_POSITIONS = 10
 # Only take a LONG breakout in a symbol currently ranked in the top
 # TREND_RANK_TOP_N gainers, and a SHORT only in the top N losers. A
 # breakout OUTSIDE the leaderboard is range noise, not a trend.
-ENABLE_TREND_RANK_ENTRY = True
+# DISABLED 2026-07-27, measured against that day's own tape.
+#
+# This rule refuses a breakout unless the stock is ALREADY in the day's
+# top 20 movers. But a breakout is, by definition, the moment BEFORE the
+# move. Requiring the stock to have already run is requiring it to be
+# late.
+#
+# 2026-07-27 was strongly bullish (regime LONG_ONLY, 518 advancing vs
+# 171 declining). Twelve stocks finished between +6.65% and +11.24%.
+# The bot traded NONE of them and closed the day flat with two dead
+# scalps. Every one of the twelve was subscribed and recorded tick by
+# tick all day -- so this was not a universe, data or liquidity problem.
+#
+# Their rank AT THE MINUTE THEY BROKE THEIR OPENING RANGE:
+#
+#     REDINGTON  09:33  +0.88%  rank 173 of 670  -> closed +7.20%
+#     CONCOR     09:54  +2.69%  rank  32 of 658  -> closed +6.65%
+#     LAURUSLABS 10:01  +2.65%  rank  39 of 653  -> closed +7.92%
+#     TMB        13:44  +3.32%  rank  37 of 618  -> closed +8.42%
+#
+# All four refused for not yet being in a top 20 they went on to lead.
+#
+# What still enforces quality without the look-back problem:
+# RS_BAND_MIN below already requires the stock to be OUTPERFORMING the
+# market at entry (>= +0.4%), which is the real signal; the rank filter
+# was a cruder proxy for the same idea, applied to the wrong instant.
+ENABLE_TREND_RANK_ENTRY = False
 TREND_RANK_TOP_N = 20
 TREND_RANK_REFRESH_SECONDS = 5   # recompute the leaderboard at most this often
 
@@ -756,7 +782,29 @@ ENABLE_SHORT_TRADES = False
 # strong enough to be real, not so extended it's spent.
 ENABLE_RS_BAND = True
 RS_BAND_MIN = 0.004      # >= +0.4% vs the market median move
-RS_BAND_MAX = 0.050      # <= +5.0% (beyond this = exhausted)
+# CEILING LIFTED 2026-07-27, from 5.0%.
+#
+# The "exhaustion" idea behind this ceiling came from ONE Friday of
+# partly-corrupt data. POST_MONDAY_TODO.md section B already listed it
+# as "fitted to corrupted data. Guess."
+#
+# What it actually did, measured on 2026-07-27: CARTRADE broke its
+# opening range at 09:33 as the SINGLE STRONGEST STOCK ON THE BOARD --
+# rank 1 of 670 -- with a relative strength of 5.41%. Refused for being
+# 0.41 of a percentage point too strong. It closed the day +11.24%.
+#
+# A rule that rejects the best stock of the day for being too good is
+# not a risk control. Note also that it worked in direct opposition to
+# the top-20 rank filter above: that one demanded the stock had already
+# moved, this one refused it once it had. Between them they left a
+# narrow window that the day's actual winners passed straight through.
+#
+# The genuine protection against a parabolic blow-off is
+# MAX_ABS_MOVE_PCT (12% from the day's OPEN) further down -- that is a
+# real guard with a mechanism, and it stays. This band keeps its FLOOR,
+# which is the part carrying the signal: the stock must be outperforming
+# the market to qualify at all.
+RS_BAND_MAX = 0.50       # effectively no ceiling; blow-off guard does that job
 # Absolute-move ceiling regardless of RS (the APAR/parabolic guard).
 # REPLACED 2026-07-25 (operator challenge). A flat "% moved today"
 # ceiling is the wrong test: it blocks the day's BEST trending stock,

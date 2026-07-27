@@ -68,6 +68,7 @@ _MECHANISMS_ON_FOR_TESTS = (
     "ENABLE_NO_PROGRESS_EXIT",
     "ONE_TRADE_PER_SYMBOL_PER_DAY",
     "BLOCK_REENTRY_AFTER_STOPOUT",
+    "ENABLE_TREND_RANK_ENTRY",
 )
 
 
@@ -78,3 +79,23 @@ def _mechanisms_enabled_for_tests(monkeypatch):
     for name in _MECHANISMS_ON_FOR_TESTS:
         if hasattr(engine_module, name):
             monkeypatch.setattr(engine_module, name, True)
+
+
+@pytest.fixture(autouse=True)
+def _no_wall_clock_dependence(monkeypatch):
+    """The ORB exchange-reconcile is only allowed to run within a few
+    minutes of 09:30 (see _reconcile_orb_once -- a restart at 10:36 was
+    re-widening every range to the running day high). That guard reads
+    the real clock, which would make every reconcile test pass or fail
+    depending on the hour it was run.
+
+    Tests exercise the MECHANISM; the deadline is pushed to end of day
+    here so the suite gives the same answer at 09:00 and at 23:00. The
+    guard itself has its own dedicated tests in
+    tests/test_orb_reconcile_time_guard.py, which set the deadline
+    explicitly."""
+    import core.engine as engine_module
+    from datetime import time as dtime
+
+    monkeypatch.setattr(engine_module, "_ORB_RECONCILE_DEADLINE_T",
+                        dtime(23, 59, 59))

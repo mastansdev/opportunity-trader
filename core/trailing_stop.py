@@ -55,7 +55,7 @@ Author : H&M Opportunity Trader
 ==========================================================
 """
 
-from config import TRAILING_STOP_WINDOW_CANDLES
+from config import TRAILING_STOP_WINDOW_CANDLES, MIN_STOP_DISTANCE_PCT
 
 LONG = "LONG"
 SHORT = "SHORT"
@@ -82,7 +82,8 @@ class TrailingStopEngine:
             "direction": direction,
         }
 
-    def update_on_candle_close(self, symbol, candle_low, candle_high):
+    def update_on_candle_close(self, symbol, candle_low, candle_high,
+                               reference_price=None):
         """
         Called every time a candle closes for a symbol that
         already has an active trailing stop. Feeds the new
@@ -91,6 +92,43 @@ class TrailingStopEngine:
         warranted. Returns the (possibly unchanged) current
         stop, or None if this symbol has no active trailing
         stop at all.
+
+        THE MINIMUM-DISTANCE FLOOR (added 2026-07-27)
+        ---------------------------------------------
+        Operator-found live. Every single position on 2026-07-27 --
+        more than twenty of them, manual and structural alike -- exited
+        by TRAILING_STOP within two to fifteen minutes, at a price
+        within 0.2% of where it went in:
+
+            LAURUSLABS  in 1681.60  out 1681.60   9 min   0.00%
+            CARTRADE    in 2893.40  out 2892.90  15 min  -0.02%
+            ETERNAL     in  295.20  out  295.40   8 min  +0.07%
+            LAURUSLABS  in 1717.50  out 1718.30   8 min  +0.05%
+
+        LAURUSLABS sold for exactly what it cost, and then ran to
+        1730.50 without us.
+
+        The cause is right here. The ratchet moved the stop to
+        `min(recent candle lows)` with NO minimum distance from price.
+        MIN_STOP_DISTANCE_PCT was applied once, when the stop was
+        seeded at entry, and then never again. In a quiet minute a
+        candle's low sits a rupee or two under the price, so after two
+        or three candles the stop had climbed to within paise of the
+        market -- and the next ordinary wobble was a "stop hit".
+
+        This is the same disease as the 0.4% seed floor fixed earlier
+        that day, one level deeper: widening the SEED changed nothing,
+        because the ratchet immediately walked the stop back up to
+        touching distance regardless.
+
+        So the floor now applies on EVERY ratchet, not just at entry:
+        the stop may rise (LONG) but may never come closer to
+        `reference_price` than MIN_STOP_DISTANCE_PCT.
+
+        `reference_price` is optional and defaults to the candle's own
+        extreme. Callers that don't pass it keep the old behaviour --
+        that is deliberate, so this cannot silently change any test or
+        replay that hasn't been looked at.
         """
         state = self._state.get(symbol)
         if state is None:
@@ -101,6 +139,10 @@ class TrailingStopEngine:
             if len(state["recent"]) > self.window:
                 state["recent"] = state["recent"][-self.window:]
             candidate = max(state["recent"])
+            # never let the stop sit closer than the floor ABOVE price
+            ref = reference_price if reference_price is not None else candle_high
+            ceiling = ref * (1 + MIN_STOP_DISTANCE_PCT)
+            candidate = max(candidate, ceiling)
             if candidate < state["stop"]:
                 state["stop"] = candidate
         else:
@@ -108,6 +150,10 @@ class TrailingStopEngine:
             if len(state["recent"]) > self.window:
                 state["recent"] = state["recent"][-self.window:]
             candidate = min(state["recent"])
+            # never let the stop sit closer than the floor BELOW price
+            ref = reference_price if reference_price is not None else candle_low
+            floor = ref * (1 - MIN_STOP_DISTANCE_PCT)
+            candidate = min(candidate, floor)
             if candidate > state["stop"]:
                 state["stop"] = candidate
 
