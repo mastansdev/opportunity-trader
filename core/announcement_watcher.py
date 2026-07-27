@@ -60,6 +60,7 @@ import time
 from datetime import datetime, timedelta
 
 from core.logger import decision, diagnostic, warn
+from core.results_ingest import find_attachment_url
 
 # ---------------------------------------------------------------
 # CLASSIFICATION -- by subject line, and honest about that
@@ -156,12 +157,18 @@ class AnnouncementWatcher:
     """Poll, dedupe, classify, remember. Read from any thread."""
 
     def __init__(self, known_symbols=None, poll_seconds=60, lookback_hours=8,
-                 fetcher=None):
+                 fetcher=None, ingestor=None):
         self.known_symbols = {str(s).upper() for s in (known_symbols or ())}
         self.poll_seconds = poll_seconds
         self.lookback_hours = lookback_hours
         # Injectable so tests never touch the network.
         self._fetcher = fetcher or self._fetch_nse
+        # core/results_ingest.py. A RESULTS filing is handed over with
+        # its PDF link; everything slow happens on the ingestor's own
+        # thread, because the filings are large (MOLD-TEK's was 7 MB) and
+        # blocking the poll loop would stall the news feed at exactly the
+        # moment news is arriving.
+        self.ingestor = ingestor
 
         self._lock = threading.Lock()
         self._seen = set()               # (symbol, stamp) -- dedupe key
@@ -229,10 +236,12 @@ class AnnouncementWatcher:
             if filed and filed.date() != today:
                 continue                                  # yesterday's news
 
+            attachment = find_attachment_url(row)
             record = {
                 "symbol": symbol,
                 "kind": kind,
                 "subject": subject[:220],
+                "attachment": attachment,
                 "filed_at": filed.strftime("%H:%M:%S") if filed else "",
                 "seen_at": now.strftime("%H:%M:%S"),
                 "minutes_ago": (round((now - filed).total_seconds() / 60.0, 1)
@@ -250,6 +259,19 @@ class AnnouncementWatcher:
                     key=lambda r: r["_filed_dt"] or datetime.min, reverse=True)
                 for r in self._today:
                     self._by_symbol.setdefault(r["symbol"], r)
+            # Hand every RESULTS filing to the ingestor. Only RESULTS --
+            # an order win or a rating change has no financial statement
+            # to read, and queueing them would just fill the log with
+            # "no readable statement".
+            if self.ingestor is not None:
+                for r in fresh:
+                    if r["kind"] == "RESULTS" and r.get("attachment"):
+                        try:
+                            self.ingestor.submit(r["symbol"], r["attachment"])
+                        except Exception as exc:           # noqa: BLE001
+                            warn(f"[NEWS] Could not queue {r['symbol']} "
+                                 f"for reading: {exc}")
+
             for r in fresh:
                 decision(
                     f"[NEWS] {r['symbol']} -- {r['kind']} filed "

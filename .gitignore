@@ -31,3 +31,4 @@ data/entries_paused.flag
 data/universe_review.csv
 data/*.csv.gz
 data/*.zip
+data/filings/

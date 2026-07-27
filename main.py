@@ -50,9 +50,10 @@ from core import corporate_actions
 from config import ENABLE_INDEX_FEED, INDEX_INSTRUMENTS, ENABLE_CANDLE_RECORDING
 from config import (
     ENABLE_ANNOUNCEMENT_WATCHER, ANNOUNCEMENT_POLL_SECONDS,
-    ANNOUNCEMENT_LOOKBACK_HOURS,
+    ANNOUNCEMENT_LOOKBACK_HOURS, ENABLE_FILING_PDF_READING,
 )
 from core.announcement_watcher import AnnouncementWatcher
+from core.results_ingest import ResultsIngestor, requests_downloader
 from config import ENABLE_STOCK_MEMORY, ENABLE_TRADE_MEMORY
 from config import EARNINGS_CALENDAR
 from core.logger import decision, diagnostic, warn
@@ -380,13 +381,29 @@ def main():
     # Own daemon thread, never the tick path. Its output feeds two
     # readers: the shortlist (a stock that filed 20 minutes ago jumps to
     # the top with the reason attached) and the dashboard panel.
+    #
+    # A RESULTS filing is handed straight to core/results_ingest.py,
+    # which downloads the attached PDF and reads the statement out of it.
+    # That PDF is the ONLY source with the figures: the announcement text
+    # carries none (seven real filings on 2026-07-27 averaged 130
+    # characters of boilerplate), and bse.resultsSnapshot lags by hours
+    # and gives no year-ago quarter. The PDF has all three quarters at
+    # full precision -- verified against MOLD-TEK's Q1 FY27 filing, whose
+    # table this parser reads as +26.31% QoQ sales while page 1 of the
+    # same document says 26.32% in prose.
     announcement_watcher = None
+    results_ingestor = None
     if ENABLE_ANNOUNCEMENT_WATCHER:
         try:
+            if quarterly is not None and ENABLE_FILING_PDF_READING:
+                results_ingestor = ResultsIngestor(
+                    quarterly, downloader=requests_downloader())
+                results_ingestor.start()
             announcement_watcher = AnnouncementWatcher(
                 known_symbols=set(resolved),
                 poll_seconds=ANNOUNCEMENT_POLL_SECONDS,
                 lookback_hours=ANNOUNCEMENT_LOOKBACK_HOURS,
+                ingestor=results_ingestor,
             )
             announcement_watcher.start()
         except Exception as exc:                           # noqa: BLE001
@@ -772,6 +789,8 @@ def main():
             candle_recorder.close()
         if announcement_watcher is not None:
             announcement_watcher.stop(timeout=3)
+        if results_ingestor is not None:
+            results_ingestor.stop(timeout=3)
         decision("Shutdown complete.")
 
 

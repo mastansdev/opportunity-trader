@@ -939,6 +939,21 @@ ANNOUNCEMENT_POLL_SECONDS = 60
 ANNOUNCEMENT_LOOKBACK_HOURS = 8
 ANNOUNCEMENT_PANEL_COUNT = 25
 
+# Read the PDF attached to a results filing (core/results_ingest.py).
+# THE ONLY SOURCE WITH THE FIGURES, measured 2026-07-27:
+#   - the announcement text has none. Seven real filings that evening
+#     averaged 130 characters of boilerplate and nothing else.
+#   - bse.resultsSnapshot lags (TMB reported and it still showed Mar-26)
+#     and returns two quarters, so YoY is impossible from it.
+#   - the PDF has the current quarter, the previous quarter AND the
+#     year-ago quarter at full precision. MOLD-TEK's Q1 FY27 table parses
+#     to +26.31% QoQ sales; page 1 of the same document says 26.32% in
+#     prose. The table and the prose agree.
+# Runs on its own thread -- the filings are large (MOLD-TEK's was 7 MB)
+# and downloading one inside the news poll would stall the feed exactly
+# when news is arriving.
+ENABLE_FILING_PDF_READING = True
+
 # --- Shortlist panel (core/shortlist.py) ------------------
 # The dashboard panel that answers "which of these 689 deserve thirty
 # seconds of my attention, and WHY". Operator, 2026-07-27: "as a human
