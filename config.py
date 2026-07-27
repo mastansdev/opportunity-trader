@@ -917,6 +917,27 @@ NO_PROGRESS_R = 0.5
 ENABLE_TICK_SANITY = True
 MAX_TICK_JUMP_PCT = 0.20     # >20% in one tick/minute = reject
 
+# --- Shortlist panel (core/shortlist.py) ------------------
+# The dashboard panel that answers "which of these 689 deserve thirty
+# seconds of my attention, and WHY". Operator, 2026-07-27: "as a human
+# i cannot read all 750/960/1500 stocks daily, i created bot to trade
+# beside me not replacing me."
+#
+# 30s, NOT the 09:30 one-shot lock core/momentum_universe.py uses.
+# Measured that day by rebuilding the ranking at nine clock times:
+# of the closing top 20, only 12 were already top 20 at 09:30, and TMB
+# -- the day's best stock at +12.1% -- sat at rank 95 at noon with 98%
+# of its volume still to come after 13:00. A frozen list cannot hold
+# it. The rebuild itself is arithmetic over rows the dashboard already
+# computed, so the cadence is cheap; the slow part (50-day volume and
+# trend normals) is loaded once per day and cached.
+SHORTLIST_REFRESH_SECONDS = 30
+# 25 rows. Deliberately looser than momentum_universe's top-25 LOCK,
+# because this list only costs attention, never a seat: showing eight
+# names when three are worth it costs thirty seconds, missing TMB
+# costs the trade.
+SHORTLIST_COUNT = 25
+
 # --- Candle recording (clean corpus for the replay bench) ---
 # Every session writes its real 1-minute OHLCV to
 # data/backtest_candles.db so the strategy can be replayed and

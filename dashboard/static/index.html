@@ -178,6 +178,19 @@
   .gl-up { color: var(--green); }
   .gl-down { color: var(--red); }
 
+  /* Shortlist reason chips, 2026-07-27. Colour carries meaning:
+     blue = a real event, amber = the crowd is already here (a warning,
+     not a reason), green/red = direction, grey = neutral context. */
+  .sl-chip { display:inline-block; padding:2px 7px; border-radius:999px; font-size:11px;
+             background: var(--panel-2); border:1px solid var(--border); margin:1px 2px 1px 0;
+             white-space: nowrap; }
+  .sl-news    { background:#1c3a5e; border-color:#2f6ea8; color:#cfe6ff; font-weight:600; }
+  .sl-crowded { background:#4a3410; border-color:#8a6320; color:#ffd9a0; }
+  .sl-quiet   { background:#123322; border-color:#2a6b47; color:#b6f0d0; }
+  .sl-up      { background:#12331f; border-color:#2a6b3e; color:#b6f0c6; font-weight:600; }
+  .sl-down    { background:#3a1414; border-color:#8a2a2a; color:#ffc0c0; font-weight:600; }
+  .sl-veto    { background:#4a1030; border-color:#93306a; color:#ffc7e6; font-weight:600; }
+  .sl-thin    { opacity:0.75; }
   .panel-head-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
   .panel-head-row h2 { margin: 0; }
 
@@ -341,6 +354,38 @@
   </div>
 
   <!-- ============ Top Gainers / Top Losers -- right below Open Positions ============ -->
+  <!-- ============ SHORTLIST, 2026-07-27 ============
+       Operator: "as a human i cannot read all 750/960/1500 stocks
+       daily, i created bot to trade beside me not replacing me."
+
+       Placed ABOVE Gainers & Losers deliberately -- that table shows
+       WHAT moved, this one shows WHY, and the why is what decides
+       whether a name is worth a click. On 2026-07-27 the old ranking
+       surfaced SWIGGY (-Rs 2,128) and never showed TMB, KFINTECH,
+       CARTRADE or SENCO. This one puts TMB at 2 and SWIGGY at 250.
+  ============================================================= -->
+  <div class="panel" style="margin-top:14px;">
+    <div class="panel-head-row">
+      <h2>Shortlist <span class="gl-refresh-note">what moved, and why &mdash; ranked</span></h2>
+      <div class="gl-head-right">
+        <span class="empty-note" id="shortlistScanned"></span>
+        <span class="empty-note" id="shortlistUpdatedAt"></span>
+      </div>
+    </div>
+    <div class="table-wrap table-wrap-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Symbol</th><th>Sector</th><th>LTP</th><th>Change%</th>
+            <th>Score</th><th style="width:45%">Why</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="shortlistRows"></tbody>
+      </table>
+    </div>
+    <div id="shortlistThin" class="empty-note" style="margin-top:8px;"></div>
+  </div>
+
   <div class="panel" style="margin-top:14px;">
     <div class="panel-head-row">
       <h2>Top 50 Gainers &amp; Losers</h2>
@@ -531,6 +576,34 @@ const glRow = (r, side) => `<tr>
         ? `<button class="btn-buy btn-sm" onclick="manualBuy('${r.symbol}')">BUY</button>`
         : `<button class="btn-short btn-sm" onclick="manualShort('${r.symbol}')">SHORT</button>`)
       : ""}</td>
+</tr>`;
+// ---- Shortlist ----------------------------------------------------
+// Each reason is its own chip so the eye can land on the one that
+// matters. "REPORTING TODAY" and "results out" are the ones worth
+// acting on; CROWDED is a warning, not a reason.
+function whyChips(why) {
+  return (why || []).map(w => {
+    let cls = "sl-chip";
+    if (/REPORTING TODAY|results out|results due/.test(w)) cls += " sl-news";
+    else if (/^CROWDED/.test(w)) cls += " sl-crowded";
+    else if (/^quiet/.test(w)) cls += " sl-quiet";
+    else if (/^up /.test(w)) cls += " sl-up";
+    else if (/^DOWN /.test(w)) cls += " sl-down";
+    return `<span class="${cls}">${escapeHtml(w)}</span>`;
+  }).join(" ");
+}
+const shortlistRow = (r) => `<tr>
+  <td>${r.s_no}</td>
+  <td><strong>${escapeHtml(r.symbol)}</strong>${
+      (r.veto || []).length ? ` <span class="sl-chip sl-veto">${escapeHtml(r.veto.join(","))}</span>` : ""}</td>
+  <td>${escapeHtml(r.sector || "—")}</td>
+  <td><strong>${fmtNum(r.ltp)}</strong></td>
+  <td class="${pnlClass(r.change_pct)}">${fmtPct(r.change_pct)}</td>
+  <td>${fmtNum(r.score)}</td>
+  <td>${whyChips(r.why)}</td>
+  <td>${IS_OPERATOR && r.change_pct >= 0
+        ? `<button class="btn-buy btn-sm" onclick="manualBuy('${r.symbol}')">BUY</button>`
+        : ""}</td>
 </tr>`;
 // NSE-style heatmap tile -- background intensity scales with the
 // magnitude of the move (deeper green up / deeper red down), so the
@@ -794,6 +867,26 @@ function render(snap) {
   // -- Top gainers / losers (replaces the old ORB watchlist, 2026-07-23) --
   const gl = snap.gainers_losers || { gainers: [], losers: [] };
   document.getElementById("glUpdatedAt").textContent = gl.built_at ? `As of ${gl.built_at} IST` : "";
+  // ---- Shortlist ----
+  const sl = s.shortlist || {};
+  const slRows = sl.rows || [];
+  document.getElementById("shortlistRows").innerHTML = slRows.length
+    ? slRows.map(shortlistRow).join("")
+    : `<tr><td colspan="8" class="empty-note">Nothing has moved enough to be worth a look yet.</td></tr>`;
+  document.getElementById("shortlistScanned").textContent =
+    sl.scanned ? `scanned ${sl.scanned} symbols` : "";
+  document.getElementById("shortlistUpdatedAt").textContent =
+    sl.built_at ? `updated ${sl.built_at}` : "";
+  // Movers you cannot actually fill. Shown rather than dropped --
+  // DPABHUSHAN rose 6.7% on 2026-07-27 and silently vanished from the
+  // first version of this list.
+  const thin = sl.thin || [];
+  document.getElementById("shortlistThin").innerHTML = thin.length
+    ? "Moved but too thin to fill: " + thin.map(t =>
+        `<span class="sl-chip sl-thin">${escapeHtml(t.symbol)} ${fmtPct(t.change_pct)} · ₹${t.turnover_cr}cr/day</span>`
+      ).join(" ")
+    : "";
+
   document.getElementById("gainersRows").innerHTML = (gl.gainers || []).length
     ? gl.gainers.map(r => glRow(r, "gainer")).join("")
     : `<tr><td colspan="12" class="no-rows">No data yet</td></tr>`;

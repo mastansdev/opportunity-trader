@@ -116,8 +116,11 @@ from config import (
     FII_NET_CR, DII_NET_CR,
     SANITY_BAND_MULTIPLE, CIRCUIT_LOCK_TOLERANCE_PCT,
     MARKET_BREADTH_REFRESH_SECONDS,
+    SHORTLIST_REFRESH_SECONDS, SHORTLIST_COUNT,
 )
 
+from core.logger import warn
+from core.shortlist import ShortlistBuilder
 from trading.charges import round_trip_charges
 
 try:
@@ -243,6 +246,21 @@ class DashboardState:
         self._breadth_cache = None
         self._breadth_built_at = 0.0
 
+        # Shortlist (core/shortlist.py), 2026-07-27. The panel that
+        # answers "which of these 689 deserve thirty seconds of my
+        # attention, and WHY" -- see that module's docstring for the
+        # TMB/KFINTECH/CARTRADE evidence. Rebuilt on its own cadence,
+        # same pattern as everything else here.
+        #
+        # Deliberately NOT locked once at 09:30 like
+        # core/momentum_universe.py. Measured 2026-07-27: of the day's
+        # closing top 20, only 12 were top 20 at 09:30. TMB sat at rank
+        # 95 at noon and closed 2nd, with 98% of its volume after 13:00.
+        # A frozen list cannot contain it.
+        self._shortlist = ShortlistBuilder()
+        self._shortlist_cache = None
+        self._shortlist_built_at = 0.0
+
     # --------------------------------------------------
 
     def refresh(self):
@@ -304,6 +322,7 @@ class DashboardState:
             "unchanged": breadth["unchanged"],
             "universe_size": breadth["universe_size"],
             "gainers_losers": gainers_losers,
+            "shortlist": self._build_shortlist(),
             "market_intelligence": self._build_market_intelligence(
                 breadth, gainers_losers, performance
             ),
@@ -666,6 +685,26 @@ class DashboardState:
             "sector_losers": sector["sector_losers"],
             "sector_built_at": sector["built_at"],
         }
+
+    def _build_shortlist(self):
+        """The reason-ranked shortlist. Throttled to its own cadence and
+        wrapped so a failure here can never take the dashboard down --
+        a screener going quiet must degrade to an empty panel, never to
+        a dead page while the operator has money on the screen."""
+        now = time.monotonic()
+        if self._shortlist_cache is not None and \
+                now - self._shortlist_built_at < SHORTLIST_REFRESH_SECONDS:
+            return self._shortlist_cache
+        try:
+            result = self._shortlist.rank(
+                self._compute_gl_rows(), top=SHORTLIST_COUNT)
+        except Exception as e:
+            warn(f"[SHORTLIST] Build failed, panel will show empty: {e}")
+            result = {"rows": [], "thin": [], "scanned": 0,
+                      "built_at": datetime.now().strftime("%H:%M:%S")}
+        self._shortlist_cache = result
+        self._shortlist_built_at = now
+        return result
 
     def _build_open_positions(self, open_positions):
         rows = []
