@@ -19,6 +19,8 @@ data/*cookies*.json
 # Scratch files from live investigation -- downloaded filings, one-off
 # snapshots. Regenerable, sometimes many MB, never source.
 data/_test_*.pdf
+# tests/fixtures/*.txt are the extracted TEXT of real filings -- small,
+# committed on purpose, so the 7 MB PDFs never need to be.
 data/bse_lag_snapshot_*.json
 
 # Databases (regenerated; keep the repo light)

@@ -380,6 +380,8 @@ def main():
                     help="BSE scrip code to inspect directly, e.g. 543596")
     ap.add_argument("--pause", type=float, default=1.0,
                     help="seconds between companies on a universe walk")
+    ap.add_argument("--resume", action="store_true",
+                    help="skip symbols already stored (after a Ctrl+C)")
     a = ap.parse_args()
 
     if a.inspect:
@@ -416,21 +418,40 @@ def main():
         return
 
     # Whole universe. One call per company -- see walk_universe().
+    # load() must be called before all_symbols() -- a fresh MasterLoader
+    # is empty, which the first version of this read as "no universe".
     symbols = []
     try:
         from core.master_loader import MasterLoader
-        symbols = sorted(MasterLoader().all_symbols())
+        loader = MasterLoader()
+        loader.load()
+        symbols = sorted(loader.all_symbols())
     except Exception as exc:                               # noqa: BLE001
         print(f"Could not load the universe ({exc}).")
         return
     if not symbols:
-        print("No symbols in the master universe.")
+        print("No symbols in the master universe after load().")
         return
+    if a.resume:
+        known = store.symbols()
+        before = len(symbols)
+        symbols = [s for s in symbols if s not in known]
+        print(f"--resume: skipping {before - len(symbols)} already stored.")
+        if not symbols:
+            print("Nothing left to fetch.")
+            report(store)
+            return
+
     mins = len(symbols) * a.pause / 60.0
     print(f"Walking {len(symbols)} symbols at {a.pause}s each "
           f"(~{mins:.0f} minutes). Ctrl+C is safe -- each name is stored "
-          f"as it arrives.")
-    walk_universe(store, symbols, pause=a.pause)
+          f"as it arrives; re-run with --resume to pick up where you "
+          f"stopped.")
+    try:
+        walk_universe(store, symbols, pause=a.pause)
+    except KeyboardInterrupt:
+        print("\nStopped. Everything fetched so far is stored. "
+              "Re-run with --resume to continue.")
     report(store)
 
 

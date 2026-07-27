@@ -28,10 +28,40 @@ import pytest
 from core.announcement_watcher import AnnouncementWatcher, classify
 
 
-def _row(symbol, subject, when=None):
+def _row(symbol, subject, when=None, body=""):
     when = when or datetime.now()
-    return {"symbol": symbol, "desc": subject,
+    return {"symbol": symbol, "desc": subject, "attchmntText": body,
             "an_dt": when.strftime("%d-%b-%Y %H:%M:%S")}
+
+
+# Verbatim from the live watcher, evening of 2026-07-27. Every one of
+# these has the SAME useless subject line; the event is named only in the
+# attachment text. The first version of classify() read the subject alone
+# and returned None for all seven.
+REAL_FILINGS = [
+    ("KANPRPLA", "Outcome of Board Meeting",
+     "Kanpur Plastipack Limited has submitted to the Exchange, the "
+     "financial results for the period ended Jun 30, 2026."),
+    ("BEL", "Outcome of Board Meeting",
+     "Bharat Electronics Limited has submitted to the Exchange, the "
+     "financial results for the period ended Jun 30, 2026 and approval "
+     "for increase in Authorised Share Capital."),
+    ("BKMINDST", "Outcome of Board Meeting",
+     "Bkm Industries Limited has submitted to the Exchange, the financial "
+     "results for the period ended Jun 30, 2026."),
+    ("TOKYOPLAST", "Outcome of Board Meeting",
+     "Tokyo Plast International Limited has submitted to the Exchange, "
+     "the financial results for the period ended Jun 30, 2026."),
+    ("SAGCEM", "Outcome of Board Meeting",
+     "Sagar Cements Limited has submitted to the Exchange, the financial "
+     "results for the period ended Jun 30, 2026."),
+    ("NORTHARC", "Outcome of Board Meeting",
+     "Northern Arc Capital Limited has submitted to the Exchange, the "
+     "financial results for the period ended Jun 30, 2026."),
+    ("TATAPOWER", "Outcome of Board Meeting",
+     "Tata Power Company Limited has submitted to the Exchange, the "
+     "financial results for the period ended Jun 30, 2026."),
+]
 
 
 def _watcher(rows, **kw):
@@ -70,6 +100,35 @@ def test_routine_filings_are_ignored(subject):
     every routine filing. A panel that fills with trading-window notices
     is a panel nobody reads."""
     assert classify(subject) is None
+
+
+@pytest.mark.parametrize("symbol,subject,body", REAL_FILINGS)
+def test_the_seven_real_filings_of_2026_07_27_are_caught(symbol, subject, body):
+    """THE regression test. All seven arrived with the subject "Outcome
+    of Board Meeting" and nothing else; the words that identify them live
+    in the attachment text. Classifying on the subject alone threw away
+    every results filing of that evening."""
+    assert classify(subject, body) == "RESULTS", \
+        f"{symbol} would be silently dropped"
+
+
+def test_subject_alone_is_not_enough_and_that_is_the_point():
+    """Kept as evidence, not as approval: this is what the feed really
+    gives us, and why body must be read."""
+    assert classify("Outcome of Board Meeting") is None
+
+
+def test_the_filing_reaches_the_panel_end_to_end():
+    w = _watcher([_row(s, subj, body=b) for s, subj, b in REAL_FILINGS])
+    assert len(w.poll_once()) == len(REAL_FILINGS)
+    assert {r["kind"] for r in w.snapshot()["rows"]} == {"RESULTS"}
+
+
+def test_a_noisy_subject_is_not_resurrected_by_its_body():
+    """Noise is judged on the SUBJECT only. A newspaper-publication
+    notice whose body mentions financial results must stay dropped."""
+    assert classify("Newspaper Publication of Financial Results",
+                    "has submitted the financial results for Jun 30, 2026") is None
 
 
 def test_newspaper_publication_is_noise_even_though_it_says_results():

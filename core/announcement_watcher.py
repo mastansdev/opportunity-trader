@@ -104,12 +104,36 @@ NOISE = re.compile(
     r"duplicate\s+share", re.I)
 
 
-def classify(subject):
-    """What KIND of announcement this is, from its subject line.
-    None means routine noise, or nothing recognisable."""
-    text = str(subject or "")
-    if not text.strip() or NOISE.search(text):
+def classify(subject, body=""):
+    """What KIND of announcement this is. None means routine noise, or
+    nothing recognisable.
+
+    BODY MATTERS, and the first version of this ignored it. Live output
+    from 2026-07-27 evening, seven consecutive real filings:
+
+        desc: Outcome of Board Meeting
+        attachment: "Bharat Electronics Limited has submitted to the
+                     Exchange, the financial results for the period
+                     ended Jun 30, 2026..."
+
+    The subject was "Outcome of Board Meeting" for BEL, TATAPOWER,
+    SAGCEM, NORTHARC, KANPRPLA, TOKYOPLAST and BKMINDST alike. Subject
+    alone classified all seven as None -- the watcher would have thrown
+    away every results filing of the evening. The words that identify it
+    are in the attachment text.
+
+    core/results_calendar.py's is_results_announcement() already took
+    both for exactly this reason; this one did not, and real data found
+    it within hours.
+
+    Noise is still judged on the SUBJECT only. A body mentioning
+    "financial results" inside a newspaper-publication notice must not
+    resurrect it.
+    """
+    subject = str(subject or "")
+    if not subject.strip() or NOISE.search(subject):
         return None
+    text = f"{subject}\n{body or ''}"
     for kind, pattern in KIND_PATTERNS:
         if pattern.search(text):
             return kind
@@ -185,7 +209,11 @@ class AnnouncementWatcher:
                 continue
 
             subject = str(row.get("desc") or row.get("subject") or "")
-            kind = classify(subject)
+            # attchmntText carries the sentence that actually names the
+            # event -- see classify()'s docstring for the seven filings
+            # that were silently dropped without it.
+            body = str(row.get("attchmntText") or row.get("attchmntFile") or "")
+            kind = classify(subject, body)
             if kind is None:
                 continue
 
