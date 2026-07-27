@@ -121,10 +121,22 @@ def parse_period(value):
     return None, None
 
 
-def inspect_feed(limit=3):
-    """Print the RAW shape. Interprets nothing."""
+def inspect_feed(sample_symbol="TMB", limit=3):
+    """Print the RAW shape. Interprets nothing.
+
+    Round 1 of this (2026-07-27) assumed resultsSnapshot() was a bulk
+    feed. It is not:
+
+        resultsSnapshot() missing 1 required positional argument: 'scripcode'
+
+    So it is ONE CALL PER COMPANY, keyed on the BSE scrip code -- a
+    different number from the NSE symbol this bot uses everywhere else.
+    That means a symbol -> scripcode map is needed before anything can be
+    fetched, which is why this now inspects the lookup path too.
+    """
+    import inspect as _inspect
     print("=" * 74)
-    print("  RAW BSE RESULTS FEED -- nothing interpreted")
+    print("  RAW BSE FEED -- nothing interpreted")
     print("=" * 74)
     try:
         from bse import BSE
@@ -132,32 +144,176 @@ def inspect_feed(limit=3):
         print("\n  The `bse` package is not installed here.")
         print("  Install it where the bot runs:  py -m pip install bse\n")
         return
+
+    print("\n  EVERY PUBLIC METHOD ON BSE, with its arguments:")
+    for name in sorted(m for m in dir(BSE) if not m.startswith("_")):
+        fn = getattr(BSE, name, None)
+        if not callable(fn):
+            continue
+        try:
+            print(f"      {name}{_inspect.signature(fn)}"[:110])
+        except (TypeError, ValueError):
+            print(f"      {name}(...)")
+
     with BSE(download_folder="data") as b:
-        for name in ("resultsSnapshot", "results", "corporateActions"):
+        # 1. How do we turn an NSE symbol into a BSE scrip code?
+        # getScripCode is the one that works -- confirmed 2026-07-27,
+        # getScripCode('TMB') -> "543596".
+        print(f"\n  SCRIP CODE FOR {sample_symbol}:")
+        code = None
+        try:
+            code = b.getScripCode(sample_symbol)
+            print(f"      getScripCode({sample_symbol!r}) -> {code!r}")
+        except Exception as exc:                           # noqa: BLE001
+            print(f"      getScripCode raised: {str(exc)[:100]}")
+        if code is None:
+            print("\n  Re-run with a known code, e.g. TMB:")
+            print("      py tools/fetch_quarterly.py --inspect --scripcode 543596")
+            return
+
+        # 2. The results themselves, for that one company.
+        print(f"\n  resultsSnapshot({code!r}):")
+        try:
+            _dump(b.resultsSnapshot(code), limit)
+        except Exception as exc:                           # noqa: BLE001
+            print(f"      raised: {exc}")
+
+        # 3. Two more that showed up in the method list and may carry
+        #    the figures or the filing dates we need.
+        for name, args in (("resultCalendar", {"scripcode": str(code)}),
+                           ("equityMetaInfo", {"scripcode": str(code)})):
             fn = getattr(b, name, None)
             if fn is None:
-                print(f"\n  BSE has no method `{name}`")
                 continue
+            print(f"\n  {name}(scripcode={code!r}):")
             try:
-                data = fn()
+                _dump(fn(**args), limit)
             except Exception as exc:                       # noqa: BLE001
-                print(f"\n  {name}() raised: {exc}")
-                continue
-            print(f"\n  {name}() -> {type(data).__name__}")
-            rows = data if isinstance(data, list) else (
-                list(data.values())[0] if isinstance(data, dict) and data else [])
-            if isinstance(rows, dict):
-                rows = [rows]
-            if not rows:
-                print("    (empty)")
-                continue
-            print(f"    {len(rows)} rows. FIELDS ON ROW 0:")
-            first = rows[0] if isinstance(rows[0], dict) else {"value": rows[0]}
+                print(f"      raised: {str(exc)[:120]}")
+
+
+def _dump(data, limit=3, indent="      "):
+    """Print whatever came back, without assuming its shape.
+
+    Round 2 of this got it wrong (2026-07-27): resultsSnapshot returns a
+    DICT -- the record itself -- and this function did
+    `list(data.values())[0]`, took the first value (a string), and then
+    iterated its characters. The operator's output read:
+
+        6 rows. FIELDS ON ROW 0:
+          value  = i
+        FIRST ROWS RAW:  "i"  "n"  " "
+
+    A dict is now printed as a dict. Only a LIST is treated as rows.
+    """
+    print(f"{indent}-> {type(data).__name__}")
+
+    if isinstance(data, dict):
+        if not data:
+            print(f"{indent}(empty dict)")
+            return
+        print(f"{indent}{len(data)} keys:")
+        for k in data:
+            v = data[k]
+            if isinstance(v, (list, dict)):
+                print(f"{indent}  {str(k):<30} = {type(v).__name__} "
+                      f"({len(v)} items)")
+                # One level down -- quarterly figures usually arrive as a
+                # nested list of periods.
+                inner = v[0] if isinstance(v, list) and v else (
+                    v if isinstance(v, dict) else None)
+                if isinstance(inner, dict):
+                    for ik in sorted(inner):
+                        print(f"{indent}      {str(ik):<26} = "
+                              f"{str(inner[ik])[:40]}")
+            else:
+                print(f"{indent}  {str(k):<30} = {str(v)[:44]}")
+        print(f"\n{indent}RAW: {json.dumps(data, default=str)[:900]}")
+        return
+
+    if isinstance(data, list):
+        if not data:
+            print(f"{indent}(empty list)")
+            return
+        first = data[0]
+        if isinstance(first, dict):
+            print(f"{indent}{len(data)} rows. FIELDS ON ROW 0:")
             for k in sorted(first):
-                print(f"      {str(k):<28} = {str(first[k])[:46]}")
-            print("\n    FIRST ROWS RAW:")
-            for r in rows[:limit]:
-                print(f"      {json.dumps(r, default=str)[:200]}")
+                print(f"{indent}  {str(k):<30} = {str(first[k])[:42]}")
+        print(f"\n{indent}FIRST ROWS RAW:")
+        for r in data[:limit]:
+            print(f"{indent}  {json.dumps(r, default=str)[:260]}")
+        return
+
+    print(f"{indent}RAW: {str(data)[:400]}")
+
+
+def fetch_symbol(bse, symbol, store, verbose=False):
+    """One company. getScripCode -> resultsSnapshot -> parse -> store.
+
+    Confirmed against the live API 2026-07-27. Returns a counts dict; a
+    failure on one name never stops a universe walk.
+    """
+    from core.quarterly_results import parse_results_snapshot
+    counts = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
+    try:
+        code = bse.getScripCode(symbol)
+    except Exception as exc:                               # noqa: BLE001
+        if verbose:
+            print(f"   {symbol:<12} no scrip code ({str(exc)[:50]})")
+        counts["failed"] += 1
+        return counts
+    try:
+        payload = bse.resultsSnapshot(str(code))
+    except Exception as exc:                               # noqa: BLE001
+        if verbose:
+            print(f"   {symbol:<12} snapshot failed ({str(exc)[:50]})")
+        counts["failed"] += 1
+        return counts
+
+    for rec in parse_results_snapshot(payload):
+        period_end, label = parse_period(rec["period_label"])
+        if period_end is None:
+            counts["failed"] += 1
+            continue
+        outcome = store.remember(
+            symbol=symbol, period_end=period_end, period_label=label,
+            source="bse:resultsSnapshot",
+            sales=rec.get("sales"), pat=rec.get("pat"), eps=rec.get("eps"),
+            operating_profit=rec.get("operating_profit"),
+            opm_pct=rec.get("opm_pct"), other_income=rec.get("other_income"))
+        counts[outcome] += 1
+    if verbose:
+        print(f"   {symbol:<12} code {code}  "
+              f"new {counts['new']} updated {counts['updated']} "
+              f"unchanged {counts['unchanged']}")
+    return counts
+
+
+def walk_universe(store, symbols, pause=1.0, verbose=True):
+    """One HTTP call per company, so this is an OVERNIGHT job -- 750
+    names at a polite one per second is about twelve minutes. It is
+    useless for reacting to a filing that lands at 13:22, and it does not
+    need to be: resultsSnapshot lags anyway (TMB reported 2026-07-27 and
+    the snapshot still showed Mar-26). This builds HISTORY."""
+    import time
+    try:
+        from bse import BSE
+    except ImportError:
+        print("The `bse` package is not installed. py -m pip install bse")
+        return
+    total = {"new": 0, "updated": 0, "unchanged": 0, "failed": 0}
+    with BSE(download_folder="data") as b:
+        for i, sym in enumerate(symbols, 1):
+            for k, v in fetch_symbol(b, sym, store, verbose=False).items():
+                total[k] += v
+            if verbose and i % 25 == 0:
+                print(f"   {i}/{len(symbols)}  new {total['new']} "
+                      f"updated {total['updated']} failed {total['failed']}")
+            time.sleep(pause)
+    print(f"\nDone. new {total['new']}, updated {total['updated']}, "
+          f"unchanged {total['unchanged']}, failed {total['failed']}")
+    return total
 
 
 def store_rows(rows, store, source="bse", verbose=True):
@@ -220,31 +376,61 @@ def main():
                     help="print the raw feed and store nothing")
     ap.add_argument("--report", action="store_true")
     ap.add_argument("--symbol")
+    ap.add_argument("--scripcode",
+                    help="BSE scrip code to inspect directly, e.g. 543596")
+    ap.add_argument("--pause", type=float, default=1.0,
+                    help="seconds between companies on a universe walk")
     a = ap.parse_args()
 
     if a.inspect:
-        inspect_feed()
+        if a.scripcode:
+            try:
+                from bse import BSE
+            except ImportError:
+                print("The `bse` package is not installed.")
+                return
+            with BSE(download_folder="data") as b:
+                print(f"resultsSnapshot({a.scripcode!r}):")
+                try:
+                    _dump(b.resultsSnapshot(a.scripcode))
+                except Exception as exc:                   # noqa: BLE001
+                    print(f"   raised: {exc}")
+            return
+        inspect_feed(sample_symbol=a.symbol or "TMB")
         return
 
     store = QuarterlyResults()
-    if a.report or a.symbol:
+    if a.report:
         report(store, a.symbol)
         return
 
-    try:
-        from bse import BSE
-    except ImportError:
-        print("The `bse` package is not installed. py -m pip install bse")
+    if a.symbol:
+        try:
+            from bse import BSE
+        except ImportError:
+            print("The `bse` package is not installed. py -m pip install bse")
+            return
+        with BSE(download_folder="data") as b:
+            fetch_symbol(b, a.symbol.upper(), store, verbose=True)
+        report(store, a.symbol.upper())
         return
-    print("Fetching BSE results snapshot...")
-    with BSE(download_folder="data") as b:
-        data = b.resultsSnapshot()
-    rows = data if isinstance(data, list) else list(data.values()) if isinstance(data, dict) else []
-    flat = []
-    for r in rows:
-        flat.extend(r) if isinstance(r, list) else flat.append(r)
-    print(f"  {len(flat)} rows returned")
-    store_rows(flat, store)
+
+    # Whole universe. One call per company -- see walk_universe().
+    symbols = []
+    try:
+        from core.master_loader import MasterLoader
+        symbols = sorted(MasterLoader().all_symbols())
+    except Exception as exc:                               # noqa: BLE001
+        print(f"Could not load the universe ({exc}).")
+        return
+    if not symbols:
+        print("No symbols in the master universe.")
+        return
+    mins = len(symbols) * a.pause / 60.0
+    print(f"Walking {len(symbols)} symbols at {a.pause}s each "
+          f"(~{mins:.0f} minutes). Ctrl+C is safe -- each name is stored "
+          f"as it arrives.")
+    walk_universe(store, symbols, pause=a.pause)
     report(store)
 
 

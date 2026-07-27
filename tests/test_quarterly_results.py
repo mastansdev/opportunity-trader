@@ -34,7 +34,26 @@ from datetime import date
 import pytest
 
 from core.quarterly_results import (QuarterlyResults, grade, summarise,
+                                    parse_results_snapshot,
                                     MATERIAL_GROWTH_PCT)
+
+# The EXACT payload bse.BSE().resultsSnapshot('543596') returned for TMB
+# on 2026-07-27, pasted from the live run rather than imagined. Two
+# earlier parsers were written from memory against this feed and both
+# were wrong -- first assuming it was a bulk endpoint, then treating the
+# dict as a list of rows.
+TMB_SNAPSHOT = {
+    "currency_unit": "in Cr.",
+    "periods": ["Mar-26", "Dec-25", "FY25-26"],
+    "results_in_crores": {
+        "fields": ["title", "Mar-26", "Dec-25", "FY25-26"],
+        "data": [["Revenue", "1,550.38", "1,469.41", "5,819.42"],
+                 ["Net Profit", "373.65", "341.50", "1,337.55"],
+                 ["EPS", "23.60", "21.57", "84.47"],
+                 ["NPM %", "24.10", "23.24", "22.98"],
+                 ["CAR %", "--", "--", "--"]]},
+    "period_links": [{"FY": "FY25-26", "LQ": "Jun-26", "SQ": "Mar-26"}],
+}
 
 
 @pytest.fixture
@@ -46,6 +65,77 @@ def _q(store, symbol, period, sales, pat, eps=None, opm=None):
     return store.remember(symbol=symbol, period_end=period, sales=sales,
                           pat=pat, eps=eps, opm_pct=opm,
                           period_label=period.strftime("%b-%y"))
+
+
+# ----------------------------------------------------------------
+# Parsing the real BSE payload
+# ----------------------------------------------------------------
+
+def test_the_real_tmb_payload_parses():
+    rows = parse_results_snapshot(TMB_SNAPSHOT)
+    assert [r["period_label"] for r in rows] == ["Mar-26", "Dec-25"]
+    assert rows[0]["sales"] == 1550.38
+    assert rows[0]["pat"] == 373.65
+    assert rows[0]["eps"] == 23.60
+
+
+def test_the_full_year_column_is_not_stored_as_a_quarter():
+    """'FY25-26' sits in the same table as the quarters. Storing it as
+    one would silently corrupt every QoQ comparison after it -- TMB's
+    FY revenue is 5,819 against a quarterly 1,550, so the next quarter
+    would read as a 73% collapse."""
+    assert all(not r["period_label"].startswith("FY")
+               for r in parse_results_snapshot(TMB_SNAPSHOT))
+
+
+def test_indian_number_formatting_is_handled():
+    assert parse_results_snapshot(TMB_SNAPSHOT)[0]["sales"] == 1550.38
+
+
+def test_a_dash_is_missing_not_zero():
+    """TMB's CAR% is '--'. A missing figure and a zero figure are
+    different facts, and storing 0.0 would make a bank look bankrupt."""
+    rows = parse_results_snapshot(TMB_SNAPSHOT)
+    assert "car" not in rows[0]
+
+
+def test_unrecognised_line_items_are_skipped_not_guessed():
+    """Line items depend on the industry -- a bank reports NPM and CAR,
+    a manufacturer reports OPM. Anything unmapped is dropped."""
+    payload = {"results_in_crores": {
+        "fields": ["title", "Jun-26"],
+        "data": [["Revenue", "100"], ["Some Exotic Metric", "42"]]}}
+    assert parse_results_snapshot(payload) == [
+        {"period_label": "Jun-26", "sales": 100.0}]
+
+
+def test_a_manufacturers_line_items_also_parse():
+    payload = {"results_in_crores": {
+        "fields": ["title", "Jun-26"],
+        "data": [["Sales", "300.50"], ["Operating Profit", "56.0"],
+                 ["OPM %", "18.6"], ["Net Profit", "25.60"],
+                 ["EPS", "7.70"]]}}
+    r = parse_results_snapshot(payload)[0]
+    assert (r["sales"], r["operating_profit"], r["opm_pct"], r["pat"],
+            r["eps"]) == (300.50, 56.0, 18.6, 25.60, 7.70)
+
+
+@pytest.mark.parametrize("junk", [None, {}, [], "nonsense",
+                                  {"results_in_crores": {}},
+                                  {"results_in_crores": {"fields": ["title"],
+                                                         "data": []}}])
+def test_malformed_payloads_return_nothing_rather_than_raising(junk):
+    assert parse_results_snapshot(junk) == []
+
+
+def test_the_feed_lags_and_the_test_records_that():
+    """NOT a parser test -- a record of the fact that shaped the design.
+    TMB reported on 2026-07-27 and this payload's newest quarter is
+    Mar-26, while period_links.LQ already says Jun-26. resultsSnapshot is
+    a HISTORY source. Same-day numbers must come from the filing itself.
+    """
+    assert TMB_SNAPSHOT["period_links"][0]["LQ"] == "Jun-26"
+    assert "Jun-26" not in TMB_SNAPSHOT["results_in_crores"]["fields"]
 
 
 # ----------------------------------------------------------------

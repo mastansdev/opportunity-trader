@@ -335,6 +335,108 @@ def summarise(qoq, yoy):
     return ", ".join(bits)
 
 
+# --------------------------------------------------------------
+# BSE resultsSnapshot -- the real payload shape
+# --------------------------------------------------------------
+# Confirmed live 2026-07-27, bse.BSE().resultsSnapshot('543596') for TMB:
+#
+#   {"currency_unit": "in Cr.",
+#    "periods": ["Mar-26", "Dec-25", "FY25-26"],
+#    "results_in_crores": {
+#       "fields": ["title", "Mar-26", "Dec-25", "FY25-26"],
+#       "data": [["Revenue",    "1,550.38", "1,469.41", "5,819.42"],
+#                ["Net Profit",   "373.65",   "341.50", "1,337.55"],
+#                ["EPS",           "23.60",    "21.57",    "84.47"],
+#                ["NPM %",         "24.10",    "23.24",    "22.98"],
+#                ["CAR %",            "--",       "--",       "--"]]},
+#    "period_links": [{"FY": "FY25-26", "LQ": "Jun-26", "SQ": "Mar-26", ...}]}
+#
+# THREE THINGS THAT MATTER, ALL LEARNED FROM THAT ONE RESPONSE:
+#
+# 1. IT LAGS. TMB reported on 2026-07-27 and this still showed Mar-26 as
+#    its latest quarter, while period_links.LQ already said "Jun-26".
+#    Same as CANBK, still Mar-26 ninety-eight minutes after its numbers
+#    were public. So this is a HISTORY source. Same-day numbers have to
+#    come from the filing itself, never from here.
+#
+# 2. ONLY TWO QUARTERS COME BACK, plus a full year. That is enough for
+#    QoQ and never enough for YoY on its own -- YoY only appears once the
+#    store has accumulated four quarters of its own.
+#
+# 3. THE LINE ITEMS DEPEND ON THE INDUSTRY. TMB is a bank, so it reports
+#    Revenue / Net Profit / EPS / NPM % / CAR %. A manufacturer reports
+#    Sales and OPM. So titles are matched permissively and anything
+#    unrecognised is skipped rather than guessed at.
+
+_TITLE_MAP = {
+    "revenue": "sales", "sales": "sales", "net sales": "sales",
+    "total income": "sales", "revenue from operations": "sales",
+    "net profit": "pat", "pat": "pat", "profit after tax": "pat",
+    "profit for the period": "pat", "net profit/loss": "pat",
+    "eps": "eps", "basic eps": "eps", "earnings per share": "eps",
+    "operating profit": "operating_profit", "pbidt": "operating_profit",
+    "ebitda": "operating_profit",
+    "opm %": "opm_pct", "opm": "opm_pct", "operating margin": "opm_pct",
+    "other income": "other_income",
+}
+
+
+def _num(value):
+    """'1,550.38' -> 1550.38. '--' and '' -> None, never 0.0 -- a missing
+    figure and a zero figure are different facts."""
+    text = str(value or "").strip().replace(",", "").replace("%", "")
+    if not text or text in ("--", "-", "NA", "N.A."):
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def parse_results_snapshot(payload):
+    """BSE's resultsSnapshot dict -> [{period_label, sales, pat, ...}].
+
+    Full-year columns are dropped: "FY25-26" is not a quarter, and
+    storing one as though it were would silently corrupt every QoQ
+    comparison afterwards.
+    """
+    if not isinstance(payload, dict):
+        return []
+    block = payload.get("results_in_crores") or payload.get("results_in_millions")
+    if not isinstance(block, dict):
+        return []
+    fields = block.get("fields") or []
+    rows = block.get("data") or []
+    if len(fields) < 2 or not rows:
+        return []
+
+    scale = 0.1 if payload.get("results_in_crores") is None else 1.0
+
+    out = []
+    for col, label in enumerate(fields[1:], start=1):
+        label = str(label).strip()
+        if not label or label.upper().startswith("FY"):
+            continue
+        record = {"period_label": label}
+        for row in rows:
+            if not isinstance(row, (list, tuple)) or len(row) <= col:
+                continue
+            key = _TITLE_MAP.get(str(row[0]).strip().lower())
+            if key is None:
+                continue
+            value = _num(row[col])
+            if value is None:
+                continue
+            # EPS and any % are per-share or ratios -- never rescaled.
+            if scale != 1.0 and key in ("sales", "pat", "operating_profit",
+                                        "other_income"):
+                value *= scale
+            record[key] = value
+        if len(record) > 1:
+            out.append(record)
+    return out
+
+
 _default = None
 
 
