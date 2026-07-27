@@ -630,7 +630,11 @@ const annRow = (r) => `<tr>
 function whyChips(why) {
   return (why || []).map(w => {
     let cls = "sl-chip";
-    if (/REPORTING TODAY|results out|results due/.test(w)) cls += " sl-news";
+    if (/^FILED /.test(w)) cls += " sl-news";
+    else if (/^(STRONG|GOOD):?/.test(w)) cls += " sl-up";
+    else if (/^WEAK:?/.test(w)) cls += " sl-down";
+    else if (/^MIXED:?/.test(w)) cls += " sl-chip";
+    else if (/REPORTING TODAY|results out|results due/.test(w)) cls += " sl-news";
     else if (/^CROWDED/.test(w)) cls += " sl-crowded";
     else if (/^quiet/.test(w)) cls += " sl-quiet";
     else if (/^up /.test(w)) cls += " sl-up";
@@ -638,9 +642,16 @@ function whyChips(why) {
     return `<span class="${cls}">${escapeHtml(w)}</span>`;
   }).join(" ");
 }
+// Grade comes from core/quarterly_results.py -- arithmetic on sales and
+// PAT, QoQ and YoY. It is NOT validated against what the price then did;
+// nobody has measured whether STRONG quarters outperform, because that
+// needs years of stored results matched to daily bars. Read it as a fast
+// way to see the numbers, not as a reason to buy.
+const GRADE_CLS = {STRONG:"sl-up", GOOD:"sl-quiet", MIXED:"sl-chip", WEAK:"sl-down"};
 const shortlistRow = (r) => `<tr>
   <td>${r.s_no}</td>
   <td><strong>${escapeHtml(r.symbol)}</strong>${
+      r.grade ? ` <span class="sl-chip ${GRADE_CLS[r.grade] || "sl-chip"}">${escapeHtml(r.grade)}</span>` : ""}${
       (r.veto || []).length ? ` <span class="sl-chip sl-veto">${escapeHtml(r.veto.join(","))}</span>` : ""}</td>
   <td>${escapeHtml(r.sector || "—")}</td>
   <td><strong>${fmtNum(r.ltp)}</strong></td>

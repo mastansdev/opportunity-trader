@@ -394,11 +394,30 @@ def main():
                  f"The shortlist will fall back to the results calendar.")
             announcement_watcher = None
 
+    # Quarterly numbers (core/quarterly_results.py), 2026-07-27. The
+    # calendar knows WHO reports, the watcher knows a filing LANDED --
+    # this is the only one that knows whether the numbers were better.
+    # KFINTECH (+9.2%) and ACUTAAS (-Rs 1,593 for us) both filed that
+    # week; nothing else in the bot could tell them apart.
+    #
+    # Read-only here. Populated by tools/fetch_quarterly.py, so an empty
+    # store just means the shortlist shows no grade -- never a failure.
+    quarterly = None
+    try:
+        from core.quarterly_results import QuarterlyResults
+        quarterly = QuarterlyResults()
+        decision(f"[FINANCIALS] {quarterly.count()} quarters on record "
+                 f"across {len(quarterly.symbols())} symbols.")
+    except Exception as exc:                               # noqa: BLE001
+        warn(f"[FINANCIALS] Quarterly store unavailable ({exc}). The "
+             f"shortlist will show events without their numbers.")
+
     dashboard_state = DashboardState(
         engine, market_data, master_loader,
         portfolio=portfolio, sector_monitor=sector_monitor,
         index_monitor=index_monitor,
         announcement_watcher=announcement_watcher,
+        quarterly_results=quarterly,
         get_feed_alive=lambda: (
             feed_state["thread"].is_alive() if feed_state["thread"] else None
         ),

@@ -207,7 +207,8 @@ class DashboardState:
 
     def __init__(self, engine, market_data, master_loader,
                  portfolio=None, sector_monitor=None, get_feed_alive=None,
-                 index_monitor=None, announcement_watcher=None):
+                 index_monitor=None, announcement_watcher=None,
+                 quarterly_results=None):
         self.engine = engine
         self.market_data = market_data
         self.master_loader = master_loader
@@ -263,8 +264,13 @@ class DashboardState:
         # DATE a company reports but not that it filed twenty minutes
         # ago. Both panels degrade rather than break.
         self.announcement_watcher = announcement_watcher
+        # core/quarterly_results.py -- optional. Empty store means the
+        # shortlist shows events without their numbers, which is where
+        # this bot was all along; it is never a failure.
+        self.quarterly_results = quarterly_results
         self._shortlist = ShortlistBuilder(
-            announcement_watcher=announcement_watcher)
+            announcement_watcher=announcement_watcher,
+            quarterly_results=quarterly_results)
         self._shortlist_cache = None
         self._shortlist_built_at = 0.0
 

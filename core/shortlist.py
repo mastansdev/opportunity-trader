@@ -111,6 +111,17 @@ MIN_MOVE_PCT = 2.0     # below this, nothing happened
 MIN_SCORE = 2.0        # below this, not worth a line
 
 
+# Reference data is the same for every builder on a given day, and
+# loading it means reading a 151 MB daily store. Sharing it across
+# instances is not a micro-optimisation: the dashboard's own tests
+# construct 45 DashboardStates and went from instant to 22 seconds,
+# which is 45 identical reads of the same file. In the live bot there is
+# only one builder, so this changes nothing there -- but a suite nobody
+# wants to run is a suite that stops being run.
+_REFERENCE_LOCK = threading.Lock()
+_REFERENCE_CACHE = {}          # (daily_db, results_db, memory_db, date) -> tuple
+
+
 class ShortlistBuilder:
     """Reference data is loaded once per trading day and cached; ranking
     itself is pure arithmetic over rows the dashboard already computed.
@@ -121,7 +132,8 @@ class ShortlistBuilder:
     """
 
     def __init__(self, daily_db=DAILY_DB, results_db=RESULTS_DB,
-                 memory_db=MEMORY_DB, announcement_watcher=None):
+                 memory_db=MEMORY_DB, announcement_watcher=None,
+                 quarterly_results=None):
         self.daily_db = daily_db
         self.results_db = results_db
         self.memory_db = memory_db
@@ -131,6 +143,13 @@ class ShortlistBuilder:
         # with it -- a calendar entry could never have told the operator
         # to look right then.
         self.announcement_watcher = announcement_watcher
+        # core/quarterly_results.py, wired 2026-07-27. The calendar and
+        # the watcher both say a company REPORTED. This says whether the
+        # numbers were better than last quarter -- the only thing that
+        # separated KFINTECH (+9.2%) from ACUTAAS (-Rs 1,593) that day,
+        # since both filed in the same week.
+        self.quarterly_results = quarterly_results
+        self._qoq_cache = {}
         self._lock = threading.Lock()
         self._loaded_for = None      # date string the cache belongs to
         self._normals = {}           # symbol -> (median_vol, median_turnover, ma50)
@@ -146,10 +165,25 @@ class ShortlistBuilder:
         with self._lock:
             if self._loaded_for == today:
                 return
-            self._normals = self._load_normals(today)
-            self._results = self._load_results(today)
-            self._actions = self._load_actions(today)
+        key = (self.daily_db, self.results_db, self.memory_db, today)
+        with _REFERENCE_LOCK:
+            cached = _REFERENCE_CACHE.get(key)
+            if cached is None:
+                cached = (self._load_normals(today),
+                          self._load_results(today),
+                          self._load_actions(today))
+                # Only today's entry is worth keeping; anything else is
+                # a finished day or a test fixture.
+                _REFERENCE_CACHE.clear()
+                _REFERENCE_CACHE[key] = cached
+                fresh = True
+            else:
+                fresh = False
+        with self._lock:
+            self._normals, self._results, self._actions = cached
             self._loaded_for = today
+        if not fresh:
+            return
         diagnostic(
             f"[SHORTLIST] Reference loaded for {today}: "
             f"{len(self._normals)} symbols with 50-day normals, "
@@ -241,6 +275,31 @@ class ShortlistBuilder:
             conn.close()
         return dict(out)
 
+    # Grade -> score. STRONG and GOOD lift a name; WEAK pushes it down,
+    # because a longs-only book wants to know a stock reported BADLY just
+    # as much as it wants to know it reported well.
+    #
+    # These weights are NOT validated against price outcomes -- nothing
+    # has measured whether STRONG quarters outperform, because that needs
+    # years of stored results matched to daily bars and the store starts
+    # empty. They are deliberately smaller than the movement score so
+    # they re-order names rather than invent a ranking of their own.
+    GRADE_SCORE = {"STRONG": 5.0, "GOOD": 3.0, "MIXED": 0.0, "WEAK": -3.0}
+
+    def _financials_for(self, symbol):
+        """Latest QoQ/YoY comparison for one symbol, cached for the day.
+        Wrapped -- the store is optional and must never break the panel."""
+        if self.quarterly_results is None:
+            return None
+        if symbol in self._qoq_cache:
+            return self._qoq_cache[symbol]
+        try:
+            out = self.quarterly_results.compare(symbol)
+        except Exception:                                  # noqa: BLE001
+            out = None
+        self._qoq_cache[symbol] = out
+        return out
+
     def _news_for(self, symbol):
         """Today's newest announcement for one symbol, or None. Wrapped
         because the watcher is optional and must never be able to break
@@ -311,6 +370,18 @@ class ShortlistBuilder:
                 if isinstance(mins, (int, float)) and mins <= 30:
                     score += 2.0
 
+            # --- reason: were the numbers actually BETTER? ---
+            # This is the one that separates KFINTECH from ACUTAAS. It
+            # goes in whether or not the stock moved, because a STRONG
+            # quarter on a flat day is exactly the "early" the operator
+            # is looking for.
+            fin = self._financials_for(symbol)
+            grade = fin.get("grade") if fin else None
+            if fin and grade:
+                summary = fin.get("summary")
+                why.append(f"{grade}" + (f": {summary}" if summary else ""))
+                score += self.GRADE_SCORE.get(grade, 0.0)
+
             for days, _purpose in sorted(self._results.get(symbol, [])):
                 if days == 0:
                     why.append("REPORTING TODAY")
@@ -352,6 +423,10 @@ class ShortlistBuilder:
                 "score": round(score, 1),
                 "vol_ratio": round(vratio, 1) if vratio is not None else None,
                 "veto": veto,
+                "grade": grade,
+                "financials": ({"period": fin.get("period"),
+                                "qoq": fin.get("qoq"),
+                                "yoy": fin.get("yoy")} if fin else None),
                 "why": why,
             })
 
