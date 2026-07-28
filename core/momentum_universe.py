@@ -52,6 +52,18 @@ class MomentumUniverse:
 
     # --------------------------------------------------
 
+    def set_snapshot_provider(self, provider):
+        self._snapshot_provider = provider
+
+    def _snapshot(self):
+        provider = getattr(self, "_snapshot_provider", None)
+        if provider is None:
+            return {}
+        try:
+            return provider() or {}
+        except Exception:                                  # noqa: BLE001
+            return {}
+
     def is_locked(self):
         return self._long_universe is not None
 
@@ -72,13 +84,26 @@ class MomentumUniverse:
         as every other breadth calc in this codebase -- never
         guessed at.
         """
+        # % change vs PREVIOUS CLOSE, the way NSE quotes it. Operator,
+        # 2026-07-28: "Do not invent on our own formulas." This used
+        # day-open, which differs on every gap, and get_day_open() resets
+        # on a mid-session restart. See core/sector_monitor.py's
+        # _change_pct() for the full note.
+        snapshot = self._snapshot()
         changes = []
         for symbol in self.master_loader.all_symbols():
-            open_price = self.market_data.get_day_open(symbol)
             last_price = self.market_data.get_latest_price(symbol)
-            if not open_price or last_price is None:
+            if last_price is None:
                 continue
-            change_pct = (last_price - open_price) / open_price * 100
+            row = snapshot.get(symbol) or {}
+            prev_close = row.get("prev_close")
+            if prev_close:
+                change_pct = (last_price - prev_close) / prev_close * 100
+            else:
+                open_price = self.market_data.get_day_open(symbol)
+                if not open_price:
+                    continue
+                change_pct = (last_price - open_price) / open_price * 100
             changes.append((symbol, change_pct))
 
         changes.sort(key=lambda pair: pair[1], reverse=True)

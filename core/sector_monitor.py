@@ -89,19 +89,68 @@ class SectorMonitor:
         record = self.master_loader.get_by_symbol(symbol)
         return record.get("SECTOR") if record else None
 
+    def set_snapshot_provider(self, provider):
+        """A zero-arg callable returning circuit_monitor's snapshot dict,
+        wired from main.py. Without it this falls back to day-open and
+        the sector heatmap disagrees with NSE."""
+        self._snapshot_provider = provider
+
+    def _snapshot(self):
+        provider = getattr(self, "_snapshot_provider", None)
+        if provider is None:
+            return {}
+        try:
+            return provider() or {}
+        except Exception:                                  # noqa: BLE001
+            return {}
+
     def is_symbol_in_panicking_sector(self, symbol):
         sector = self.sector_of(symbol)
         return sector is not None and self.is_panicking(sector)
 
     # --------------------------------------------------
 
+    # ------------------------------------------------------------
+    # % CHANGE IS MEASURED THE WAY NSE MEASURES IT
+    #
+    # Operator, 2026-07-28: "change in % of stock raising / falling must
+    # follow with NSE. Do not invent on our own formulas."
+    #
+    # NSE, BSE, every terminal and every broker quote a stock's % change
+    # against its PREVIOUS CLOSE. This module used day-open, which is a
+    # different number entirely on any gap, and core/market_data.py's
+    # get_day_open() is worse still -- its own docstring records that a
+    # mid-session restart resets it to "change since the restart".
+    #
+    # prev_close comes from core/circuit_monitor.py's REST snapshot, the
+    # same source dashboard/state.py's breadth and gainers/losers tables
+    # already use, so every number on the screen now agrees with NSE and
+    # with each other.
+    #
+    # Falls back to day-open ONLY when no prev_close is available for a
+    # symbol, and says so, rather than silently dropping it.
+    # ------------------------------------------------------------
+
+    def _change_pct(self, symbol, snapshot):
+        last = self.market_data.get_latest_price(symbol)
+        if last is None:
+            return None
+        row = (snapshot or {}).get(symbol) or {}
+        prev_close = row.get("prev_close")
+        if prev_close:
+            return (last - prev_close) / prev_close * 100
+        open_price = self.market_data.get_day_open(symbol)
+        if not open_price:
+            return None
+        return (last - open_price) / open_price * 100
+
     def _compute_panic_sectors(self):
         by_sector = {}  # sector -> [change_pct, ...]
+        snapshot = self._snapshot()
 
         for symbol in self.master_loader.all_symbols():
-            open_price = self.market_data.get_day_open(symbol)
-            last_price = self.market_data.get_latest_price(symbol)
-            if not open_price or last_price is None:
+            change_pct = self._change_pct(symbol, snapshot)
+            if change_pct is None:
                 continue
 
             record = self.master_loader.get_by_symbol(symbol)
@@ -109,7 +158,6 @@ class SectorMonitor:
             if not sector:
                 continue
 
-            change_pct = (last_price - open_price) / open_price * 100
             by_sector.setdefault(sector, []).append(change_pct)
 
         panic = set()

@@ -29,6 +29,8 @@ class IndexMonitor:
         self._id_to_name = {str(k): v for k, v in id_to_name.items()}
         self._data = {}   # name -> {"ltp": float|None, "prev_close": float|None}
         self._lock = threading.Lock()
+        self._first_packet = {}
+        self._unknown = {}
 
     def index_security_ids(self):
         """The set of security ids that belong to indices, so the
@@ -46,6 +48,62 @@ class IndexMonitor:
                 d["ltp"] = ltp
             if prev_close is not None and prev_close > 0:
                 d["prev_close"] = prev_close
+
+    def note_packet(self, security_id, message):
+        """Record the FIRST packet seen for each known index, so its
+        real field names are visible in the log rather than guessed.
+        config.INDEX_INSTRUMENTS carried "VERIFY on the live feed" in
+        its own comment and nobody ever did."""
+        name = self._id_to_name.get(str(security_id))
+        if name is None:
+            return
+        with self._lock:
+            if name in self._first_packet:
+                return
+            self._first_packet[name] = dict(message)
+        from core.logger import decision
+        decision(f"[INDEX] {name} (id {security_id}) first packet: "
+                 f"{ {k: message.get(k) for k in list(message)[:14]} }")
+
+    def note_unknown(self, security_id, message):
+        """An IDX packet whose id is not in INDEX_INSTRUMENTS.
+
+        The VALUE is what identifies it. Live on 2026-07-28, id 13 was
+        mapped to "nifty" and delivered 7327.50 while Nifty 50 had closed
+        at 23,996 the day before, and id 25 ("banknifty") delivered
+        3036.60 against a real BankNifty near 52,000. Both ids were
+        wrong, and a tile showing a plausible-looking number for the
+        wrong index is far more dangerous than a blank one. Printing the
+        level lets the right id be identified by eye in one session."""
+        sid = str(security_id)
+        with self._lock:
+            if sid in self._unknown or len(self._unknown) >= 40:
+                return
+            self._unknown[sid] = True
+        from core.logger import decision
+        decision(f"[INDEX] Unmapped IDX id {sid}: LTP={message.get('LTP')} "
+                 f"close={message.get('close')} -- identify it by the level "
+                 f"and add it to config.INDEX_INSTRUMENTS.")
+
+    def suspect(self, expected_levels):
+        """Configured indices whose level is nowhere near what that index
+        actually trades at -- i.e. the security id maps to something
+        else. expected_levels: {name: (low, high)}."""
+        out = []
+        with self._lock:
+            data = {k: dict(v) for k, v in self._data.items()}
+        for name, (lo, hi) in expected_levels.items():
+            ltp = (data.get(name) or {}).get("ltp")
+            if ltp and not (lo <= ltp <= hi):
+                out.append((name, ltp))
+        return out
+
+    def missing(self):
+        """Names configured but never seen -- surfaced on the panel so
+        a wrong id looks like a wrong id, not like a dead market."""
+        with self._lock:
+            return sorted(n for n in self._id_to_name.values()
+                          if not self._data.get(n, {}).get("ltp"))
 
     def snapshot(self):
         """name -> {ltp, prev_close, pct, available}. pct is the %

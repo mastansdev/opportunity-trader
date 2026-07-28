@@ -208,7 +208,8 @@ class DashboardState:
     def __init__(self, engine, market_data, master_loader,
                  portfolio=None, sector_monitor=None, get_feed_alive=None,
                  index_monitor=None, announcement_watcher=None,
-                 quarterly_results=None, news_watcher=None):
+                 quarterly_results=None, news_watcher=None,
+                 market_flows=None):
         self.engine = engine
         self.market_data = market_data
         self.master_loader = master_loader
@@ -273,6 +274,11 @@ class DashboardState:
         # GANDHAR -11.6% (flood at its Silvassa plant) and CARTRADE
         # +10.8% (UBS initiation). Neither is a regulatory disclosure.
         self.news_watcher = news_watcher
+        # core/market_flows.py -- FII/DII. config's FII_NET_CR and
+        # DII_NET_CR were placeholders meant to be typed by hand and
+        # never were, so the tile read "set in config (EOD)" every
+        # session since the dashboard was built.
+        self.market_flows = market_flows
         self._shortlist = ShortlistBuilder(
             announcement_watcher=announcement_watcher,
             quarterly_results=quarterly_results,
@@ -1047,15 +1053,25 @@ class DashboardState:
             "banknifty": banknifty,
             "midcap": _idx("midcap", "needs index feed"),
             "vix": _idx("vix", "needs India VIX feed"),
-            # FII/DII: operator-set (EOD only, config.FII_NET_CR /
-            # DII_NET_CR) -- honest manual value, never a fake intraday
-            # scrape.
-            "institutional": {
-                "available": FII_NET_CR is not None or DII_NET_CR is not None,
-                "fii_cr": FII_NET_CR,
-                "dii_cr": DII_NET_CR,
-                "note": "set FII_NET_CR / DII_NET_CR in config",
-            },
+            # FII/DII, 2026-07-28. Was a config placeholder
+            # (FII_NET_CR / DII_NET_CR) meant to be typed by hand and
+            # never was, so the tile read "set in config" every session.
+            # core/market_flows.py now fetches it from NSE. Always an
+            # EOD figure -- NSE publishes after the close -- so it is
+            # context, never a trigger, and carries its own date.
+            "institutional": (
+                self.market_flows.snapshot()
+                if self.market_flows is not None
+                else {"available": FII_NET_CR is not None
+                                   or DII_NET_CR is not None,
+                      "fii_cr": FII_NET_CR, "dii_cr": DII_NET_CR,
+                      "note": "set in config (EOD)"}),
+            # Configured indices that never delivered a tick, so a wrong
+            # security id looks like a wrong id rather than a dead
+            # market. config.INDEX_INSTRUMENTS said "VERIFY on the live
+            # feed" in its own comment and nobody ever did.
+            "index_missing": (self.index_monitor.missing()
+                              if self.index_monitor is not None else []),
         }
 
     def _build_book_analytics(self, open_positions, closed_positions):

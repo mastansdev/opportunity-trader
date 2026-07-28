@@ -56,6 +56,7 @@ from config import (
 from core.announcement_watcher import AnnouncementWatcher
 from core.results_ingest import ResultsIngestor, requests_downloader
 from core.news_watcher import NewsWatcher
+from core.market_flows import MarketFlows
 from config import ENABLE_STOCK_MEMORY, ENABLE_TRADE_MEMORY
 from config import EARNINGS_CALENDAR
 from core.logger import decision, diagnostic, warn
@@ -393,6 +394,29 @@ def main():
     # full precision -- verified against MOLD-TEK's Q1 FY27 filing, whose
     # table this parser reads as +26.31% QoQ sales while page 1 of the
     # same document says 26.32% in prose.
+    # Quarterly numbers (core/quarterly_results.py), 2026-07-27. The
+    # calendar knows WHO reports, the watcher knows a filing LANDED --
+    # this is the only one that knows whether the numbers were better.
+    # KFINTECH (+9.2%) and ACUTAAS (-Rs 1,593 for us) both filed that
+    # week; nothing else in the bot could tell them apart.
+    #
+    # Read-only here. Populated by tools/fetch_quarterly.py, so an empty
+    # store just means the shortlist shows no grade -- never a failure.
+    #
+    # MUST BE BUILT BEFORE the announcement watcher: the ResultsIngestor
+    # writes into it. Ordered the other way round on 2026-07-28 and the
+    # whole filings feed died at startup with "cannot access local
+    # variable 'quarterly'" -- on a day 65 companies were reporting.
+    quarterly = None
+    try:
+        from core.quarterly_results import QuarterlyResults
+        quarterly = QuarterlyResults()
+        decision(f"[FINANCIALS] {quarterly.count()} quarters on record "
+                 f"across {len(quarterly.symbols())} symbols.")
+    except Exception as exc:                               # noqa: BLE001
+        warn(f"[FINANCIALS] Quarterly store unavailable ({exc}). The "
+             f"shortlist will show events without their numbers.")
+
     announcement_watcher = None
     results_ingestor = None
     if ENABLE_ANNOUNCEMENT_WATCHER:
@@ -413,24 +437,6 @@ def main():
                  f"The shortlist will fall back to the results calendar.")
             announcement_watcher = None
 
-    # Quarterly numbers (core/quarterly_results.py), 2026-07-27. The
-    # calendar knows WHO reports, the watcher knows a filing LANDED --
-    # this is the only one that knows whether the numbers were better.
-    # KFINTECH (+9.2%) and ACUTAAS (-Rs 1,593 for us) both filed that
-    # week; nothing else in the bot could tell them apart.
-    #
-    # Read-only here. Populated by tools/fetch_quarterly.py, so an empty
-    # store just means the shortlist shows no grade -- never a failure.
-    quarterly = None
-    try:
-        from core.quarterly_results import QuarterlyResults
-        quarterly = QuarterlyResults()
-        decision(f"[FINANCIALS] {quarterly.count()} quarters on record "
-                 f"across {len(quarterly.symbols())} symbols.")
-    except Exception as exc:                               # noqa: BLE001
-        warn(f"[FINANCIALS] Quarterly store unavailable ({exc}). The "
-             f"shortlist will show events without their numbers.")
-
     # High-conviction news (core/news_watcher.py). Filings are not the
     # whole story -- on 2026-07-27 the day's two biggest moves, GANDHAR
     # -11.6% (plant flood) and CARTRADE +10.8% (UBS initiation), were
@@ -445,6 +451,21 @@ def main():
             warn(f"[NEWSFEED] News watcher unavailable ({exc}).")
             news_watcher = None
 
+    # FII/DII (core/market_flows.py). NSE publishes these once, after
+    # the close, so this is always about a COMPLETED session -- context,
+    # never a trigger. Fetched on its own thread so a slow NSE response
+    # cannot delay startup.
+    # % change everywhere now measured vs PREVIOUS CLOSE, like NSE.
+    # circuit_monitor's REST snapshot is the single source of prev_close
+    # the dashboard already uses; handing it to these two makes every
+    # number on the screen agree with NSE and with each other.
+    sector_monitor.set_snapshot_provider(engine.get_circuit_snapshot)
+    momentum_universe.set_snapshot_provider(engine.get_circuit_snapshot)
+
+    market_flows = MarketFlows()
+    threading.Thread(target=market_flows.refresh, name="flows",
+                     daemon=True).start()
+
     dashboard_state = DashboardState(
         engine, market_data, master_loader,
         portfolio=portfolio, sector_monitor=sector_monitor,
@@ -452,6 +473,7 @@ def main():
         announcement_watcher=announcement_watcher,
         quarterly_results=quarterly,
         news_watcher=news_watcher,
+        market_flows=market_flows,
         get_feed_alive=lambda: (
             feed_state["thread"].is_alive() if feed_state["thread"] else None
         ),
@@ -525,18 +547,42 @@ def main():
             # may carry LTP, prev_close, or both depending on type;
             # pass whatever is present.
             if security_id in index_ids:
-                try:
-                    ltp = message.get("LTP")
-                    ltp = float(ltp) if ltp is not None else None
-                except (TypeError, ValueError):
-                    ltp = None
-                try:
-                    pc = message.get("prev_close")
-                    pc = float(pc) if pc is not None else None
-                except (TypeError, ValueError):
-                    pc = None
-                index_monitor.on_index_tick(security_id, ltp=ltp, prev_close=pc)
+                # Dhan names the previous close differently by packet
+                # type -- "close_price" on a Full packet, "prev_close"
+                # elsewhere. Reading only one of them left every index
+                # tile showing "needs index feed" all through 2026-07-27
+                # even though ticks were arriving. Try each in turn.
+                def _num(*keys):
+                    for k in keys:
+                        v = message.get(k)
+                        if v not in (None, "", 0):
+                            try:
+                                return float(v)
+                            except (TypeError, ValueError):
+                                continue
+                    return None
+                ltp = _num("LTP", "ltp", "last_price", "LTP_price")
+                # Dhan's Quote packet calls the previous close "close".
+                # Confirmed live 2026-07-28 from a real IDX packet:
+                #   {'LTP': '7327.50', ..., 'open': '0.00',
+                #    'close': '7327.50', 'high': '0.00', 'low': '0.00'}
+                # Reading only "close_price"/"prev_close" left every
+                # index tile blank even though ticks were arriving.
+                pc = _num("close", "close_price", "prev_close",
+                          "prev_close_price", "previous_close")
+                index_monitor.on_index_tick(security_id, ltp=ltp,
+                                            prev_close=pc)
+                index_monitor.note_packet(security_id, message)
                 return
+
+            # An IDX packet whose id we do NOT recognise. config's
+            # INDEX_INSTRUMENTS ids were never verified against the live
+            # feed ("VERIFY on the live feed" in its own comment), so log
+            # the first few unknown ones -- that is how the real ids get
+            # discovered rather than guessed a second time.
+            if message.get("exchange_segment") in ("IDX_I", "IDX", 0) \
+                    and security_id not in security_id_to_symbol:
+                index_monitor.note_unknown(security_id, message)
 
             symbol = security_id_to_symbol.get(security_id)
             if symbol is None:

@@ -93,12 +93,19 @@ IMPACT = [
         r"penalt|show\s+cause|licen[cs]e\s+(cancel|suspend|revok)|"
         r"USFDA\s+(observation|warning|Form\s*483|import\s+alert)|"
         r"warning\s+letter|\bimport\s+alert\b|regulatory\s+action", re.I)),
+    # A broker NAME alone is not a broker call. Live on 2026-07-28 this
+    # tagged "Kotak Mahindra Bank taps HSBC and CTBC for $600-million
+    # overseas loan" as BROKER -- HSBC was the LENDER. So the house must
+    # appear beside an analyst action, or the action must stand alone.
     ("BROKER", re.compile(
         r"initiat(es|ed|ing)\s+coverage|target\s+price|price\s+target|"
         r"\bupgrade[sd]?\b|\bdowngrade[sd]?\b|raises?\s+target|cuts?\s+target|"
-        r"\b(UBS|Jefferies|Morgan\s+Stanley|Goldman|CLSA|Nomura|Citi|"
-        r"Macquarie|Bernstein|HSBC|JP\s*Morgan|Motilal|ICICI\s+Securities)\b",
-        re.I)),
+        r"\b(?:UBS|Jefferies|Morgan\s+Stanley|Goldman|CLSA|Nomura|Citi|"
+        r"Macquarie|Bernstein|HSBC|JP\s*Morgan|Motilal|ICICI\s+Securities|"
+        r"Kotak\s+Institutional|Emkay|Axis\s+Capital)\b"
+        r"(?=.{0,60}?\b(?:buy|sell|hold|neutral|outperform|underperform|"
+        r"overweight|underweight|rating|rates?|target|initiat|upgrad|"
+        r"downgrad|coverage|reiterat|maintains?)\b)", re.I)),
     ("LEGAL", re.compile(
         r"\bNCLT\b|insolvenc|arbitration\s+award|court\s+(rules|orders|"
         r"verdict)|tribunal|\bwins?\s+(case|appeal)\b|adverse\s+(order|ruling)",
@@ -133,6 +140,14 @@ NOISE = re.compile(
     r"trading\s+(strategy|idea|call)|\bF&O\b|\bmuhurat\b|\bhoroscope\b|"
     r"\bopinion\b|\bcolumn\b|market\s+(wrap|close|open|live\s+updates)|"
     r"sensex|nifty\s+(today|closes|opens)", re.I)
+
+# Capitalised words that routinely START a headline or a clause and so
+# do NOT indicate the following word is part of a longer company name.
+_LEAD_WORDS = {
+    "the", "a", "an", "why", "how", "after", "as", "on", "in", "at", "for",
+    "and", "but", "with", "from", "india", "indian", "shares", "stock",
+    "stocks", "buy", "sell", "hold", "up", "down", "q1", "q2", "q3", "q4",
+}
 
 # Company suffixes that never help a match.
 _SUFFIX = re.compile(
@@ -217,13 +232,25 @@ def match_symbols(headline, index, limit=3):
         if any(phrase in u for u in used):
             continue
         haystack = raw if phrase.isupper() else text
-        if f" {phrase} " in haystack:
-            symbol = index[phrase]
-            if symbol not in hits:
-                hits.append(symbol)
-                used.append(phrase)
-            if len(hits) >= limit:
-                break
+        pos = haystack.find(f" {phrase} ")
+        if pos < 0:
+            continue
+        # A SINGLE-WORD match that is preceded by another capitalised
+        # word belongs to a longer proper noun, not to us. Live on
+        # 2026-07-28: "Gujarat State Petronet falls sharply" matched
+        # PETRONET -- Petronet LNG -- because Gujarat State Petronet
+        # (GSPL) is not in this universe at all. Acting on that would
+        # have meant buying the wrong company.
+        if " " not in phrase:
+            before = raw[:pos].rstrip().split()
+            if before and before[-1][:1].isupper() and before[-1].lower() not in _LEAD_WORDS:
+                continue
+        symbol = index[phrase]
+        if symbol not in hits:
+            hits.append(symbol)
+            used.append(phrase)
+        if len(hits) >= limit:
+            break
     return hits
 
 

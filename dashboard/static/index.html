@@ -313,6 +313,15 @@
       <span class="gl-refresh-note" id="mktRegimeBadge"></span>
     </div>
     <div class="mkt-grid" id="mktGrid"></div>
+    <div id="mktIndexNote" class="empty-note" style="margin:6px 0 0;"></div>
+    <!-- Market Breadth folded in here 2026-07-28, operator request. It
+         is the backbone of every number above it -- Market Trend, Trade
+         Bias and Overall Score are all derived from breadth -- so it
+         belongs in the same box, not in a panel of its own below. -->
+    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">
+      <div class="mc-label" style="margin-bottom:6px;">Market Breadth</div>
+      <div class="breadth-row" id="breadthRow"></div>
+    </div>
     <div class="daily-goal-wrap">
       <div class="daily-goal-head">
         <span>Daily realized P&amp;L (net of costs)</span>
@@ -326,11 +335,6 @@
         <span id="dailyGoalLabel" class="pos">goal</span>
       </div>
     </div>
-  </div>
-
-  <div class="panel" style="margin-bottom:14px;">
-    <h2>Market Breadth</h2>
-    <div class="breadth-row" id="breadthRow"></div>
   </div>
 
   <!-- ============ POSITIONS (full width) ============ -->
@@ -876,12 +880,30 @@ function renderMarketIntelligence(mi) {
       ? mktCell("FII / DII (₹ cr)",
                 `${mi.institutional.fii_cr != null ? mi.institutional.fii_cr : "—"} / ${mi.institutional.dii_cr != null ? mi.institutional.dii_cr : "—"}`,
                 (mi.institutional.fii_cr > 0 ? "mc-bull" : (mi.institutional.fii_cr < 0 ? "mc-bear" : "")),
-                "FII / DII net (EOD)")
-      : mktCell("FII / DII", "—", "", "set in config (EOD)", true)),
+                // Always an EOD number -- NSE publishes after the close.
+                // Dated on the tile so a stale figure can never be read
+                // as a live one.
+                mi.institutional.as_of ? "net, " + mi.institutional.as_of
+                                       : "net (EOD)")
+      : mktCell("FII / DII", "—", "",
+                (mi.institutional && mi.institutional.error)
+                  ? "feed error" : "not fetched yet", true)),
   ];
   document.getElementById("mktGrid").innerHTML = cells.join("");
   document.getElementById("mktRegimeBadge").textContent =
     mi.regime ? `bias: ${mi.regime}` : "";
+  // Name the indices that have never delivered a tick. Four silent
+  // tiles reading "needs index feed" look like a quiet market; naming
+  // them makes it obvious the security ids are wrong.
+  const miss = mi.index_missing || [];
+  const noteEl = document.getElementById("mktIndexNote");
+  if (noteEl) {
+    noteEl.innerHTML = miss.length
+      ? `<span class="sl-chip sl-crowded">no ticks yet</span> ${escapeHtml(miss.join(", "))}
+         &mdash; check the security ids in config.INDEX_INSTRUMENTS against the
+         <code>[INDEX] Unmapped IDX id</code> lines in the log`
+      : "";
+  }
 
   const net = mi.realized_net_pnl || 0;
   const goal = mi.daily_goal_rs || 50000;
