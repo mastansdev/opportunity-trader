@@ -133,7 +133,7 @@ class ShortlistBuilder:
 
     def __init__(self, daily_db=DAILY_DB, results_db=RESULTS_DB,
                  memory_db=MEMORY_DB, announcement_watcher=None,
-                 quarterly_results=None):
+                 quarterly_results=None, news_watcher=None):
         self.daily_db = daily_db
         self.results_db = results_db
         self.memory_db = memory_db
@@ -149,6 +149,11 @@ class ShortlistBuilder:
         # separated KFINTECH (+9.2%) from ACUTAAS (-Rs 1,593) that day,
         # since both filed in the same week.
         self.quarterly_results = quarterly_results
+        # core/news_watcher.py. Filings are not the whole story: on
+        # 2026-07-27 the day's biggest mover either way -- GANDHAR
+        # -11.6% on a plant flood, CARTRADE +10.8% on a UBS initiation
+        # -- were both invisible to a filings-only feed.
+        self.news_watcher = news_watcher
         self._qoq_cache = {}
         self._lock = threading.Lock()
         self._loaded_for = None      # date string the cache belongs to
@@ -300,6 +305,22 @@ class ShortlistBuilder:
         self._qoq_cache[symbol] = out
         return out
 
+    # A concrete event outranks a price move, because the price move is
+    # usually the CONSEQUENCE. Negative categories score too -- for a
+    # longs-only book, knowing a plant is on fire matters as much as
+    # knowing an order was won.
+    NEWS_SCORE = {"DISASTER": -6.0, "REGULATORY": -5.0, "LEGAL": -4.0,
+                  "ORDER_WIN": 5.0, "BROKER": 4.0, "DEAL": 4.0,
+                  "GUIDANCE": 3.0, "FUND_RAISE": 1.0, "MANAGEMENT": -2.0}
+
+    def _headline_for(self, symbol):
+        if self.news_watcher is None:
+            return None
+        try:
+            return self.news_watcher.for_symbol(symbol)
+        except Exception:                                  # noqa: BLE001
+            return None
+
     def _news_for(self, symbol):
         """Today's newest announcement for one symbol, or None. Wrapped
         because the watcher is optional and must never be able to break
@@ -370,6 +391,13 @@ class ShortlistBuilder:
                 if isinstance(mins, (int, float)) and mins <= 30:
                     score += 2.0
 
+            # --- reason: a high-conviction news event ---
+            head = self._headline_for(symbol)
+            if head:
+                why.append(f"NEWS {head['kind'].replace('_', ' ')}: "
+                           f"{head['headline'][:70]}")
+                score += self.NEWS_SCORE.get(head["kind"], 0.0)
+
             # --- reason: were the numbers actually BETTER? ---
             # This is the one that separates KFINTECH from ACUTAAS. It
             # goes in whether or not the stock moved, because a STRONG
@@ -424,6 +452,7 @@ class ShortlistBuilder:
                 "vol_ratio": round(vratio, 1) if vratio is not None else None,
                 "veto": veto,
                 "grade": grade,
+                "news": head,
                 "financials": ({"period": fin.get("period"),
                                 "qoq": fin.get("qoq"),
                                 "yoy": fin.get("yoy")} if fin else None),

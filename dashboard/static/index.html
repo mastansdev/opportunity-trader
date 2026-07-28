@@ -354,6 +354,32 @@
   </div>
 
   <!-- ============ Top Gainers / Top Losers -- right below Open Positions ============ -->
+  <!-- ============ HIGH-CONVICTION NEWS, 2026-07-28 ============
+       Filings are not the whole story. On 2026-07-27 the two biggest
+       single moves of the day were both invisible to a filings-only
+       feed: GANDHAR -11.6% (flood at its Silvassa plant) and CARTRADE
+       +10.8% (UBS initiated Buy, target Rs 4,000). One is a news story,
+       the other a broker note.
+  ============================================================= -->
+  <div class="panel" style="margin-top:14px;">
+    <div class="panel-head-row">
+      <h2>News <span class="gl-refresh-note">high-conviction only &mdash; events that move a stock</span></h2>
+      <div class="gl-head-right">
+        <span class="empty-note" id="newsCount"></span>
+        <span class="empty-note" id="newsPolled"></span>
+      </div>
+    </div>
+    <div id="newsError" class="empty-note" style="display:none;margin-bottom:8px;"></div>
+    <div class="table-wrap table-wrap-scroll" style="max-height:260px;">
+      <table>
+        <thead>
+          <tr><th>Seen</th><th>Symbol</th><th>Kind</th><th style="width:52%">Headline</th><th>Source</th><th></th></tr>
+        </thead>
+        <tbody id="newsRows"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- ============ LIVE ANNOUNCEMENTS, 2026-07-27 ============
        main.py used to read the results calendar ONCE at startup and
        never again. Canara Bank filed around noon that day; at 13:50 the
@@ -602,6 +628,24 @@ const glRow = (r, side) => `<tr>
         ? `<button class="btn-buy btn-sm" onclick="manualBuy('${r.symbol}')">BUY</button>`
         : `<button class="btn-short btn-sm" onclick="manualShort('${r.symbol}')">SHORT</button>`)
       : ""}</td>
+</tr>`;
+// ---- High-conviction news -----------------------------------------
+// Colour marks severity, not a recommendation: red for things that hurt
+// (disaster, regulatory, legal), green for things that help.
+const NEWS_KIND = {
+  DISASTER: "sl-down", REGULATORY: "sl-down", LEGAL: "sl-down",
+  MANAGEMENT: "sl-crowded", FUND_RAISE: "sl-chip", GUIDANCE: "sl-crowded",
+  BROKER: "sl-news", ORDER_WIN: "sl-up", DEAL: "sl-news",
+};
+const newsRow = (r) => `<tr>
+  <td class="empty-note">${escapeHtml(r.seen_at || "")}</td>
+  <td><strong>${escapeHtml((r.symbols || [r.symbol]).join(", "))}</strong></td>
+  <td><span class="sl-chip ${NEWS_KIND[r.kind] || "sl-chip"}">${escapeHtml((r.kind||"").replace(/_/g," "))}</span></td>
+  <td style="font-size:12px;">${r.link
+      ? `<a href="${escapeHtml(r.link)}" target="_blank" rel="noopener">${escapeHtml(r.headline || "")}</a>`
+      : escapeHtml(r.headline || "")}</td>
+  <td class="empty-note">${escapeHtml(r.source || "")}</td>
+  <td>${IS_OPERATOR ? `<button class="btn-buy btn-sm" onclick="manualBuy('${r.symbol}')">BUY</button>` : ""}</td>
 </tr>`;
 // ---- Live announcements -------------------------------------------
 // KIND is classified from the SUBJECT LINE only -- "results filed", not
@@ -924,6 +968,25 @@ function render(snap) {
   // -- Top gainers / losers (replaces the old ORB watchlist, 2026-07-23) --
   const gl = snap.gainers_losers || { gainers: [], losers: [] };
   document.getElementById("glUpdatedAt").textContent = gl.built_at ? `As of ${gl.built_at} IST` : "";
+  // ---- High-conviction news ----
+  const nw = s.news || {};
+  const nwRows = nw.rows || [];
+  document.getElementById("newsRows").innerHTML = nwRows.length
+    ? nwRows.map(newsRow).join("")
+    : `<tr><td colspan="6" class="empty-note">${
+        nw.available === false
+          ? "News watcher is not running."
+          : "No high-conviction news yet today."}</td></tr>`;
+  document.getElementById("newsCount").textContent =
+    nw.count_today ? `${nw.count_today} today` : "";
+  document.getElementById("newsPolled").textContent =
+    nw.last_poll_at ? `checked ${nw.last_poll_at}` : "";
+  const nwErr = document.getElementById("newsError");
+  if (nw.error) {
+    nwErr.style.display = "";
+    nwErr.innerHTML = `<span class="sl-chip sl-down">feed error</span> ${escapeHtml(nw.error)}`;
+  } else { nwErr.style.display = "none"; }
+
   // ---- Live announcements ----
   const ann = s.announcements || {};
   const annRowsData = ann.rows || [];

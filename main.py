@@ -51,9 +51,11 @@ from config import ENABLE_INDEX_FEED, INDEX_INSTRUMENTS, ENABLE_CANDLE_RECORDING
 from config import (
     ENABLE_ANNOUNCEMENT_WATCHER, ANNOUNCEMENT_POLL_SECONDS,
     ANNOUNCEMENT_LOOKBACK_HOURS, ENABLE_FILING_PDF_READING,
+    ENABLE_NEWS_WATCHER, NEWS_POLL_SECONDS,
 )
 from core.announcement_watcher import AnnouncementWatcher
 from core.results_ingest import ResultsIngestor, requests_downloader
+from core.news_watcher import NewsWatcher
 from config import ENABLE_STOCK_MEMORY, ENABLE_TRADE_MEMORY
 from config import EARNINGS_CALENDAR
 from core.logger import decision, diagnostic, warn
@@ -429,12 +431,27 @@ def main():
         warn(f"[FINANCIALS] Quarterly store unavailable ({exc}). The "
              f"shortlist will show events without their numbers.")
 
+    # High-conviction news (core/news_watcher.py). Filings are not the
+    # whole story -- on 2026-07-27 the day's two biggest moves, GANDHAR
+    # -11.6% (plant flood) and CARTRADE +10.8% (UBS initiation), were
+    # both invisible to a filings-only feed.
+    news_watcher = None
+    if ENABLE_NEWS_WATCHER:
+        try:
+            news_watcher = NewsWatcher(poll_seconds=NEWS_POLL_SECONDS,
+                                       known_symbols=set(resolved))
+            news_watcher.start()
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[NEWSFEED] News watcher unavailable ({exc}).")
+            news_watcher = None
+
     dashboard_state = DashboardState(
         engine, market_data, master_loader,
         portfolio=portfolio, sector_monitor=sector_monitor,
         index_monitor=index_monitor,
         announcement_watcher=announcement_watcher,
         quarterly_results=quarterly,
+        news_watcher=news_watcher,
         get_feed_alive=lambda: (
             feed_state["thread"].is_alive() if feed_state["thread"] else None
         ),
@@ -791,6 +808,8 @@ def main():
             announcement_watcher.stop(timeout=3)
         if results_ingestor is not None:
             results_ingestor.stop(timeout=3)
+        if news_watcher is not None:
+            news_watcher.stop(timeout=3)
         decision("Shutdown complete.")
 
 

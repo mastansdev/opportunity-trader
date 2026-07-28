@@ -954,6 +954,23 @@ ANNOUNCEMENT_PANEL_COUNT = 25
 # when news is arriving.
 ENABLE_FILING_PDF_READING = True
 
+# --- High-conviction news (core/news_watcher.py) ----------
+# The previous news subsystem (~3,200 lines) was deleted 2026-07-26 --
+# it ran a thread through every session and nothing read the output.
+# This is the operator's tighter brief from the same day: news, but ONLY
+# key events that can move a stock.
+#
+# The gap it fills, measured on 2026-07-27: the filings watcher would
+# have missed BOTH of the day's biggest single moves --
+#   GANDHAR   -11.6%  flood damage at its Silvassa plant
+#   CARTRADE  +10.8%  UBS initiated Buy, target Rs 4,000
+# One is a news story, the other a broker note. Neither is a filing.
+#
+# 180s. RSS is cheap but these are public feeds; polling harder buys
+# nothing and risks being throttled.
+ENABLE_NEWS_WATCHER = True
+NEWS_POLL_SECONDS = 180
+
 # --- Shortlist panel (core/shortlist.py) ------------------
 # The dashboard panel that answers "which of these 689 deserve thirty
 # seconds of my attention, and WHY". Operator, 2026-07-27: "as a human

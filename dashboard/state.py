@@ -208,7 +208,7 @@ class DashboardState:
     def __init__(self, engine, market_data, master_loader,
                  portfolio=None, sector_monitor=None, get_feed_alive=None,
                  index_monitor=None, announcement_watcher=None,
-                 quarterly_results=None):
+                 quarterly_results=None, news_watcher=None):
         self.engine = engine
         self.market_data = market_data
         self.master_loader = master_loader
@@ -268,9 +268,15 @@ class DashboardState:
         # shortlist shows events without their numbers, which is where
         # this bot was all along; it is never a failure.
         self.quarterly_results = quarterly_results
+        # core/news_watcher.py -- high-conviction news only. The filings
+        # watcher would have missed both of 2026-07-27's biggest movers:
+        # GANDHAR -11.6% (flood at its Silvassa plant) and CARTRADE
+        # +10.8% (UBS initiation). Neither is a regulatory disclosure.
+        self.news_watcher = news_watcher
         self._shortlist = ShortlistBuilder(
             announcement_watcher=announcement_watcher,
-            quarterly_results=quarterly_results)
+            quarterly_results=quarterly_results,
+            news_watcher=news_watcher)
         self._shortlist_cache = None
         self._shortlist_built_at = 0.0
 
@@ -337,6 +343,7 @@ class DashboardState:
             "gainers_losers": gainers_losers,
             "shortlist": self._build_shortlist(),
             "announcements": self._build_announcements(),
+            "news": self._build_news(),
             "market_intelligence": self._build_market_intelligence(
                 breadth, gainers_losers, performance
             ),
@@ -738,6 +745,21 @@ class DashboardState:
             return snap
         except Exception as e:
             warn(f"[NEWS] Panel build failed: {e}")
+            return {"available": False, "rows": [], "count_today": 0,
+                    "note": f"error: {e}"}
+
+    def _build_news(self):
+        """High-conviction news. Same shape as the announcements panel so
+        the frontend treats them alike. `available: False` is deliberately
+        different from an empty list -- "no big news today" and "the feed
+        is down" must never look the same."""
+        if self.news_watcher is None:
+            return {"available": False, "rows": [], "count_today": 0,
+                    "note": "news watcher not running"}
+        try:
+            return self.news_watcher.snapshot(limit=ANNOUNCEMENT_PANEL_COUNT)
+        except Exception as e:
+            warn(f"[NEWSFEED] Panel build failed: {e}")
             return {"available": False, "rows": [], "count_today": 0,
                     "note": f"error: {e}"}
 
