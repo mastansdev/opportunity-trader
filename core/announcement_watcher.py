@@ -157,7 +157,11 @@ class AnnouncementWatcher:
     """Poll, dedupe, classify, remember. Read from any thread."""
 
     def __init__(self, known_symbols=None, poll_seconds=60, lookback_hours=8,
-                 fetcher=None, ingestor=None):
+                 fetcher=None, ingestor=None, store=None):
+        # Shared on-disk home for what this collects, so the polling can
+        # live in the collector and main.py can just read. Optional --
+        # None keeps the old in-memory-only behaviour exactly.
+        self.store = store
         self.known_symbols = {str(s).upper() for s in (known_symbols or ())}
         self.poll_seconds = poll_seconds
         self.lookback_hours = lookback_hours
@@ -253,6 +257,14 @@ class AnnouncementWatcher:
             fresh.append(record)
 
         if fresh:
+            # ---- SO main.py CAN STOP POLLING. 3 August 2026. ----
+            # The collector passes a FeedStore; main.py passes nothing
+            # and behaves exactly as before. See core/feed_store.py.
+            if self.store is not None:
+                self.store.save("announcement", fresh,
+                                lambda r: f"{r.get('symbol')}|"
+                                          f"{r.get('filed_at')}|"
+                                          f"{(r.get('subject') or '')[:80]}")
             with self._lock:
                 self._today = fresh + self._today
                 self._today.sort(

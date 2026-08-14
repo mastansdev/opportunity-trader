@@ -9,9 +9,12 @@ from datetime import datetime
 
 import pytest
 
+import config
+
 from config import LAYER1_FIXED_QTY
 from core.engine import Engine
 from trading.portfolio import Portfolio
+from config import MTF_MARGIN_PER_POSITION_RS
 
 
 @pytest.fixture(autouse=True)
@@ -36,10 +39,78 @@ def _pin_sizing_constants(monkeypatch):
     monkeypatch.setattr(em, "MIN_STOP_DISTANCE_PCT", 0.01)
     monkeypatch.setattr(em, "ATR_STOP_MULTIPLIER", 2.5)
     monkeypatch.setattr(em, "ATR_TRAIL_MULTIPLIER", 2.5)
+    # 2026-08-01: pinned alongside the others because the manual
+    # dashboard seeds now read THIS constant, not MIN_STOP_DISTANCE_PCT.
+    # The two tests that assert on the manual buffer read it back off
+    # the module rather than restating the number, so re-tuning the live
+    # stop cannot leave a stale literal asserting the old one.
+    monkeypatch.setattr(em, "HARD_STOP_FROM_ENTRY_PCT", 0.025)
+
+
+# ==========================================================
+# FILL PRICES, 30 July 2026
+# ==========================================================
+# These helpers replaced a pile of hardcoded intent prices.
+#
+# Sixteen tests in this file asserted `entry_price == 112.0` -- the
+# price the engine ASKED for. The engine was using that same intended
+# price for the P&L while trading/paper_execution.py filled at 112.22
+# and modelled the difference as slippage. The tests agreed with the
+# bug, so they passed, and the dashboard reported a session's profit as
+# roughly 11x the truth.
+#
+# The fix is not to hardcode 112.22 instead. It is to assert the
+# INVARIANT: a buy never fills below what you asked, a sell never fills
+# above it, and every downstream number is computed from the fill. A
+# test written that way would have failed the moment the engine started
+# ignoring the fill, whatever the slippage model happened to produce.
+
+def _expected_fill(intent, side, turnover_cr=None, at_time=None):
+    """What trading/slippage.py says this order fills at."""
+    from trading.slippage import fill_price
+    return fill_price(intent, side, turnover_cr, at_time)
+
+
+def _entry_of(engine, symbol):
+    return engine.open_positions[symbol]["entry_price"]
+
+
+def _bought(intent):
+    """What a BUY at `intent` actually fills at (paper slippage model)."""
+    from trading.slippage import BUY
+    return _expected_fill(intent, BUY)
+
+
+def _sold(intent):
+    """What a SELL at `intent` actually fills at."""
+    from trading.slippage import SELL
+    return _expected_fill(intent, SELL)
+
 
 
 def _t(hh, mm, ss=0):
     return datetime(2026, 7, 22, hh, mm, ss)
+
+
+
+@pytest.fixture(autouse=True)
+def _seed_stop_tests_use_the_legacy_trail(monkeypatch):
+    """Most stop assertions in this file predate 2026-07-28 and encode
+    the SEEDED stop -- the breakout candle's own low, or a small buffer
+    below entry.
+
+    The percent-from-peak trail (config.PEAK_TRAIL_PCT) replaced that:
+    the stop now starts exactly 2.5% below entry on every trade, so the
+    initial risk is the same known number every time instead of being
+    whatever the candle low happened to be -- sometimes a rupee away
+    (clipped by noise in seconds), sometimes 6% away.
+
+    The seeding logic is unchanged and still runs when the peak trail is
+    off, so these tests keep covering it. New behaviour is covered by
+    tests/test_peak_trail.py.
+    """
+    import core.trailing_stop as _ts
+    monkeypatch.setattr(_ts, "ENABLE_PEAK_TRAIL", False)
 
 
 def _engine(**kwargs):
@@ -72,7 +143,24 @@ def _engine(**kwargs):
     # the corrupt-tick guard would (correctly) call impossible. Off by
     # default; its own tests below switch it on.
     kwargs.setdefault("enable_tick_sanity", False)
-    return Engine(**kwargs)
+    # ALERT_ONLY_MODE is True in config from 30 July 2026 -- the bot
+    # reports signals instead of buying them. This suite tests entry
+    # MECHANICS, so it opts out unless a test asks otherwise.
+    kwargs.setdefault("alert_only", False)
+    engine = Engine(**kwargs)
+    # ---- THE BREAKOUT NEEDS ITS OWN ARMING NOW. 6 August 2026. ----
+    #
+    # engine.breakout_armed defaults to False in production, because
+    # one switch arming two buyers is what put eight unwanted fills in
+    # his account on 6 August. This suite tests the breakout MECHANICS,
+    # so it arms the path explicitly -- the same opt-out shape as
+    # alert_only and the strategy gates above.
+    #
+    # The DEFAULT is proven separately by
+    # test_bot_trading_on_does_not_arm_the_breakout below, which builds
+    # a real Engine and asserts it refuses.
+    engine.breakout_armed = True
+    return engine
 
 
 def _feed_orb_range(engine, symbol="TCS", sid="1", low=100.0, high=110.0):
@@ -158,7 +246,7 @@ def test_breakout_close_triggers_a_paper_buy():
     engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
 
     assert "TCS" in engine.open_positions
-    assert engine.open_positions["TCS"]["entry_price"] == 112.0
+    assert engine.open_positions["TCS"]["entry_price"] == _bought(112.0)
 
 
 def test_wick_above_high_without_a_close_does_not_buy():
@@ -402,8 +490,8 @@ def test_exit_all_exits_a_quiet_symbol_immediately_using_cached_price():
     assert "TCS" not in engine.open_positions
     assert "INFY" not in engine.open_positions
     exit_prices = {c["symbol"]: c["exit_price"] for c in engine.closed_positions}
-    assert exit_prices["TCS"] == 113.0
-    assert exit_prices["INFY"] == 226.0
+    assert exit_prices["TCS"] == _sold(113.0)
+    assert exit_prices["INFY"] == _sold(226.0)
     assert engine.trade_controller.is_exit_all_requested() is False
 
 
@@ -425,7 +513,7 @@ def test_individual_exit_of_a_different_symbol_resolves_via_market_data():
     engine.process_tick("TCS", "1", 100.0, _t(9, 40, 0))
 
     assert "INFY" not in engine.open_positions
-    assert engine.closed_positions[-1]["exit_price"] == 230.0
+    assert engine.closed_positions[-1]["exit_price"] == _sold(230.0)
 
 
 def test_exit_all_leaves_a_symbol_pending_with_no_known_price_yet():
@@ -703,7 +791,8 @@ def test_breakdown_close_triggers_a_paper_short():
     assert "TCS" in engine.open_positions
     position = engine.open_positions["TCS"]
     assert position["direction"] == "SHORT"
-    assert position["entry_price"] == 95.0
+    # A short ENTERS by selling, so it fills below what it asked for.
+    assert position["entry_price"] == _sold(95.0)
     assert position["entry_reason"] == "STRUCTURAL_SHORT_BREAKDOWN"
 
 
@@ -856,19 +945,43 @@ def test_short_position_pnl_is_profit_when_price_falls():
     engine.process_tick("TCS", "1", 99.0, _t(9, 31, 0))
     engine.process_tick("TCS", "1", 95.0, _t(9, 31, 30))
     engine.process_tick("TCS", "1", 96.0, _t(9, 32, 0))
-    assert portfolio.available_capital == 1_000_000.0 + 95.0 * LAYER1_FIXED_QTY
+    # Credited at the FILL, not the intent -- a short sells to open.
+    short_entry = _entry_of(engine, "TCS")
+    assert short_entry <= 95.0
+    assert portfolio.available_capital == \
+        1_000_000.0 + short_entry * LAYER1_FIXED_QTY
 
     engine.trade_controller.request_exit_all()
     engine.process_tick("TCS", "1", 90.0, _t(9, 45, 0))
 
-    assert portfolio.realized_pnl == (95.0 - 90.0) * LAYER1_FIXED_QTY
-    assert engine.closed_positions[0]["pnl"] == (95.0 - 90.0) * LAYER1_FIXED_QTY
+    # Both legs at their FILLS: sold to open below 95, bought to cover
+    # above 90. Slippage bites twice on a short, and the honest P&L is
+    # smaller than the arithmetic on the intended prices.
+    cover = engine.closed_positions[0]["exit_price"]
+    assert cover >= 90.0, "a buy-to-cover cannot fill below what it asked"
+    expected = (short_entry - cover) * LAYER1_FIXED_QTY
+    assert portfolio.realized_pnl == pytest.approx(expected)
+    assert engine.closed_positions[0]["pnl"] == pytest.approx(expected)
+    assert expected < (95.0 - 90.0) * LAYER1_FIXED_QTY
     assert engine.closed_positions[0]["direction"] == "SHORT"
 
 
 # -- MIS buying power gate (core/engine.py's _enter(), trading/portfolio.py) --
 
-def test_margin_blocks_a_new_structural_entry_once_buying_power_is_exhausted():
+def test_margin_blocks_a_new_structural_entry_once_buying_power_is_exhausted(monkeypatch):
+    # ---- THIS TEST ISOLATES THE MARGIN GATE. 10 August 2026. ----
+    #
+    # Rs 11,200 is deliberately below core/capital.FREE_CASH_FLOOR_RS,
+    # so with ENABLE_CASH_SIZED_BOOK on the SLOT gate answers zero and
+    # returns before the margin gate is ever reached. That is correct
+    # behaviour under his own rule -- "keep at least 1 lakh free cash"
+    # -- and it is not what this test is about.
+    #
+    # Pinning the flag here keeps the two gates testable separately.
+    # The interaction itself is covered by the capital tests.
+    import core.engine as _eng
+    monkeypatch.setattr(_eng, "ENABLE_CASH_SIZED_BOOK", False,
+                        raising=False)
     # 100% margin (no leverage) so notional == margin blocked.
     portfolio = Portfolio(starting_capital=11_200.0, default_margin_pct=1.0)
     engine = _engine(portfolio=portfolio)
@@ -898,7 +1011,20 @@ def test_margin_gate_applies_to_manual_buy_too():
     assert "TCS" not in engine.open_positions
 
 
-def test_margin_frees_up_after_a_position_closes_not_a_permanent_block():
+def test_margin_frees_up_after_a_position_closes_not_a_permanent_block(monkeypatch):
+    # ---- THIS TEST ISOLATES THE MARGIN GATE. 10 August 2026. ----
+    #
+    # Rs 11,200 is deliberately below core/capital.FREE_CASH_FLOOR_RS,
+    # so with ENABLE_CASH_SIZED_BOOK on the SLOT gate answers zero and
+    # returns before the margin gate is ever reached. That is correct
+    # behaviour under his own rule -- "keep at least 1 lakh free cash"
+    # -- and it is not what this test is about.
+    #
+    # Pinning the flag here keeps the two gates testable separately.
+    # The interaction itself is covered by the capital tests.
+    import core.engine as _eng
+    monkeypatch.setattr(_eng, "ENABLE_CASH_SIZED_BOOK", False,
+                        raising=False)
     """Unlike entry_blocked, a margin skip is NOT for the rest of
     the day -- closing a position frees the capital immediately
     for the very next valid signal."""
@@ -1068,6 +1194,64 @@ def test_paused_new_entries_stays_paused_while_any_position_remains_open():
 # above, specifically to prove the production floor actually works.
 # ==========================================================
 
+# ==========================================================
+# entry_blocked_reason() -- built 12 August 2026 so core/auto_entry.py's
+# risk-layer check (previously a silent no-op, see
+# tests/test_a_broken_check_refuses_the_trade.py) has a real method to
+# call. It crashed live at 09:30 the same morning it shipped --
+# _entry_cutoff_reason() calls .time() on what it is given, and this
+# passed datetime.now().time() (already a time, no .time() method)
+# instead of datetime.now() (a datetime, which has one). Every ranked
+# and early-bird entry that morning was refused by "the risk check
+# itself failed", not by a real block. Fixed to pass the full
+# datetime.now(). This test calls the REAL Engine(), not a mock, so a
+# regression here fails loudly instead of being swallowed by
+# auto_entry.py's own fail-closed exception handler.
+#
+# ---- AND THEN THEY ONLY PASSED BEFORE 15:30. 12 August 2026. ----
+# Both asserted on a real Engine reading the WALL CLOCK, so from 15:30
+# every evening they failed with "the market is closed (15:30)" -- true,
+# and not the thing being measured. Run at 17:14 they were the only two
+# red lines in a 4,025-test suite, which is how a suite stops being
+# believed. Commit 1691b16 fixed this exact bug in two other files and
+# these were written after it.
+#
+# entry_blocked_reason() now takes the moment being asked about, so the
+# test states its own time instead of inheriting the machine's.
+# ==========================================================
+
+# Mid-session on a real trading Wednesday: past the 09:30 ORB close,
+# well before any square-off, so nothing about the clock is in play.
+MIDSESSION = datetime(2026, 8, 12, 11, 30)
+
+
+def test_entry_blocked_reason_does_not_crash_on_a_real_engine():
+    engine = Engine()
+    # Must not raise, and with nothing actually blocking, must say so.
+    assert engine.entry_blocked_reason("TCS", "LONG",
+                                       at_time=MIDSESSION) is None
+
+
+def test_entry_blocked_reason_reports_an_existing_block():
+    engine = Engine()
+    engine._block_entry("TCS", "LONG", "same-day HIGH-confidence news "
+                        "points the other way")
+    assert "news points the other way" in \
+        engine.entry_blocked_reason("TCS", "LONG", at_time=MIDSESSION)
+    # A block on one direction must not leak onto the other.
+    assert engine.entry_blocked_reason("TCS", "SHORT",
+                                       at_time=MIDSESSION) is None
+
+
+def test_the_clock_still_blocks_when_the_market_is_shut():
+    """The parameter must not have made the square-off guard optional --
+    passing a time AFTER the cutoff has to still refuse."""
+    engine = Engine()
+    after_hours = datetime(2026, 8, 12, 17, 14)
+    assert engine.entry_blocked_reason("TCS", "LONG",
+                                       at_time=after_hours) is not None
+
+
 def test_structural_entry_below_price_floor_is_silently_skipped():
     engine = Engine()
     _feed_orb_range(engine, low=90.0, high=100.0)
@@ -1084,31 +1268,44 @@ def test_structural_entry_below_price_floor_is_silently_skipped():
 
 
 def test_structural_entry_at_or_above_price_floor_works_normally():
-    engine = Engine()
+    # Real Engine() on purpose -- this proves the PRODUCTION price floor
+    # (config.MIN_TRADABLE_PRICE_RS = 200) actually admits a stock above
+    # it. alert_only is switched off because that is a different rule:
+    # from 30 July 2026 config.ALERT_ONLY_MODE stops the bot buying at
+    # all, which would make this test pass for the wrong reason.
+    # breakout_armed likewise -- from 6 August 2026 the structural path
+    # needs its own arming, and leaving it off would make this pass for
+    # the wrong reason too.
+    engine = Engine(alert_only=False)
+    engine.breakout_armed = True
     _feed_orb_range(engine, low=190.0, high=200.0)
     engine.process_tick("TCS", "1", 205.0, _t(9, 31, 0))
     engine.process_tick("TCS", "1", 212.0, _t(9, 31, 30))
     engine.process_tick("TCS", "1", 211.0, _t(9, 32, 0))
 
     assert "TCS" in engine.open_positions
-    assert engine.open_positions["TCS"]["entry_price"] == 212.0
+    assert engine.open_positions["TCS"]["entry_price"] == _bought(212.0)
 
 
-def test_manual_buy_below_price_floor_is_blocked_no_matter_what():
-    """"No matter what" means manual buy/short too -- unlike the
-    news/sector checks, this is NOT an operator-overridable judgment
-    call (same non-overridable treatment as the margin gate)."""
+def test_a_cheap_stock_is_no_longer_refused():
+    """Floor removed 2026-07-29: "Remove cap on below 200 & above
+    10,000 rs as we have moved from MIS to MTF". A Rs 50 stock the
+    operator asks for is now bought."""
     engine = Engine()
     engine.trade_controller.request_buy("PENNY")
 
     engine.process_tick("PENNY", "1", 50.0, _t(9, 20, 0))
 
-    assert "PENNY" not in engine.open_positions
+    assert "PENNY" in engine.open_positions
 
 
-def test_manual_short_below_price_floor_is_blocked_no_matter_what():
-    engine = Engine()
-    engine.trade_controller.request_short("PENNY")
+def test_the_floor_still_works_if_it_is_ever_put_back():
+    """MIN_TRADABLE_PRICE_RS was set to 0.0 rather than deleted, so
+    restoring a floor is a one-number change. That claim is only worth
+    making if the plumbing behind it still runs -- this is the test
+    that keeps it honest."""
+    engine = Engine(min_tradable_price=200.0)
+    engine.trade_controller.request_buy("PENNY")
 
     engine.process_tick("PENNY", "1", 50.0, _t(9, 20, 0))
 
@@ -1124,31 +1321,74 @@ def test_manual_buy_at_or_above_price_floor_still_works():
     assert "TCS" in engine.open_positions
 
 
-def test_manual_buy_is_risk_sized_not_flat_100_shares():
-    """Audit #1 fix, 2026-07-24 (evening) -- the APAR case. A manual
-    buy at Rs 14,610 must NOT be the old flat 100 shares (Rs 14.6L /
-    the Rs 53k loss). It's risk-sized + notional-capped: seed floor is
-    1% below (stop distance ~146), so qty = min(2000/146, 200000/
-    14610) = 13 shares, ~Rs 1.9L notional -- under the Rs 2L cap."""
-    engine = _engine()  # min_tradable_price=0 so the toy-free path is clear
+def test_manual_buy_is_sized_by_MTF_MARGIN_not_flat_100_shares(monkeypatch):
+    """SUPERSEDED 2026-07-28 -- this used to assert 13 shares from the
+    old risk formula (min(2000/stop, 200000/price)).
+
+    That formula was replaced on the operator's own instruction:
+
+        "Buy no of shares worth equal to 1 Lakh = mtf power. ex - as of
+         now if i want to buy coforge 1686 rs - qty 225 with 99657.31
+         rs worth."
+
+    It had to go because at the 1% stop floor its two halves are
+    algebraically identical -- 2000/(0.01*p) == 200000/p -- so every one
+    of 2026-07-28's eighteen trades came out at Rs 1.90-2.00 lakh. It
+    could not tell NILKAMAL (11% daily swing) from MANAPPURAM (2%).
+
+    No margin book is wired here, so this exercises the OWN-CASH
+    fallback: Rs 1 lakh buys Rs 1 lakh of stock. 100000 // 14610 = 6.
+    The original point of the test still holds -- it must not be the old
+    flat 100 shares that produced the Rs 53k APAR loss.
+    """
+    # These test the RISK SIZER. config.MANUAL_TEST_QTY overrides it for
+    # manual clicks (Friday's one-share order), so it has to be off here
+    # or they would be testing the override instead.
+    monkeypatch.setattr("core.engine.MANUAL_TEST_QTY", None)
+    engine = _engine()
     engine.trade_controller.request_buy("APAR")
     engine.process_tick("APAR", "1", 14610.0, _t(9, 20, 0))
 
     assert "APAR" in engine.open_positions
     qty = engine.open_positions["APAR"]["qty"]
-    assert qty == 13
-    assert qty * 14610.0 <= 200_000  # notional under the cap
-    assert qty != 100  # the old flat placeholder is gone
+    assert qty == int(MTF_MARGIN_PER_POSITION_RS // 14610.0)
+    assert qty * 14610.0 <= MTF_MARGIN_PER_POSITION_RS        # never more than the commitment
+    assert qty != 100                      # the old flat placeholder is gone
 
 
-def test_manual_short_is_risk_sized_too():
+def test_manual_buy_uses_the_MTF_margin_book_when_one_is_wired(monkeypatch):
+    """With a real margin book the same Rs 1 lakh buys a LEVERAGED
+    position -- the operator's COFORGE case: 225 shares, Rs 3.79L of
+    stock, Rs 99,655 blocked."""
+    # These test the RISK SIZER. config.MANUAL_TEST_QTY overrides it for
+    # manual clicks (Friday's one-share order), so it has to be off here
+    # or they would be testing the override instead.
+    monkeypatch.setattr("core.engine.MANUAL_TEST_QTY", None)
+    from core.mtf_margin import MtfMarginBook
+    book = MtfMarginBook(
+        calculator=lambda sid, price, qty: {"data": {"totalMargin": price * 0.2627}}
+    )
+    engine = _engine(mtf_margin=book)
+    engine.trade_controller.request_buy("COFORGE")
+    engine.process_tick("COFORGE", "11543", 1686.0, _t(9, 20, 0))
+
+    qty = engine.open_positions["COFORGE"]["qty"]
+    assert qty == int(MTF_MARGIN_PER_POSITION_RS // (1686.0 * 0.2627))
+    assert qty * 1686.0 * 0.2627 <= MTF_MARGIN_PER_POSITION_RS
+
+
+def test_manual_short_is_sized_the_same_way(monkeypatch):
+    # These test the RISK SIZER. config.MANUAL_TEST_QTY overrides it for
+    # manual clicks (Friday's one-share order), so it has to be off here
+    # or they would be testing the override instead.
+    monkeypatch.setattr("core.engine.MANUAL_TEST_QTY", None)
     engine = _engine()
     engine.trade_controller.request_short("APAR")
     engine.process_tick("APAR", "1", 14610.0, _t(9, 20, 0))
 
     assert "APAR" in engine.open_positions
-    assert engine.open_positions["APAR"]["direction"] == "SHORT"
-    assert engine.open_positions["APAR"]["qty"] == 13
+    assert engine.open_positions["APAR"]["qty"] == int(MTF_MARGIN_PER_POSITION_RS // 14610.0)
+
 
 
 def test_manual_buy_price_floor_is_injectable_and_overridable_in_tests():
@@ -1175,11 +1415,11 @@ def test_manual_buy_request_opens_a_position_outside_the_orb_rule():
     engine.process_tick("TCS", "1", 250.0, _t(9, 20, 0))
 
     assert "TCS" in engine.open_positions
-    assert engine.open_positions["TCS"]["entry_price"] == 250.0
+    assert engine.open_positions["TCS"]["entry_price"] == _bought(250.0)
     assert engine.open_positions["TCS"]["entry_reason"] == "MANUAL_BUY_DASHBOARD"
     # One-shot: must not fire again on the next tick.
     engine.process_tick("TCS", "1", 251.0, _t(9, 21, 0))
-    assert engine.open_positions["TCS"]["entry_price"] == 250.0
+    assert engine.open_positions["TCS"]["entry_price"] == _bought(250.0)
 
 
 def test_manual_buy_request_is_ignored_if_already_open_no_pyramiding():
@@ -1188,13 +1428,13 @@ def test_manual_buy_request_is_ignored_if_already_open_no_pyramiding():
     engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
     engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
     engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-    assert engine.open_positions["TCS"]["entry_price"] == 112.0
+    assert engine.open_positions["TCS"]["entry_price"] == _bought(112.0)
 
     engine.trade_controller.request_buy("TCS")
     engine.process_tick("TCS", "1", 200.0, _t(9, 33, 0))
 
     # Still the original position -- manual buy request was ignored.
-    assert engine.open_positions["TCS"]["entry_price"] == 112.0
+    assert engine.open_positions["TCS"]["entry_price"] == _bought(112.0)
 
 
 def test_manual_buy_seeds_trailing_stop_from_last_closed_candle_low():
@@ -1229,8 +1469,17 @@ def test_manual_buy_falls_back_to_a_buffer_when_candle_low_is_stale_or_inverted(
     assert "TCS" in engine.open_positions
     stop = engine.trailing_stop.get_stop("TCS")
     assert stop < 96.0
-    # 1% buffer (MIN_STOP_DISTANCE_PCT, widened 0.5%->1% on 2026-07-24).
-    assert stop == 96.0 * 0.99
+    # The buffer is HARD_STOP_FROM_ENTRY_PCT -- 2.5%, the same stop the
+    # bot's own entries use. It read MIN_STOP_DISTANCE_PCT (1%) until
+    # 2026-08-01; that constant is the floor under the ATR TRAIL, and
+    # the trail was switched off on 29 July. See
+    # tests/test_manual_stop_is_the_hard_stop.py for the measurements.
+    #
+    # Read back off the module rather than hardcoded: the literal 0.99
+    # sat here while the value it mirrored changed underneath it, which
+    # is how the operator ended up trading a stop he never approved.
+    import core.engine as em
+    assert stop == pytest.approx(96.0 * (1 - em.HARD_STOP_FROM_ENTRY_PCT))
 
 
 # -- Manual SHORT (dashboard's per-row SHORT button, Top 50 Losers) --
@@ -1243,12 +1492,12 @@ def test_manual_short_request_opens_a_position_outside_the_orb_rule():
     engine.process_tick("TCS", "1", 250.0, _t(9, 20, 0))
 
     assert "TCS" in engine.open_positions
-    assert engine.open_positions["TCS"]["entry_price"] == 250.0
+    assert engine.open_positions["TCS"]["entry_price"] == _sold(250.0)
     assert engine.open_positions["TCS"]["direction"] == "SHORT"
     assert engine.open_positions["TCS"]["entry_reason"] == "MANUAL_SHORT_DASHBOARD"
     # One-shot: must not fire again on the next tick.
     engine.process_tick("TCS", "1", 249.0, _t(9, 21, 0))
-    assert engine.open_positions["TCS"]["entry_price"] == 250.0
+    assert engine.open_positions["TCS"]["entry_price"] == _sold(250.0)
 
 
 def test_manual_short_request_is_ignored_if_already_open_no_pyramiding():
@@ -1257,13 +1506,13 @@ def test_manual_short_request_is_ignored_if_already_open_no_pyramiding():
     engine.process_tick("TCS", "1", 92.0, _t(9, 31, 0))
     engine.process_tick("TCS", "1", 88.0, _t(9, 31, 30))
     engine.process_tick("TCS", "1", 89.0, _t(9, 32, 0))
-    assert engine.open_positions["TCS"]["entry_price"] == 88.0
+    assert engine.open_positions["TCS"]["entry_price"] == _sold(88.0)
 
     engine.trade_controller.request_short("TCS")
     engine.process_tick("TCS", "1", 50.0, _t(9, 33, 0))
 
     # Still the original position -- manual short request was ignored.
-    assert engine.open_positions["TCS"]["entry_price"] == 88.0
+    assert engine.open_positions["TCS"]["entry_price"] == _sold(88.0)
 
 
 def test_manual_short_seeds_trailing_stop_from_last_closed_candle_high():
@@ -1298,16 +1547,48 @@ def test_manual_short_falls_back_to_a_buffer_when_candle_high_is_stale_or_invert
     assert "TCS" in engine.open_positions
     stop = engine.trailing_stop.get_stop("TCS")
     assert stop > 104.0
-    # 1% buffer (MIN_STOP_DISTANCE_PCT, widened 0.5%->1% on 2026-07-24).
-    assert stop == 104.0 * 1.01
+    # Mirror of the manual-BUY buffer test above. 2026-08-01: moved from
+    # MIN_STOP_DISTANCE_PCT (1%) to HARD_STOP_FROM_ENTRY_PCT (2.5%), and
+    # read off the module rather than restated as a literal.
+    import core.engine as em
+    assert stop == pytest.approx(104.0 * (1 + em.HARD_STOP_FROM_ENTRY_PCT))
 
 
-def test_manual_short_is_blocked_after_square_off_time():
+def test_manual_short_is_blocked_after_square_off_when_square_off_is_armed(
+        monkeypatch):
+    """Blocked because the bot would flatten it minutes later.
+
+    31 July 2026: this used to be a bare "past 15:15" rule. It is now
+    tied to the thing that justified it -- see
+    core/engine._entry_cutoff_reason(). With FORCE_SQUARE_OFF_AT_CLOSE
+    ON, the old behaviour must come back exactly.
+    """
+    import config
+    monkeypatch.setattr(config, "FORCE_SQUARE_OFF_AT_CLOSE", True)
     engine = _engine()
     engine.trade_controller.request_short("TCS")
     engine.process_tick("TCS", "1", 500.0, _t(15, 20, 0))
 
     assert "TCS" not in engine.open_positions
+
+
+def test_manual_short_is_allowed_after_1515_when_carrying_overnight(
+        monkeypatch):
+    """
+        "Pls remove this 15:15 Hard rule as we moved from MIS to MTF.
+         this hard square off is not ideal to have."
+
+    With FORCE_SQUARE_OFF_AT_CLOSE off nothing is flattened at 15:15,
+    so refusing the entry was protecting it from a liquidation that no
+    longer happens.
+    """
+    import config
+    monkeypatch.setattr(config, "FORCE_SQUARE_OFF_AT_CLOSE", False)
+    engine = _engine()
+    engine.trade_controller.request_short("TCS")
+    engine.process_tick("TCS", "1", 500.0, _t(15, 20, 0))
+
+    assert "TCS" in engine.open_positions
 
 
 def test_manual_short_still_works_before_square_off_time():
@@ -1331,8 +1612,8 @@ def test_closed_position_is_recorded_with_full_history():
     assert len(engine.closed_positions) == 1
     record = engine.closed_positions[0]
     assert record["symbol"] == "TCS"
-    assert record["entry_price"] == 112.0
-    assert record["exit_price"] == 120.0
+    assert record["entry_price"] == _bought(112.0)
+    assert record["exit_price"] == _sold(120.0)
     assert record["exit_reason"] == "MANUAL_EXIT"
     assert record["entry_reason"] == "STRUCTURAL_LONG_BREAKOUT"
     # entry_time is the last tick INSIDE the breakout candle
@@ -1351,13 +1632,22 @@ def test_portfolio_is_updated_on_buy_and_sell_when_wired_in():
     engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
     engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
 
-    assert portfolio.available_capital == 1_000_000.0 - 112.0 * LAYER1_FIXED_QTY
+    # The capital blocked is the price PAID, not the price wanted.
+    entry = _entry_of(engine, "TCS")
+    assert entry >= 112.0, "a buy cannot fill below what it asked for"
+    assert portfolio.available_capital == 1_000_000.0 - entry * LAYER1_FIXED_QTY
 
     engine.trade_controller.request_exit_all()
     engine.process_tick("TCS", "1", 120.0, _t(9, 45, 0))
 
-    assert portfolio.realized_pnl == (120.0 - 112.0) * LAYER1_FIXED_QTY
-    assert engine.closed_positions[0]["pnl"] == (120.0 - 112.0) * LAYER1_FIXED_QTY
+    exit_price = engine.closed_positions[0]["exit_price"]
+    assert exit_price <= 120.0, "a sell cannot fill above what it asked for"
+    # And the P&L is built from both fills -- which is the whole bug.
+    expected = (exit_price - entry) * LAYER1_FIXED_QTY
+    assert portfolio.realized_pnl == pytest.approx(expected)
+    assert engine.closed_positions[0]["pnl"] == pytest.approx(expected)
+    assert expected < (120.0 - 112.0) * LAYER1_FIXED_QTY, (
+        "slippage must REDUCE the reported profit, never be dropped")
 
 
 # ==========================================================
@@ -1406,11 +1696,20 @@ def test_momentum_mode_allows_a_structural_long_inside_the_locked_universe(monke
     (100/110/105/105) plus the 108/112/111 breakout ticks, ATR(14)
     over the resulting 5 closed candles works out to 5.5 (verified
     directly against core.atr.compute_atr on this exact candle
-    sequence) -> stop distance 2.5*5.5=13.75, qty=int(1000/13.75)=72.
-    RISK_PER_TRADE_RS pinned to 1000 here so the arithmetic is
-    immune to production tuning (it was raised to 2000 in Lever 2)."""
+    sequence) -> stop distance 2.5*5.5=13.75, which still sets the
+    STOP.
+
+    The SIZE, since 2026-07-29, is the operator's own rule instead:
+    Rs 1 lakh of margin per position. No mtf_margin book is wired in
+    a bare test engine, so it falls back to own-cash sizing --
+    100000 // 112 = 892 shares.""" 
     import core.engine as engine_module
-    monkeypatch.setattr(engine_module, "RISK_PER_TRADE_RS", 1000.0)
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
     _feed_orb_range(engine, high=110.0)
@@ -1420,22 +1719,27 @@ def test_momentum_mode_allows_a_structural_long_inside_the_locked_universe(monke
 
     assert "TCS" in engine.open_positions
     position = engine.open_positions["TCS"]
-    assert position["qty"] == 72
+    assert position["qty"] == 892
     assert position["initial_stop"] == 112.0 - 13.75
     assert position["fixed_target"] is None
     assert position["stop_mode"] == "ATR_TRAILING"
     assert position["atr_stop"] == 112.0 - 13.75
-    assert position["atr_extreme"] == 112.0
+    assert position["atr_extreme"] == _bought(112.0)
 
 
 def test_momentum_mode_short_side_mirrors_long_gating_and_atr_sizing(monkeypatch):
     """Mirrors the LONG test above -- same seed candles, breakout
     ticks 99/95/96 instead. ATR(14) over the resulting 5 candles
     works out to 6.25 -> stop distance 2.5*6.25=15.625,
-    qty=int(1000/15.625)=64. RISK_PER_TRADE_RS pinned to 1000 so the
-    arithmetic is immune to production tuning (Lever 2 raised it)."""
+    which still sets the STOP. Size is the operator's Rs 1 lakh rule
+    (2026-07-29): 100000 // 95 = 1052 shares."""
     import core.engine as engine_module
-    monkeypatch.setattr(engine_module, "RISK_PER_TRADE_RS", 1000.0)
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
     universe = _FakeMomentumUniverse(short_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
     _feed_orb_range(engine, low=100.0, high=110.0)
@@ -1446,7 +1750,7 @@ def test_momentum_mode_short_side_mirrors_long_gating_and_atr_sizing(monkeypatch
     assert "TCS" in engine.open_positions
     position = engine.open_positions["TCS"]
     assert position["direction"] == "SHORT"
-    assert position["qty"] == 64
+    assert position["qty"] == 1052
     assert position["initial_stop"] == 95.0 + 15.625
     assert position["fixed_target"] is None
     assert position["stop_mode"] == "ATR_TRAILING"
@@ -1497,7 +1801,13 @@ def test_atr_trailing_target_hit_never_closes_it_no_fixed_target_exists():
     assert "TCS" in engine.open_positions
 
 
-def test_atr_trailing_stop_hit_closes_the_position_at_the_current_atr_stop():
+def test_atr_trailing_stop_hit_closes_the_position_at_the_current_atr_stop(monkeypatch):
+    import core.engine as engine_module
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
     _feed_orb_range(engine, high=110.0)
@@ -1511,7 +1821,9 @@ def test_atr_trailing_stop_hit_closes_the_position_at_the_current_atr_stop():
     engine.process_tick("TCS", "1", stop, _t(9, 36, 0))
     assert "TCS" not in engine.open_positions
     assert engine.closed_positions[-1]["exit_reason"] == "TRAILING_STOP"
-    assert engine.closed_positions[-1]["exit_price"] == stop
+    # The stop is the price it TRIED to get out at. What it got is the
+    # fill -- which is the point of a stop being a market order.
+    assert engine.closed_positions[-1]["exit_price"] == _sold(stop)
 
 
 def test_atr_trailing_stop_out_blocks_same_direction_reentry_when_flag_is_on():
@@ -1531,7 +1843,13 @@ def test_atr_trailing_stop_out_blocks_same_direction_reentry_when_flag_is_on():
     assert "LONG" in engine.entry_blocked.get("TCS", {})
 
 
-def test_atr_trailing_ratchets_up_on_a_favourable_candle_close_and_never_loosens():
+def test_atr_trailing_ratchets_up_on_a_favourable_candle_close_and_never_loosens(monkeypatch):
+    import core.engine as engine_module
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
     _feed_orb_range(engine, high=110.0)
@@ -1595,16 +1913,21 @@ def test_partial_exit_disabled_position_rides_uncapped(monkeypatch):
 
 
 def test_partial_exit_trims_qty_at_the_configured_atr_multiple(monkeypatch):
-    """Verified directly against the real engine: entry qty=72 @
-    112.00 (ATR=5.5 at entry; 2026-07-24 evening ATR_STOP_MULTIPLIER
-    2.5 -> qty=int(1000/13.75)=72). The 130/135/134 candle closes at
+    """Verified directly against the real engine: entry qty=892 @
+    112.00 (Rs 1 lakh of margin // 112, the operator's sizing rule
+    since 2026-07-29). The 130/135/134 candle closes at
     135.00 with a freshly recomputed ATR of ~7.833 -- comfortably past
     entry_price + 2*ATR (~127.67), so the partial fires at that
     candle's own close (135.00, not the wick), trimming
-    round(72*0.5)=36 shares and leaving 36 open."""
+    round(892*0.5)=446 shares and leaving 446 open."""
     import core.engine as engine_module
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
     monkeypatch.setattr(engine_module, "ENABLE_PARTIAL_EXIT", True)
-    monkeypatch.setattr(engine_module, "RISK_PER_TRADE_RS", 1000.0)
+    monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
@@ -1612,26 +1935,31 @@ def test_partial_exit_trims_qty_at_the_configured_atr_multiple(monkeypatch):
     engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
     engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
     engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-    assert engine.open_positions["TCS"]["qty"] == 72
+    assert engine.open_positions["TCS"]["qty"] == 892
 
     engine.process_tick("TCS", "1", 130.0, _t(9, 33, 0))
     engine.process_tick("TCS", "1", 135.0, _t(9, 33, 30))
     engine.process_tick("TCS", "1", 134.0, _t(9, 34, 0))
 
     assert "TCS" in engine.open_positions  # remainder still open
-    assert engine.open_positions["TCS"]["qty"] == 36
+    assert engine.open_positions["TCS"]["qty"] == 446
     assert engine.open_positions["TCS"]["partial_exit_done"] is True
 
     assert len(engine.closed_positions) == 1
     partial = engine.closed_positions[0]
-    assert partial["qty"] == 36
-    assert partial["exit_price"] == 135.0
+    assert partial["qty"] == 446
+    assert partial["exit_price"] == _sold(135.0)
     assert partial["exit_reason"] == "PARTIAL_PROFIT_ATR"
-    assert partial["entry_price"] == 112.0
+    assert partial["entry_price"] == _bought(112.0)
 
 
 def test_partial_exit_only_fires_once_even_across_many_more_candles(monkeypatch):
     import core.engine as engine_module
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
     monkeypatch.setattr(engine_module, "ENABLE_PARTIAL_EXIT", True)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
@@ -1662,8 +1990,13 @@ def test_partial_exit_leaves_the_atr_trail_completely_unaffected(monkeypatch):
     non-partial position would show after the identical candle
     sequence (test_atr_trailing_ratchets_up_... above)."""
     import core.engine as engine_module
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
     monkeypatch.setattr(engine_module, "ENABLE_PARTIAL_EXIT", True)
-    monkeypatch.setattr(engine_module, "RISK_PER_TRADE_RS", 1000.0)
+    monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
@@ -1679,7 +2012,7 @@ def test_partial_exit_leaves_the_atr_trail_completely_unaffected(monkeypatch):
 
     # Partial fired (qty dropped) AND the trail still ratcheted up
     # from this same candle, same as the non-partial test.
-    assert engine.open_positions["TCS"]["qty"] == 36
+    assert engine.open_positions["TCS"]["qty"] == 446
     assert engine.open_positions["TCS"]["atr_stop"] > initial_stop
 
 
@@ -1690,6 +2023,11 @@ def test_partial_exit_skipped_when_trim_would_round_to_zero(monkeypatch):
     naturally-triggering momentum-mode scenario as the tests above,
     just shrinks qty to 1 right after entry -- round(1*0.5)=0."""
     import core.engine as engine_module
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
     monkeypatch.setattr(engine_module, "ENABLE_PARTIAL_EXIT", True)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
@@ -1711,8 +2049,13 @@ def test_partial_exit_skipped_when_trim_would_round_to_zero(monkeypatch):
 
 def test_partial_exit_credits_portfolio_and_frees_margin(monkeypatch):
     import core.engine as engine_module
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
     monkeypatch.setattr(engine_module, "ENABLE_PARTIAL_EXIT", True)
-    monkeypatch.setattr(engine_module, "RISK_PER_TRADE_RS", 1000.0)
+    monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     portfolio = Portfolio()
@@ -1727,8 +2070,13 @@ def test_partial_exit_credits_portfolio_and_frees_margin(monkeypatch):
     engine.process_tick("TCS", "1", 135.0, _t(9, 33, 30))
     engine.process_tick("TCS", "1", 134.0, _t(9, 34, 0))
 
-    # 36 shares realized at (135 - 112) = 23/share.
-    assert engine.closed_positions[0]["pnl"] == 36 * (135.0 - 112.0)
+    # 446 shares realized, both legs at their fills rather than at the
+    # intended 112 -> 135.
+    trimmed = engine.closed_positions[0]
+    assert trimmed["pnl"] == pytest.approx(
+        446 * (trimmed["exit_price"] - trimmed["entry_price"]))
+    assert trimmed["pnl"] < 446 * (135.0 - 112.0), (
+        "slippage on both legs must reduce a partial exit too")
     # used_margin is derived fresh from qty*entry_price -- must have
     # dropped now that 60 fewer shares are held.
     margin_after = portfolio.used_margin(engine.open_positions)
@@ -1785,10 +2133,38 @@ def test_structural_entry_still_fires_in_the_afternoon_no_cutoff():
     assert "TCS" in engine.open_positions
 
 
-def test_manual_buy_is_blocked_after_square_off_time():
+def test_manual_buy_is_blocked_after_square_off_when_square_off_is_armed(
+        monkeypatch):
+    import config
+    monkeypatch.setattr(config, "FORCE_SQUARE_OFF_AT_CLOSE", True)
     engine = _engine()
     engine.trade_controller.request_buy("TCS")
     engine.process_tick("TCS", "1", 500.0, _t(15, 20, 0))
+
+    assert "TCS" not in engine.open_positions
+
+
+def test_manual_buy_is_allowed_at_1520_on_mtf(monkeypatch):
+    """The operator's actual Monday. He buys by hand, on MTF, to carry.
+    15:20 is a legitimate overnight entry, not stray intraday
+    exposure."""
+    import config
+    monkeypatch.setattr(config, "FORCE_SQUARE_OFF_AT_CLOSE", False)
+    engine = _engine()
+    engine.trade_controller.request_buy("TCS")
+    engine.process_tick("TCS", "1", 500.0, _t(15, 20, 0))
+
+    assert "TCS" in engine.open_positions
+
+
+def test_no_entry_is_ever_accepted_after_the_market_closes(monkeypatch):
+    """The one cutoff that never goes away. 15:29 is a real entry;
+    15:31 is not, whatever the product."""
+    import config
+    monkeypatch.setattr(config, "FORCE_SQUARE_OFF_AT_CLOSE", False)
+    engine = _engine()
+    engine.trade_controller.request_buy("TCS")
+    engine.process_tick("TCS", "1", 500.0, _t(15, 31, 0))
 
     assert "TCS" not in engine.open_positions
 
@@ -1801,11 +2177,19 @@ def test_manual_buy_still_works_before_square_off_time():
     assert "TCS" in engine.open_positions
 
 
-def test_74_open_positions_scenario_does_not_accept_a_new_entry_after_square_off():
+def test_74_open_positions_scenario_does_not_accept_a_new_entry_after_square_off(
+        monkeypatch):
     """Reproduces the exact shape of the live bug: many positions
     already open, market data still flowing past square-off, a
     fresh breakout signal on an UNRELATED symbol arrives -- must be
-    refused, not just silently ignored because of margin."""
+    refused, not just silently ignored because of margin.
+
+    31 July 2026: square-off is armed explicitly now. The cutoff moved
+    from a bare clock to whether the bot actually flattens (see
+    core/engine._entry_cutoff_reason()), and this incident only makes
+    sense in the world where it does."""
+    import config
+    monkeypatch.setattr(config, "FORCE_SQUARE_OFF_AT_CLOSE", True)
     engine = _engine()
     # Simulate a handful of pre-existing open positions (stand-in
     # for the 74 seen live) -- doesn't need real portfolio wiring,
@@ -1827,13 +2211,20 @@ def test_74_open_positions_scenario_does_not_accept_a_new_entry_after_square_off
     assert "FRESH" not in engine.open_positions
 
 
-def test_square_off_leak_boundary_candle_confirmed_by_a_1515_tick_is_blocked():
+def test_square_off_leak_boundary_candle_confirmed_by_a_1515_tick_is_blocked(
+        monkeypatch):
     """#0 fix, 2026-07-24 (evening): the live leak. A breakout candle
     that BUILT during 15:14 (all its ticks < 15:15, so its own label
     time is ~15:14:59) but only CLOSES when the first 15:15:00 tick
     arrives must NOT enter -- the real execution is at/after square-
     off, racing the flatten. The guard now checks the processing
-    tick_time (15:15:00), not the candle's 15:14 label."""
+    tick_time (15:15:00), not the candle's 15:14 label.
+
+    The RACE is the point of this test and it is unchanged. Only the
+    time it guards is now derived from whether square-off is armed, so
+    the test arms it."""
+    import config
+    monkeypatch.setattr(config, "FORCE_SQUARE_OFF_AT_CLOSE", True)
     engine = _engine()
     # Build the ORB and a breakout candle entirely within 15:14, so
     # the closing candle's own "time" is 15:14:xx (< square-off)...
@@ -1904,10 +2295,14 @@ class _FakeCircuitMonitor:
 
 
 def test_circuit_proximity_blocks_a_fresh_structural_entry():
+    # 2026-07-29: the rule is direction-aware now. A LONG near its
+    # UPPER circuit is the day's best position and is deliberately
+    # left alone -- see tests/test_circuit_rule_direction_aware.py.
+    # The trapped case this test means is the LOWER circuit.
     monitor = _FakeCircuitMonitor()
     engine = _engine(circuit_monitor=monitor)
     _feed_orb_range(engine, high=110.0)
-    monitor.flag("TCS", side="UPPER")
+    monitor.flag("TCS", side="LOWER")
 
     engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
     engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
@@ -1917,6 +2312,10 @@ def test_circuit_proximity_blocks_a_fresh_structural_entry():
 
 
 def test_circuit_proximity_force_exits_an_open_long_position():
+    # 2026-07-29: the rule is direction-aware now. A LONG near its
+    # UPPER circuit is the day's best position and is deliberately
+    # left alone -- see tests/test_circuit_rule_direction_aware.py.
+    # The trapped case this test means is the LOWER circuit.
     """Even though UPPER is the FAVOURABLE side for a long (the
     position is winning), the operator's instruction was explicit:
     close it anyway -- no real counterparty for an exit order once
@@ -1929,7 +2328,7 @@ def test_circuit_proximity_force_exits_an_open_long_position():
     engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
     assert "TCS" in engine.open_positions
 
-    monitor.flag("TCS", side="UPPER")
+    monitor.flag("TCS", side="LOWER")
     engine.process_tick("TCS", "1", 113.0, _t(9, 33, 0))
 
     assert "TCS" not in engine.open_positions
@@ -1937,6 +2336,10 @@ def test_circuit_proximity_force_exits_an_open_long_position():
 
 
 def test_circuit_proximity_force_exits_an_open_short_position():
+    # 2026-07-29, direction-aware: the trap for a SHORT is the UPPER
+    # circuit -- covering means BUYING, and at the upper limit there
+    # are no sellers. At the LOWER limit a short is deeply in profit
+    # and can cover freely, so it is left alone now.
     """The unfavourable case for a SHORT is the LOWER circuit
     (position winning but locked), and the favourable-but-still-
     closed case is the UPPER circuit (position losing) -- both must
@@ -1948,7 +2351,7 @@ def test_circuit_proximity_force_exits_an_open_short_position():
     engine.process_tick("HFCL", "9", 95.0, _t(9, 32, 0))
     assert "HFCL" in engine.open_positions
 
-    monitor.flag("HFCL", side="LOWER")
+    monitor.flag("HFCL", side="UPPER")
     engine.process_tick("HFCL", "9", 94.0, _t(9, 33, 0))
 
     assert "HFCL" not in engine.open_positions
@@ -1956,6 +2359,10 @@ def test_circuit_proximity_force_exits_an_open_short_position():
 
 
 def test_circuit_proximity_exit_triggers_the_stopout_reentry_block():
+    # 2026-07-29: the rule is direction-aware now. A LONG near its
+    # UPPER circuit is the day's best position and is deliberately
+    # left alone -- see tests/test_circuit_rule_direction_aware.py.
+    # The trapped case this test means is the LOWER circuit.
     """Changed 2026-07-24 after a live bug: STYL round-tripped SHORT
     5x in 11 minutes, every exit tagged CIRCUIT_PROXIMITY, each one
     immediately followed by a fresh structural re-entry as the stock
@@ -1971,7 +2378,7 @@ def test_circuit_proximity_exit_triggers_the_stopout_reentry_block():
     engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
     assert "TCS" in engine.open_positions
 
-    monitor.flag("TCS", side="UPPER")
+    monitor.flag("TCS", side="LOWER")
     engine.process_tick("TCS", "1", 113.0, _t(9, 33, 0))
     assert "TCS" not in engine.open_positions
 
@@ -1985,6 +2392,10 @@ def test_circuit_proximity_exit_triggers_the_stopout_reentry_block():
 
 
 def test_circuit_proximity_exit_leaves_the_opposite_direction_free():
+    # 2026-07-29: the rule is direction-aware now. A LONG near its
+    # UPPER circuit is the day's best position and is deliberately
+    # left alone -- see tests/test_circuit_rule_direction_aware.py.
+    # The trapped case this test means is the LOWER circuit.
     """A LONG flagged near its circuit still leaves SHORT open on the
     same symbol, exactly like the stopout block -- a failed/flagged
     long says nothing about whether a later short setup is valid."""
@@ -1996,7 +2407,7 @@ def test_circuit_proximity_exit_leaves_the_opposite_direction_free():
     engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
     assert "TCS" in engine.open_positions
 
-    monitor.flag("TCS", side="UPPER")
+    monitor.flag("TCS", side="LOWER")
     engine.process_tick("TCS", "1", 113.0, _t(9, 33, 0))
     assert "TCS" not in engine.open_positions
 
@@ -2015,15 +2426,23 @@ def test_circuit_proximity_exit_leaves_the_opposite_direction_free():
 # ==========================================================
 
 def test_atr_entry_sizing_floors_stop_distance_and_caps_qty_when_atr_is_tiny(monkeypatch):
-    """entry_price=300, ATR patched to 0.1 -> raw stop distance
-    2.5*0.1=0.25, floored up to 0.01*300=3.0 (MIN_STOP_DISTANCE_PCT,
-    now 1%). qty from that floored distance is int(1000/3.0)=333, but
-    notional 333*300 exceeds MAX_NOTIONAL_PER_TRADE_RS(50,000), so qty
-    is capped down to int(50000/300)=166."""
+    """The STOP is still ATR-derived and still floored.
+
+    entry_price=300, ATR patched to 0.1 -> raw stop distance
+    2.5*0.1=0.25, floored up to 0.01*300=3.0 (MIN_STOP_DISTANCE_PCT).
+    That floor is the point of this test and is unchanged.
+
+    The SIZE is now the operator's rule -- Rs 1 lakh of margin per
+    position, 100000 // 300 = 333 shares -- and is deliberately
+    INDEPENDENT of the stop distance."""
     import core.engine as engine_module
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
     monkeypatch.setattr(engine_module, "compute_atr", lambda candles, period: 0.1)
-    monkeypatch.setattr(engine_module, "RISK_PER_TRADE_RS", 1000.0)
-    monkeypatch.setattr(engine_module, "MAX_NOTIONAL_PER_TRADE_RS", 50000.0)
+    monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
@@ -2037,21 +2456,39 @@ def test_atr_entry_sizing_floors_stop_distance_and_caps_qty_when_atr_is_tiny(mon
     assert "TCS" in engine.open_positions
     position = engine.open_positions["TCS"]
     assert position["initial_stop"] == 300.0 - 3.0
-    assert position["qty"] == 166
+    assert position["qty"] == 333
 
 
 def test_atr_entry_sizing_notional_cap_binds_independently_of_the_stop_floor(monkeypatch):
-    """entry_price=300, ATR patched to 2.0 -> raw stop distance
-    2.5*2.0=5.0, ABOVE the 3.0 floor (1% of 300) so the floor does NOT
-    bind (stop distance stays exactly 5.0, proving the floor isn't
-    over-applying). qty from that distance is int(1000/5.0)=200,
-    notional 200*300=60,000 still exceeds the Rs 50,000 cap, so qty is
-    capped down to int(50000/300)=166 -- the two nets are independent,
-    this one fires on its own."""
+    """THE REGRESSION TEST FOR 29 JULY.
+
+    Same entry price and the same Rs 1 lakh rule as the test above,
+    but a twenty-fold larger ATR: 2.0 instead of 0.1. The stop moves
+    accordingly (2.5*2.0=5.0, above the 3.0 floor, so the floor
+    correctly does not bind) -- and the SHARE COUNT DOES NOT MOVE AT
+    ALL. 333 either way.
+
+    That independence is the whole fix. Until 29 July the size came
+    from min(RISK_PER_TRADE_RS / stop_distance,
+    MAX_NOTIONAL_PER_TRADE_RS / price), which at the 1% stop floor is
+    algebraically the same number -- so the notional ceiling bound on
+    every single trade and ATR did nothing. All 29 of that day's
+    structural entries came out between Rs 197,041 and Rs 200,382,
+    double the size the operator had specified, while his manual buys
+    correctly landed at Rs 1 lakh.
+
+    Both stale knobs are pinned to absurd values here on purpose: if
+    either one ever reaches the size again, this test fails."""
     import core.engine as engine_module
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
     monkeypatch.setattr(engine_module, "compute_atr", lambda candles, period: 2.0)
-    monkeypatch.setattr(engine_module, "RISK_PER_TRADE_RS", 1000.0)
-    monkeypatch.setattr(engine_module, "MAX_NOTIONAL_PER_TRADE_RS", 50000.0)
+    monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
+    monkeypatch.setattr(engine_module, "RISK_PER_TRADE_RS", 1.0)
+    monkeypatch.setattr(engine_module, "MAX_NOTIONAL_PER_TRADE_RS", 1.0)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
@@ -2063,7 +2500,7 @@ def test_atr_entry_sizing_notional_cap_binds_independently_of_the_stop_floor(mon
     assert "TCS" in engine.open_positions
     position = engine.open_positions["TCS"]
     assert position["initial_stop"] == 300.0 - 5.0
-    assert position["qty"] == 166
+    assert position["qty"] == 333
 
 
 def test_atr_trailing_ratchet_also_respects_the_min_stop_distance_floor(monkeypatch):
@@ -2074,6 +2511,11 @@ def test_atr_trailing_ratchet_also_respects_the_min_stop_distance_floor(monkeypa
     floor is 0.01*400=4.0 (bigger than 2.5*0.1=0.25), so the ratcheted
     stop must sit exactly 4.0 below the new extreme."""
     import core.engine as engine_module
+    # 2026-07-29: the ATR trail is OFF by default now (it turned
+    # +Rs 21,374 of entries into -Rs 1,252 over 80 real trades).
+    # Enabled explicitly here so the old path stays covered rather
+    # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
     monkeypatch.setattr(engine_module, "compute_atr", lambda candles, period: 0.1)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
@@ -2234,6 +2676,12 @@ def test_regime_gate_blocks_a_long_when_the_tape_is_broadly_declining(monkeypatc
     perfectly valid LONG breakout is skipped, silently."""
     import core.engine as engine_module
     monkeypatch.setattr(engine_module, "REGIME_MIN_SYMBOLS", 5)
+    # The gate is OFF in production since 2026-07-28
+    # (config.ENABLE_MARKET_REGIME_GATE) -- it left the bot unable
+    # to take a single long on a 67%-red tape. These two tests
+    # cover the GATE ITSELF, so they switch it back on rather
+    # than silently testing a code path nobody runs.
+    monkeypatch.setattr(engine_module, "ENABLE_MARKET_REGIME_GATE", True)
 
     monitor = _FakeRegimeCircuitMonitor(n_up=3, n_down=7)
     engine = _engine(circuit_monitor=monitor)
@@ -2266,6 +2714,12 @@ def test_regime_gate_still_allows_a_short_when_the_tape_is_broadly_declining(mon
 def test_regime_gate_blocks_a_short_when_the_tape_is_broadly_advancing(monkeypatch):
     import core.engine as engine_module
     monkeypatch.setattr(engine_module, "REGIME_MIN_SYMBOLS", 5)
+    # The gate is OFF in production since 2026-07-28
+    # (config.ENABLE_MARKET_REGIME_GATE) -- it left the bot unable
+    # to take a single long on a 67%-red tape. These two tests
+    # cover the GATE ITSELF, so they switch it back on rather
+    # than silently testing a code path nobody runs.
+    monkeypatch.setattr(engine_module, "ENABLE_MARKET_REGIME_GATE", True)
 
     monitor = _FakeRegimeCircuitMonitor(n_up=7, n_down=3)
     engine = _engine(circuit_monitor=monitor)
@@ -3173,3 +3627,229 @@ def test_no_rotation_when_the_challenger_is_not_clearly_stronger(monkeypatch):
     _long_breakout(engine, "NEW", "9")
     assert "HOLD" in engine.open_positions               # not evicted
     assert "NEW" not in engine.open_positions            # book stays full
+
+
+# ---------------------------------------------------------------
+# MTF: hold overnight instead of flattening at 15:15 (2026-07-28).
+# Square-off is MIS machinery. It closed TVSMOTOR and CUB on the day
+# the operator had already moved to MTF to hold for days.
+# ---------------------------------------------------------------
+
+def test_carry_forward_reports_instead_of_closing():
+    """The whole point: positions must STILL BE OPEN afterwards."""
+    engine = _engine()
+    engine.open_positions["TVSMOTOR"] = {
+        "entry_price": 3991.0, "qty": 50, "direction": "LONG",
+        "stop": 3957.53, "security_id": 1,
+    }
+    engine.report_carry_forward(lambda s: 3997.10)
+    assert "TVSMOTOR" in engine.open_positions
+    assert engine.closed_positions == []
+
+
+def test_carry_forward_on_an_empty_book_is_harmless():
+    engine = _engine()
+    engine.report_carry_forward(lambda s: 100.0)
+    assert engine.open_positions == {}
+
+
+def test_carry_forward_survives_a_missing_price():
+    """No live price must not stop the report or close the position."""
+    engine = _engine()
+    engine.open_positions["CUB"] = {
+        "entry_price": 239.61, "qty": 834, "direction": "LONG",
+        "stop": 237.21, "security_id": 2,
+    }
+    engine.report_carry_forward(lambda s: None)
+    assert "CUB" in engine.open_positions
+
+
+def test_square_off_never_books_a_fake_flat_pnl_on_a_missing_price():
+    """It used to fall back to the position's OWN ENTRY price, recording
+    a perfectly flat P&L for a trade that had one -- a silent
+    falsification of the book. It must skip and stay open instead."""
+    engine = _engine()
+    engine.open_positions["CUB"] = {
+        "entry_price": 239.61, "qty": 834, "direction": "LONG",
+        "stop": 237.21, "security_id": 2,
+    }
+    engine.flatten_all(lambda s: None)
+    assert "CUB" in engine.open_positions
+    assert engine.closed_positions == []
+
+
+def test_square_off_still_closes_when_a_price_is_available():
+    engine = _engine()
+    engine.open_positions["CUB"] = {
+        "entry_price": 239.61, "qty": 834, "direction": "LONG",
+        "stop": 237.21, "security_id": 2,
+    }
+    engine.flatten_all(lambda s: 240.40)
+    assert "CUB" not in engine.open_positions
+
+
+# ---------------------------------------------------------------
+# MARKET REGIME GATE, switched off 2026-07-28.
+#
+# On that day 445 of 665 symbols were declining, the regime read
+# SHORT_ONLY, and the operator -- who trades LONG ONLY -- had a bot that
+# could not take a single entry, silently, all session. CUB reported and
+# went +8.47% on that same tape.
+# ---------------------------------------------------------------
+
+def test_a_long_is_allowed_on_a_red_tape_when_the_gate_is_off(monkeypatch):
+    import core.engine as eng
+    monkeypatch.setattr(eng, "ENABLE_MARKET_REGIME_GATE", False)
+    engine = _engine()
+    monkeypatch.setattr(engine, "_market_regime", lambda: "SHORT_ONLY")
+    engine.trade_controller.request_buy("CUB")
+    engine.process_tick("CUB", "1", 240.0, _t(9, 45, 0))
+    assert "CUB" in engine.open_positions
+
+
+def test_the_gate_still_blocks_when_switched_back_on(monkeypatch):
+    """Not deleted -- one flag away. "Trade with the tape" may prove
+    right once there is data to judge it on."""
+    import core.engine as eng
+    monkeypatch.setattr(eng, "ENABLE_MARKET_REGIME_GATE", True)
+    engine = _engine()
+    monkeypatch.setattr(engine, "_market_regime", lambda: "SHORT_ONLY")
+    engine.process_tick("CUB", "1", 240.0, _t(9, 20, 0))
+    engine.process_tick("CUB", "1", 250.0, _t(9, 45, 0))
+    assert "CUB" not in engine.open_positions
+
+
+# ==========================================================
+# ALERT ONLY -- the bot stops trading and starts telling
+# ==========================================================
+#     "we will stop completely bot from trade taking as of now. it must
+#      show me the stock in alerts only."   -- operator, 30 July 2026
+#
+# Why: on 30 July the bot placed 16 of 29 trades between 09:31 and 09:35,
+# filling all ten slots in four minutes, then refused 665 signals for the
+# rest of the day. It took THYROCARE on 0.03x volume because a slot was
+# free and six minutes later refused KSB on 715x volume because the book
+# was full. Nothing compared them -- there is no ranking between
+# candidates, only per-stock gates and arrival order.
+
+def test_alert_only_does_not_buy():
+    engine = _engine(alert_only=True)
+    _feed_orb_range(engine, high=110.0)
+    # Same sequence as test_breakout_close_triggers_a_paper_buy: the third
+    # tick lands in a NEW minute, which is what closes the 112 candle.
+    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
+    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
+    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
+    assert not engine.open_positions, \
+        "alert-only mode bought something"
+
+
+def test_alert_only_still_raises_an_alert_naming_the_stock():
+    """Silence is the failure mode to avoid. trade_controller's pause
+    already skips entries -- but SILENTLY, by design ("no log line"),
+    because it fires on every candle close. The whole point here is to be
+    told, so this is a separate path that speaks."""
+    engine = _engine(alert_only=True)
+    _feed_orb_range(engine, high=110.0)
+    # Same sequence as test_breakout_close_triggers_a_paper_buy: the third
+    # tick lands in a NEW minute, which is what closes the 112 candle.
+    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
+    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
+    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
+    alerts = engine.get_manual_alerts()
+    assert alerts, "the signal was dropped in silence"
+    assert any(a.get("symbol") == "TCS" for a in alerts)
+    text = " ".join(str(a.get("message", "")) for a in alerts)
+    assert "ALERT ONLY" in text
+    assert "would have been entered" in text
+
+
+def test_alert_only_ignores_a_full_book():
+    """THE bug this nearly shipped with.
+
+    The slot cap returns BEFORE the alert point. The operator is carrying
+    10 positions into the next session and MAX_OPEN_POSITIONS is 10, so
+    the book is full at 09:15 -- every signal would have died at the cap
+    and alert-only mode would have produced ZERO alerts all day. A silent
+    bot looks exactly like a quiet market.
+
+    Capacity limits how much money is committed. In alert-only mode
+    nothing is committed, so they do not apply.
+    """
+    engine = _engine(alert_only=True)
+    # Fill the book well past any cap.
+    for i in range(12):
+        engine.open_positions[f"FILLER{i}"] = {
+            "security_id": str(100 + i), "qty": 1, "entry_price": 100.0,
+            "direction": "LONG", "entry_reason": "test",
+        }
+    _feed_orb_range(engine, high=110.0)
+    # Same sequence as test_breakout_close_triggers_a_paper_buy: the third
+    # tick lands in a NEW minute, which is what closes the 112 candle.
+    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
+    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
+    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
+    assert any(a.get("symbol") == "TCS" for a in engine.get_manual_alerts()), \
+        "a full book silenced the alert -- capacity must not gate telling"
+
+
+def test_alert_only_off_still_trades():
+    """The switch must be a switch, not a one-way door."""
+    engine = _engine(alert_only=False)
+    _feed_orb_range(engine, high=110.0)
+    # Same sequence as test_breakout_close_triggers_a_paper_buy: the third
+    # tick lands in a NEW minute, which is what closes the 112 candle.
+    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
+    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
+    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
+    assert "TCS" in engine.open_positions
+
+
+# ===================================================================
+# THE SWITCH THAT ARMED TWO BUYERS
+# ===================================================================
+#
+#     "even morning i asked can bot trade ? u replied with all rules .
+#      but again random entries taken that too with 1 L capital right?"
+#                                       -- operator, 6 August 2026
+#
+# He was told the RANKER's rules -- up 1%, above its own open, a
+# written reason, beating its sector, liquid enough. He turned bot
+# trading ON. Every fill that day came from the STRUCTURAL BREAKOUT
+# path, which applies none of those:
+#
+#     EXIDEIND JAMNAAUTO BASF JKLAKSHMI RHIM BELRISE VGUARD GMDCLTD
+#
+# Both paths read engine.alert_only, so one switch armed both.
+#
+# These two tests drive a real Engine -- not _engine(), which arms the
+# breakout for the mechanics suite -- and prove the default refuses.
+def test_bot_trading_on_does_not_arm_the_breakout():
+    """alert_only=False must NOT be enough to buy a level break."""
+    engine = Engine(alert_only=False, min_tradable_price=0,
+                    enable_rs_band=False, enable_staged_entry=False,
+                    one_trade_per_symbol=False, enable_no_progress=False,
+                    enable_tick_sanity=False)
+    assert engine.breakout_armed is False, (
+        "the breakout must be off until it is armed on its own")
+    _feed_orb_range(engine, high=110.0)
+    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
+    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
+    engine.process_tick("TCS", "1", 112.5, _t(9, 32, 0))
+    assert "TCS" not in engine.open_positions, (
+        "bot trading ON bought a breakout -- this is the 6 August bug")
+
+
+def test_arming_the_breakout_explicitly_lets_it_trade_again():
+    """It is a switch, not a removal. He can still turn it on."""
+    engine = Engine(alert_only=False, min_tradable_price=0,
+                    enable_rs_band=False, enable_staged_entry=False,
+                    one_trade_per_symbol=False, enable_no_progress=False,
+                    enable_tick_sanity=False)
+    engine.breakout_armed = True
+    _feed_orb_range(engine, high=110.0)
+    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
+    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
+    engine.process_tick("TCS", "1", 112.5, _t(9, 32, 0))
+    assert "TCS" in engine.open_positions, (
+        "armed explicitly, the breakout must still work")

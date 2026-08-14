@@ -20,6 +20,39 @@ Author : H&M Opportunity Trader
 
 import threading
 
+# Dhan's IDX_I segment, as it appears in a decoded packet. The SDK's
+# MarketFeed.IDX is 0; the wire value comes back as an int, and older
+# builds have used the string form, so all spellings are accepted.
+IDX_SEGMENTS = (0, "0", "IDX", "IDX_I")
+
+
+def is_index_segment(message):
+    """True if this packet came from the INDEX segment.
+
+    WHY THE SEGMENT AND NOT THE ID -- the worst data bug this project
+    has had. Index security ids and equity security ids are separate
+    numbering spaces, and they collide:
+
+        IDX_I 13 = NIFTY 50          NSE_EQ 13 = ABB INDIA
+        IDX_I 25 = NIFTY BANK        NSE_EQ 25 = ADANI ENTERPRISES
+
+    main.py's router keyed on the id ALONE and checked it before the
+    symbol lookup, so on 2026-07-28 every ABB and ADANIENT tick was
+    swallowed by the index monitor and returned early. Both stocks were
+    subscribed, both were in the universe, and neither produced a single
+    candle, opening range or gainers row for the whole session. Nothing
+    logged an error -- the ticks simply went somewhere else.
+
+    The Nifty tile meanwhile displayed 7,234, which is ABB's share
+    price, while Nifty 50 was near 24,000. That was diagnosed as "wrong
+    security ids" and INDEX_INSTRUMENTS was emptied. The ids were right.
+    The routing was wrong.
+
+    (security_id, segment) is the only pair that identifies an
+    instrument. Either half alone is ambiguous.
+    """
+    return (message or {}).get("exchange_segment") in IDX_SEGMENTS
+
 
 class IndexMonitor:
 
@@ -35,8 +68,24 @@ class IndexMonitor:
     def index_security_ids(self):
         """The set of security ids that belong to indices, so the
         feed callback can route them here instead of the stock
-        pipeline."""
+        pipeline.
+
+        NOT sufficient on its own for routing -- see is_index_segment().
+        An id in this set is only an index if the packet also came from
+        the IDX segment. Use owns(security_id, message).
+        """
         return set(self._id_to_name.keys())
+
+    def owns(self, security_id, message):
+        """True if THIS packet is one of the configured indices.
+
+        Both halves are required. The id says which instrument within a
+        segment; the segment says which numbering space the id belongs
+        to. Checking the id alone is what routed ABB's ticks into the
+        Nifty tile -- see is_index_segment() for the full account.
+        """
+        return (is_index_segment(message)
+                and str(security_id) in self._id_to_name)
 
     def on_index_tick(self, security_id, ltp=None, prev_close=None):
         name = self._id_to_name.get(str(security_id))

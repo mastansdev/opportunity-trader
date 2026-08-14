@@ -81,6 +81,7 @@ Author : H&M Opportunity Trader
 """
 
 import os
+import statistics
 from datetime import datetime, timezone
 
 from sqlalchemy import (
@@ -89,6 +90,7 @@ from sqlalchemy import (
 )
 
 from core.db import resolve_database_url
+from core.logger import warn
 
 # Growth at or above this counts as genuinely better, not noise. Indian
 # quarterly numbers swing on seasonality and one-offs; a 2% "rise" in
@@ -167,9 +169,62 @@ class QuarterlyResults:
     # WRITE
     # ----------------------------------------------------------
 
+    # How far a quarter's sales may sit from the company's own median
+    # before it is treated as a misread rather than a business event.
+    #
+    # Twenty is deliberately loose. A genuine doubling, a merger, even
+    # a fourfold jump on a new plant all pass. What it catches is the
+    # decimal-place and wrong-column class of error, which is never
+    # subtle: the real cases were 100x to 2,600x out.
+    SALES_SANITY_RATIO = 20.0
+
+    # Below this a company has no history to judge a new quarter
+    # against, and refusing on two data points would block every
+    # newly-covered stock.
+    SALES_SANITY_MIN_HISTORY = 3
+
+    def _implausible(self, symbol, sales):
+        """Why this sales figure cannot be believed, or None.
+
+        Compares the company against ITSELF. There is no absolute
+        rupee threshold that is right for both Reliance and a
+        small-cap, and inventing one would refuse real quarters.
+        """
+        if sales is None:
+            return None
+        try:
+            sales = float(sales)
+        except (TypeError, ValueError):
+            return "sales is not a number"
+        if sales < 0:
+            return f"sales is negative ({sales})"
+        if sales == 0:
+            return None                 # genuinely possible, and rare
+        try:
+            with self.engine.begin() as conn:
+                rows = conn.execute(
+                    select(self.results.c.sales).where(
+                        (self.results.c.symbol == symbol)
+                        & (self.results.c.sales.isnot(None)))
+                ).fetchall()
+        except Exception:                                  # noqa: BLE001
+            return None                 # never block a write on a read
+        history = [float(r[0]) for r in rows if r[0] and float(r[0]) > 0]
+        if len(history) < self.SALES_SANITY_MIN_HISTORY:
+            return None
+        median = statistics.median(history)
+        if median <= 0:
+            return None
+        ratio = max(sales / median, median / sales)
+        if ratio >= self.SALES_SANITY_RATIO:
+            return (f"sales {sales:,.2f} is {ratio:,.0f}x from this "
+                    f"company's own median of {median:,.2f} -- almost "
+                    f"certainly a misread column, not a quarter")
+        return None
+
     def remember(self, symbol, period_end, sales=None, other_income=None,
                  operating_profit=None, opm_pct=None, pat=None, eps=None,
-                 period_label=None, source="bse"):
+                 period_label=None, source="bse", trusted=False):
         """Store or update one quarter. Returns "new", "updated" or
         "unchanged" so a fetcher can report honestly -- "0 new" is
         ambiguous between "nothing arrived" and "nothing was different",
@@ -178,6 +233,46 @@ class QuarterlyResults:
         if not symbol or period_end is None:
             return "unchanged"
         symbol = str(symbol).strip().upper()
+
+        # ---- A COMPANY'S SALES DO NOT MOVE BY A FACTOR OF TWENTY ----
+        # 1 August 2026, found by auditing the store after 200 filings
+        # were fetched and parsed:
+        #
+        #     BAJFINANCE  Jun-26  sales     12.00   own median  8,308.97
+        #     REDINGTON   Jun-26  sales     19.59   own median  6,400.64
+        #     TORNTPHARM  Mar-26  sales      1.00   own median  2,599.00
+        #     VEDL        Jun-25  sales     24.61   own median 15,754.00
+        #
+        # 21 rows of 1,685, nineteen of them from the PDF parser
+        # reading the wrong column of a results table. Bajaj Finance
+        # did not do twelve crore of sales.
+        #
+        # A wrong number is worse than a missing one. A missing quarter
+        # leaves the panel labelled with the older quarter's name,
+        # which is visible; a wrong one produces a confident grade off
+        # arithmetic that is nonsense.
+        #
+        # The test is the company against ITSELF, never a threshold in
+        # rupees -- there is no absolute figure that is right for both
+        # Reliance and a small-cap.
+        # ---- `trusted` EXISTS BECAUSE THE GUARD BLOCKS THE CURE ----
+        #
+        # WESTLIFE's stored history is 1.0 and 1.0, both misread from a
+        # filing PDF. Earnings Pulse's own card says 736. Compared
+        # against that history the CORRECT figure is a 736x outlier and
+        # the guard refuses it -- the corrupt data defending itself.
+        #
+        # So a reading that came from the channel's published grid
+        # skips the self-comparison. It is not a weaker check; it is a
+        # better SOURCE. The channel prints the figure the company
+        # reported, minutes after it reports, and it does not have to
+        # find a table inside a fourteen-megabyte PDF to do it.
+        refused = None if trusted else self._implausible(symbol, sales)
+        if refused:
+            warn(f"[RESULTS] {symbol} {period_label or period_end}: "
+                 f"REFUSED -- {refused}. The older quarter is kept.")
+            return "unchanged"
+
         values = dict(
             sales=sales, other_income=other_income,
             operating_profit=operating_profit, opm_pct=opm_pct,
@@ -263,14 +358,54 @@ class QuarterlyResults:
 
         qoq = block(prev)
         yoy = block(year_ago)
+
+        # ---- +1839% IS NOT A QUARTER. 1 August 2026. ----
+        #
+        # The store held these, and the panel was showing them:
+        #
+        #     RAINBOW    GOOD    sales +1839% QoQ
+        #     NAZARA     STRONG  PAT +750% QoQ
+        #     CHOICEIN   STRONG  PAT +428% QoQ
+        #
+        # RAINBOW's two figures were 0.33 and 6.40. Both wrong, both
+        # from the PDF parser, and a self-comparison cannot see it
+        # because NEITHER of them is the outlier -- the whole history
+        # is wrong together.
+        #
+        # remember()'s sanity check compares a company against its own
+        # median and so is blind to exactly this: it also needs three
+        # stored quarters, and 618 of 748 companies have fewer.
+        #
+        # This catches the SYMPTOM instead, which needs no history at
+        # all. Measured across 916 consecutive quarters in the store:
+        #
+        #     50th percentile of |sales QoQ|      12.0%
+        #     90th                                55.9%
+        #     95th                                91.6%
+        #     above 400%                     12 pairs, 1.3%
+        #
+        # and every one of those twelve is visibly a misread --
+        # JINDWORLD 0.02 -> 539.90, COROMANDEL 56.61 -> 7,743.55.
+        #
+        # The comparison is still RETURNED so the operator can look at
+        # it. Only the grade and the summary are withheld, because
+        # those are what the panel turns into a chip, and a chip that
+        # says STRONG on a data error is the failure this whole file
+        # was written to avoid.
+        unbelievable = _implausible_change(qoq, yoy)
+        if unbelievable:
+            warn(f"[RESULTS] {symbol}: no grade -- {unbelievable}")
+
         return {
             "symbol": str(symbol).strip().upper(),
             "period": latest.get("period_label") or str(latest["period_end"]),
             "latest": latest,
             "qoq": qoq,
             "yoy": yoy,
-            "grade": grade(qoq, yoy),
-            "summary": summarise(qoq, yoy),
+            "grade": None if unbelievable else grade(qoq, yoy),
+            "summary": (f"figures not believable ({unbelievable})"
+                        if unbelievable else summarise(qoq, yoy)),
+            "unreliable": unbelievable,
         }
 
     def count(self):
@@ -289,6 +424,32 @@ class QuarterlyResults:
 # --------------------------------------------------------------
 # GRADING -- arithmetic, printed alongside its own inputs
 # --------------------------------------------------------------
+
+# A quarter-on-quarter sales change beyond this is a data error, not a
+# business event. Measured across 916 consecutive quarters held on
+# 1 August 2026: the 95th percentile is 91.6%, and only 12 pairs (1.3%)
+# exceed 400% -- every one of them a visible misread.
+#
+# Sales only. PAT can legitimately swing enormously on a small base,
+# and _pct() already refuses a negative base, so a loss-to-profit swing
+# never produces a number here at all.
+MAX_BELIEVABLE_SALES_CHANGE_PCT = 400.0
+
+
+def _implausible_change(qoq, yoy):
+    """Why this comparison cannot be believed, or None."""
+    for label, block in (("QoQ", qoq), ("YoY", yoy)):
+        if not block:
+            continue
+        change = block.get("sales")
+        if change is None:
+            continue
+        if abs(change) > MAX_BELIEVABLE_SALES_CHANGE_PCT:
+            return (f"sales {change:+,.0f}% {label} -- beyond anything a "
+                    f"real quarter does, so one of the two figures is "
+                    f"misread")
+    return None
+
 
 def grade(qoq, yoy):
     """STRONG / GOOD / MIXED / WEAK, or None when unknown.

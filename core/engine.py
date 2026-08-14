@@ -59,9 +59,17 @@ from datetime import datetime, time as dtime, timedelta
 from config import (
     ENABLE_SHORT_TRADES,
     LAYER1_FIXED_QTY, ORB_STOP_BUFFER_PCT, BLOCK_REENTRY_AFTER_STOPOUT,
+    MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE, MANUAL_POSITIONS_TRAIL_ALERTS_ONLY,
+    MANUAL_ALERT_HISTORY, ENABLE_BOT_TRAILING_STOP, MANUAL_TEST_QTY,
+    ALERT_ONLY_MODE,
+    HARD_STOP_FROM_ENTRY_PCT, VOLUME_WINDOW_CANDLES,
+    VOLUME_REQUIRED_FOR_ENTRY, ROTATION_MAX_PER_DAY,
+    CIRCUIT_RULE_DIRECTION_AWARE,
     TOP_N_MOMENTUM_MODE, FIXED_TARGET_RS, FIXED_STOP_LOSS_RS,
     SQUARE_OFF_TIME, FROZEN_PRICE_STREAK_CANDLES,
-    ATR_PERIOD, MIN_ATR_CANDLES, RISK_PER_TRADE_RS,
+    ATR_PERIOD, MIN_ATR_CANDLES,
+    ENABLE_MARKET_REGIME_GATE,
+    MTF_MARGIN_PER_POSITION_RS,
     ATR_STOP_MULTIPLIER, ATR_TRAIL_MULTIPLIER, ATR_TRAIL_ACTIVATION_MULT,
     MIN_STOP_DISTANCE_PCT, MAX_NOTIONAL_PER_TRADE_RS,
     MIN_TRADABLE_PRICE_RS, EARNINGS_CALENDAR,
@@ -76,6 +84,7 @@ from config import (
     ENABLE_RS_BAND, RS_BAND_MIN, RS_BAND_MAX, MAX_ABS_MOVE_PCT,
     ENABLE_STILL_TRENDING, STILL_TRENDING_MIN_POSITION,
     ENABLE_STAGED_ENTRY, STAGED_POSITION_LIMITS, STAGED_NO_ENTRY_AFTER,
+    ENABLE_CASH_SIZED_BOOK,
     ONE_TRADE_PER_SYMBOL_PER_DAY,
     ENABLE_NO_PROGRESS_EXIT, NO_PROGRESS_MINUTES, NO_PROGRESS_R,
     ENABLE_ORB_EXCHANGE_RECONCILE,
@@ -90,6 +99,23 @@ from config import (
     MIN_VOLUME_CANDLES,
 )
 from core.atr import compute_atr
+# ---- ONE RISK BUDGET, NOT TWO. 12 August 2026. ----
+#
+# This was `RISK_PER_TRADE_RS` off config.py, which says 2,000.
+# core/position_plan.py -- the sizing on the OTHER lane that can place
+# an order -- takes it from core/rules.py, which says 1,500. Both are
+# live, so the same bot risked a different amount depending on which
+# half of itself found the trade.
+#
+# AUDIT_2026-08-12.md calls config's 2,000 "legacy, sizes nothing".
+# That was true until 7 August and is not true now: _cap_by_risk()
+# below reads it on every single entry this engine makes.
+#
+# 1,500 is the number he approved on 11 August, and the reasoning in
+# core/rules.py still holds -- twelve replayed days were measured at
+# 1,500 and the selector has no proven edge yet, so raising size before
+# there is an edge only loses money faster.
+from core.rules import RISK_PER_TRADE_RS
 from core.orb_engine import OrbEngine, EARLY_ORB_END_T, ORB_WINDOW_END_T
 from core.candle_engine import CandleEngine
 from core.strategy import Strategy
@@ -131,6 +157,60 @@ def _parse_hhmm(value):
 # ORB_WINDOW_END_T) -- ties the block to the market's own timeline,
 # not system clock drift.
 SQUARE_OFF_T = _parse_hhmm(SQUARE_OFF_TIME)
+
+
+def _entry_cutoff_reason(at_time):
+    """Why a NEW position may not be opened right now, or None.
+
+    ---- 31 July 2026: THE 15:15 BLOCK WAS GUARDING NOTHING ----
+
+        "Pls remove this 15:15 Hard rule as we moved from MIS to MTF.
+         this hard square off is not ideal to have."
+
+    The block above was written for MIS. Its entire justification, in
+    its own words, was "square-off exists specifically to guarantee
+    zero new intraday exposure past this time" -- do not open something
+    the bot is about to force-close three minutes later.
+
+    That reasoning is sound and it stopped being true on 28 July, when
+    FORCE_SQUARE_OFF_AT_CLOSE was set False for MTF. Nothing is
+    force-closed at 15:15 any more. The gate stayed, so the bot was
+    refusing entries to protect them from a liquidation that no longer
+    happens -- and on MTF a 15:20 entry is not stray intraday exposure,
+    it is an overnight position, which is the entire point of the
+    product.
+
+    So the rule is now tied to the thing that justified it rather than
+    to a clock. Turn FORCE_SQUARE_OFF_AT_CLOSE back on for a day you
+    want to be flat, and the 15:15 block comes back with it,
+    automatically, because it is once again true.
+
+    WHAT DID NOT CHANGE
+    -------------------
+    - The market close still ends everything. 15:29 is a real entry;
+      15:31 is not.
+    - STAGED_NO_ENTRY_AFTER (15:00) still gates AUTOMATIC entries, so
+      the bot's own behaviour is barely affected -- it had already
+      stopped opening by 15:00. This mostly frees the operator's own
+      manual buys in the last half hour, which is what he asked for.
+    - Trailing stops keep managing everything through the close and
+      into the next session. A position is never unmanaged.
+
+    Read from config at CALL time, not import time, so flipping the
+    switch does not need a code change to take effect anywhere.
+    """
+    if at_time is None:
+        return None
+    from config import (FORCE_SQUARE_OFF_AT_CLOSE, MARKET_CLOSE,
+                        SQUARE_OFF_TIME as _SO)
+    now = at_time.time()
+    if FORCE_SQUARE_OFF_AT_CLOSE and now >= _parse_hhmm(_SO):
+        return (f"past square-off ({_SO}) and FORCE_SQUARE_OFF_AT_CLOSE "
+                f"is ON -- a new position would be flattened within "
+                f"minutes")
+    if now >= _parse_hhmm(MARKET_CLOSE):
+        return f"the market is closed ({MARKET_CLOSE})"
+    return None
 
 # How long after the opening-range window closes the exchange reconcile
 # may still run. The quote it reads carries the DAY high/low, which only
@@ -189,6 +269,40 @@ EXIT_REASON_ROTATED_OUT = "ROTATED_OUT"
 # ROTATED_OUT, never arms BLOCK_REENTRY_AFTER_STOPOUT.
 EXIT_REASON_NO_PROGRESS = "NO_PROGRESS"
 
+# A position he opened himself, taken into the bot's book so the stops
+# and exits that already work start working on it too. 5 August 2026.
+ENTRY_REASON_ADOPTED = "ADOPTED_FROM_BROKER"
+
+# ---- THE MOVE IS OVER. 5 August 2026. ----
+#
+#   "ride untill the momentum stays - exit once it gone ruthlessly"
+#                                 -- operator, core ideology
+#
+# core/ranker.py's liveness() has known since 4 August when a move has
+# died -- it is what demotes a stock that made its high at 09:16 and
+# sat there. It was used to RANK and never to EXIT.
+#
+# The cost, measured on 5 August: of nineteen reconstructed trades,
+# SEVENTEEN reached neither their stop nor their target. They were held
+# until the bell because nothing was watching whether they still
+# worked. HAPPYFORGE was +Rs 786 with a target it never reached and
+# nothing asked, at any point, whether the move was still on.
+#
+# A stop protects against being wrong. This protects against being
+# right and then sitting through the giveback.
+EXIT_REASON_MOVE_DIED = "MOVE_DIED"
+
+# How far off the day's extreme before the move is called finished.
+# Deliberately WIDER than the ranker's 3.0% entry threshold: refusing
+# to open a position is cheap, and closing one he is already in costs
+# brokerage and a slot. A position gets more rope than a candidate.
+MOVE_DIED_OFF_EXTREME_PCT = 4.5
+
+# Only once it has actually made money. A new position that dips below
+# its entry is the STOP's business, not this one -- exiting there would
+# be a second, tighter, undeclared stop.
+MOVE_DIED_MIN_GAIN_R = 0.5
+
 # ATR_TRAILING only, 2026-07-24 -- "dynamic position building"
 # extension to item 3 (config.PARTIAL_EXIT_ATR_MULTIPLE's docstring).
 # Books PART of the qty as a realized win while the position is
@@ -198,6 +312,14 @@ EXIT_REASON_NO_PROGRESS = "NO_PROGRESS"
 # failed signal) and never appears in _exit() at all -- see
 # _maybe_partial_exit()'s own bookkeeping.
 EXIT_REASON_PARTIAL_PROFIT = "PARTIAL_PROFIT_ATR"
+
+# The operator's own trim, from the dashboard -- "sell half and let the
+# rest run". Kept SEPARATE from PARTIAL_PROFIT_ATR on purpose: one is
+# the bot's rule firing and the other is his judgement, and the trade
+# log has to be able to tell them apart when either is later measured.
+# Like the ATR trim, it never closes the whole position and so never
+# reaches _exit().
+EXIT_REASON_MANUAL_PARTIAL = "MANUAL_PARTIAL"
 
 # 2026-07-27, operator-found live on SWIGGY: the bot's stop is checked
 # ONLY against tick prices that actually arrive --
@@ -233,13 +355,32 @@ class Engine:
 
     def __init__(self, portfolio=None, sector_monitor=None,
                  momentum_universe=None, circuit_monitor=None, market_data=None,
+                 signal_journal=None,
                  min_tradable_price=MIN_TRADABLE_PRICE_RS,
                  earnings_calendar=None,
                  candle_recorder=None,
                  enable_rs_band=None, enable_staged_entry=None,
                  one_trade_per_symbol=None, enable_no_progress=None,
                  enable_tick_sanity=None, stock_memory=None,
-                 trade_memory=None):
+                 trade_memory=None, breakout_feed=None,
+                 mtf_margin=None, results_gate=None,
+                 news_feed=None, announcements=None,
+                 alert_only=None, dhan_client=None):
+        # ALERT ONLY -- config.py's value by default, injectable for the
+        # same reason min_tradable_price is: a module-level constant read
+        # from inside the tick path cannot be turned off for a test that
+        # is about entry MECHANICS rather than about this switch. Reading
+        # ALERT_ONLY_MODE directly broke 14 entry tests, which is the
+        # signal that it belonged here rather than in the hot path.
+        self.alert_only = (ALERT_ONLY_MODE if alert_only is None
+                           else bool(alert_only))
+        # THE SECOND SWITCH, AND IT IS OFF. The structural breakout
+        # path has no ranker gates -- no move threshold, no reason, no
+        # sector check, no liquidity check. It must be armed on its own,
+        # deliberately, and never as a side effect of turning the bot on.
+        # See _try_structural_entry() for what this cost on 6 August.
+        self.breakout_armed = False
+
         # config.py's real value by default -- injectable purely so
         # tests can construct an Engine without it (this whole
         # suite's pre-existing price convention uses toy values like
@@ -260,8 +401,63 @@ class Engine:
         self.candle_engine = CandleEngine()
         self.strategy = Strategy(self.orb_engine)
         self.trailing_stop = TrailingStopEngine()
-        self.execution = Execution()
+        # Slippage needs to know how liquid each symbol is, and
+        # circuit_monitor already polls day turnover for the whole
+        # universe -- no new poller, no extra request. Lambda rather
+        # than a direct reference so it reads the CURRENT snapshot on
+        # every fill, not whatever existed at construction.
+        # Returns None (= assume thin, the expensive assumption) when
+        # the snapshot is not ready or the monitor is not wired.
+        # THE ARGUMENT THAT WAS NEVER PASSED.
+        #
+        # 31 July 2026, 09:00. TRADING_MODE was flipped to LIVE for the
+        # first real order and main.py refused to start:
+        #
+        #   RuntimeError: TRADING_MODE is LIVE but no Dhan client was
+        #   provided. Refusing to start.
+        #
+        # main.py had built the REST client at line 210 and handed it to
+        # the circuit monitor and the MTF margin calculator. It never
+        # handed it here, because until this line there was nowhere to
+        # put it. In PAPER the argument is unused, so the omission was
+        # invisible for months.
+        #
+        # Both lookups are LAMBDAS, not values: self.market_data and
+        # self.open_positions are assigned further down this same
+        # __init__, so anything read eagerly here would be None. They
+        # also need to read the CURRENT price and the CURRENT book at
+        # order time, not whatever existed at construction.
+        self.execution = Execution(
+            turnover_lookup=self._day_turnover_cr,
+            dhan_client=dhan_client,
+            price_lookup=self._live_price_for_order,
+            open_position_count=lambda: len(self.open_positions),
+        )
         self.trade_controller = TradeController()
+
+        # ---- A STOP THAT SURVIVES THIS PROCESS DYING, 2026-08-02 ----
+        #
+        # self.trailing_stop above lives in RAM. If this process dies
+        # with an MTF position open, that stop dies with it and Dhan
+        # never knew one was intended. This rests a Forever Order at
+        # the broker as a BACKSTOP -- below the live stop, so the two
+        # cannot race, and cancelled on every exit.
+        #
+        # OFF unless BROKER_STOP_ENABLED. See trading/broker_stop.py.
+        from config import (BROKER_STOP_ENABLED, BROKER_STOP_RESYNC_PCT,
+                            BROKER_STOP_TAG_PREFIX, EXCHANGE_SEGMENT)
+        from trading.broker_stop import BrokerStop
+        self.broker_stop = BrokerStop(
+            dhan_client=dhan_client,
+            exchange_segment=EXCHANGE_SEGMENT,
+            # MTF, matching every order trading/live_execution.py sends.
+            # A protective order on the wrong product would be refused
+            # by Dhan, or worse, accepted against a different position.
+            product_type="MTF",
+            enabled=BROKER_STOP_ENABLED,
+            resync_pct=BROKER_STOP_RESYNC_PCT,
+            tag_prefix=BROKER_STOP_TAG_PREFIX,
+        )
 
         # Display/tracking ledger only -- see
         # trading/portfolio.py's own docstring. None is fully
@@ -281,6 +477,11 @@ class Engine:
         # TOP_N_MOMENTUM_MODE is False, this is never consulted at
         # all, regardless of whether an instance was wired in.
         self.momentum_universe = momentum_universe
+
+        # Disk record of every structural signal, taken or refused
+        # (core/signal_journal.py, 2026-07-29). Optional: None means
+        # nothing is written and nothing else changes.
+        self.signal_journal = signal_journal
 
         # Proactive circuit-limit approach detector -- see
         # core/circuit_monitor.py and config.py's
@@ -309,6 +510,33 @@ class Engine:
         # make a decision -- see that module's docstring.
         self.trade_memory = trade_memory
 
+        # Fresh Breakouts panel (core/breakout_feed.py, 2026-07-28).
+        # Observation only -- it never gates a trade.
+        self.breakout_feed = breakout_feed
+
+        # Operator's Rs 1 lakh-of-margin sizing rule
+        # (core/mtf_margin.py, 2026-07-28). None = own cash only.
+        self.mtf_margin = mtf_margin
+
+        # Results gate (core/results_gate.py, 2026-07-28).
+        # None = fall back to the old blanket results-day block.
+        self.results_gate = results_gate
+
+        # The evidence feeds. Read by _capture_reason(), which stamps
+        # WHY a trade was taken onto the position for
+        # core/trade_memory.py -- and, since 12 August 2026, by
+        # _no_reason_refusal(), which requires that there BE a why.
+        #
+        # That comment used to end "Observation only -- nothing here
+        # gates a trade". It was accurate for a fortnight and it was
+        # also the bug: BOT_SPEC.md's entry rule 2 existed the whole
+        # time and this lane never applied it.
+        self.news_feed = news_feed
+        self.announcements = announcements
+
+        # Said once, not per symbol per candle. See _no_reason_refusal().
+        self._warned_no_reason_sources = False
+
         # Cached last-known-price reader -- see core/market_data.py.
         # None is fully supported (mirrors every other optional
         # reader here): _process_pending_manual_exits() just falls
@@ -324,6 +552,11 @@ class Engine:
         # durable record; this is what the dashboard's Closed
         # Positions table reads for a fast, structured view.
         self.closed_positions = []
+        # Symbols we have sold today and are still watching, purely so
+        # the dashboard can answer "what did it do after we got out".
+        # See _watch_after_exit() -- observation only, never an input
+        # to any decision.
+        self.post_exit = {}
 
         # symbol -> {direction: reason} -- see module docstring's
         # _try_structural_entry() section. Persisted (see
@@ -381,6 +614,24 @@ class Engine:
 
         # Sector leaderboard cache (strong, weak, ranked, computed_at)
         self._sector_cache = None
+
+        # Plain-English notes about positions the OPERATOR opened --
+        # every time the bot wanted to close one and was not allowed
+        # to, and every trailing-stop breach it reported instead of
+        # acting on. 2026-07-29, after SMLMAH. See _manual_alert.
+        self.manual_alerts = []
+        self._manual_alerts_seen = set()
+
+        # Slot rotation, switched on 2026-07-29 for the two paper
+        # sessions before live. Counted and capped -- see config's
+        # ROTATION_MAX_PER_DAY.
+        self._rotations_today = 0
+        self._rotation_cap_logged = False
+
+        # (symbol, source, event stamp) already announced. Keyed on the
+        # EVENT so a second, different filing on the same stock is still
+        # reported. 2026-07-29.
+        self._news_alerted = set()
 
         # How many EARLY-momentum entries were taken today (capped by
         # config.EARLY_ENTRY_MAX_POSITIONS -- these skip the full ORB
@@ -450,7 +701,55 @@ class Engine:
 
         self._maybe_snapshot_exit_all()
 
+        # Where a stock we already sold has gone since. One dict
+        # lookup, before anything can return early -- a symbol we are
+        # flat in takes several early exits further down this method,
+        # and putting this after any of them is how the panel would
+        # quietly stay empty for exactly the stocks it exists for.
+        self._update_after_exit(symbol, price, tick_time)
+
         self.orb_engine.update(symbol, price, tick_time)
+
+        # 2026-07-29: our ticks are snapshots ~4.6s apart, so the true
+        # opening-range extreme is often never in one. Dhan's REST
+        # quote carries the exchange's own session high and low and is
+        # polled every 3 seconds -- inside the ORB window that IS the
+        # range. A dict lookup on the tick path; widens only, never
+        # narrows. See OrbEngine.merge_official for the measurements.
+        if self.circuit_monitor is not None:
+            try:
+                official = (self.circuit_monitor.get_snapshot()
+                            or {}).get(symbol)
+                if official:
+                    self.orb_engine.merge_official(
+                        symbol, official.get("high"), official.get("low"),
+                        tick_time)
+                    # Same response carries the exchange's real OPEN.
+                    # Ours is the first snapshot to arrive, ~2s and a
+                    # rupee or two late -- INFY opened at 1,147.00 on
+                    # 29 July and the bot's first tick said 1,145.00,
+                    # which is the whole "+3.55% vs NSE's +3.74%" gap.
+                    if self.market_data is not None:
+                        self.market_data.set_official_day_open(
+                            symbol, official.get("open"))
+            except Exception:                              # noqa: BLE001
+                pass
+
+        # Fresh Breakouts panel: mark a breakout FADED the moment price
+        # drops back inside the range it broke. A dict lookup and a
+        # float compare -- cheap enough for the tick path. The row is
+        # kept, greyed: a breakout that silently vanishes teaches
+        # nothing, one that visibly fails teaches how often they fail.
+        if self.breakout_feed is not None:
+            self.breakout_feed.update_price(symbol, price)
+            # Count TESTS of the range boundary -- the pressure building
+            # BEFORE a break, which the operator can see on a chart and
+            # the bot previously could not (RADICO pressed against 4,182
+            # for hours on 2026-07-28 before finally going).
+            orb = self.orb_engine.get_range(symbol)
+            if orb and orb.get("complete"):
+                self.breakout_feed.note_touch(
+                    symbol, price, orb.get("high"), orb.get("low"))
 
         closed_candle = self.candle_engine.update(
             symbol, price, tick_time, cum_volume
@@ -499,6 +798,13 @@ class Engine:
                 # protected by whatever stop it already had, until
                 # the feed recovers or square-off closes it normally.
                 position = self.open_positions[symbol]
+
+                # 2026-07-29: news on something we HOLD. Once per closed
+                # candle, open positions only -- roughly ten lookups a
+                # minute rather than ten thousand.
+                self._check_news_on_holding(symbol, position,
+                                            closed_candle.get("close"))
+
                 if not self._is_frozen(symbol):
                     if position.get("stop_mode") == STOP_MODE_ATR_TRAILING:
                         self._update_atr_trailing_on_candle_close(
@@ -567,23 +873,28 @@ class Engine:
         # already made an informed choice, the automation doesn't
         # second-guess it.
         if self.trade_controller.is_buy_requested(symbol):
+            # READ THE SIZE BEFORE CLEARING. clear_buy() drops the
+            # remembered quantity along with the request, so reading it
+            # afterwards would silently give every dashboard buy the
+            # default size again -- the exact bug this change exists to
+            # fix, reintroduced by the order of two lines.
+            asked_qty = self.trade_controller.buy_qty(symbol)
             self.trade_controller.clear_buy(symbol)
             if symbol in self.open_positions:
                 warn(
                     f"[MANUAL_BUY] {symbol} already has an open "
                     f"position -- request ignored, no pyramiding."
                 )
-            elif tick_time is not None and tick_time.time() >= SQUARE_OFF_T:
-                # Real bug found live, 2026-07-23 15:18 -- see
-                # SQUARE_OFF_T's own module-level comment. Manual
-                # buy is normally an unconditional operator override,
-                # but square-off exists specifically to guarantee
-                # zero new intraday exposure past this time -- an
-                # override that could reopen that exposure would
-                # defeat the one thing square-off is for.
+            elif _entry_cutoff_reason(tick_time):
+                # Was a flat "past 15:15" block. See
+                # _entry_cutoff_reason() -- that rule existed to stop
+                # the bot opening something it was about to force-close,
+                # and since 28 July it force-closes nothing. On MTF a
+                # 15:20 buy is an overnight position, not stray
+                # intraday exposure.
                 warn(
-                    f"[MANUAL_BUY] {symbol} skipped -- past square-off "
-                    f"time ({SQUARE_OFF_T}), no new positions today."
+                    f"[MANUAL_BUY] {symbol} skipped -- "
+                    f"{_entry_cutoff_reason(tick_time)}."
                 )
             else:
                 last_candle = self.candle_engine.last_closed(symbol)
@@ -602,12 +913,79 @@ class Engine:
                 # seconds (ACUTAAS/IGIL/SYRMA, this session). Whichever
                 # is LOWER (further from entry = more room) wins, so a
                 # genuinely wide candle low is still respected.
-                floor_low = price * (1 - MIN_STOP_DISTANCE_PCT)
+                #
+                # ---- 2026-08-01: THE FLOOR IS NOW THE HARD STOP ----
+                # This line read MIN_STOP_DISTANCE_PCT (1%) until today,
+                # and the operator did not know it:
+                #
+                #     "what are we using 1% stoploss? from when this came
+                #      i'm not aware of this logic"
+                #
+                # He was right not to recognise it. MIN_STOP_DISTANCE_PCT
+                # is a FLOOR UNDER THE ATR TRAIL, raised to 1% on 24 July
+                # to stop the trail clipping winners on noise. On 29 July
+                # the trail was switched off entirely and the stop became
+                # HARD_STOP_FROM_ENTRY_PCT, 2.5%, his own number measured
+                # across 80 replayed trades. _atr_entry_sizing() was
+                # updated. THIS LINE WAS NOT. So the bot's own entries ran
+                # a 2.5% stop while every dashboard BUY ran 1% -- two
+                # stops in one account, with nothing anywhere saying why.
+                #
+                # Measured before changing it. 50,422 entries, buy at
+                # close, hold 3 sessions, liquid NSE stocks since 1 April:
+                #
+                #     stop    avg/trade   stopped out   winners killed
+                #     1.0%      +0.392%      72.9%          51.4%
+                #     2.5%      +0.424%      45.2%          19.7%
+                #     3.5%      +0.489%      30.7%           9.8%
+                #     5.0%      +0.577%      16.5%           3.2%
+                #     none      +0.634%       0.0%              -
+                #
+                # 1% was killing HALF of all winning trades. Of trades up
+                # after three sessions, the median dipped 1.05% below
+                # entry first -- the stop sat inside ordinary noise, and
+                # on a multi-day MTF hold that is fatal.
+                #
+                # WHY 2.5% AND NOT 3.5%, WHICH EARNS MORE. Leverage. At
+                # 4X on a Rs 4,00,000 position Dhan's holding coverage
+                # reaches 20% -- their margin-call line -- at a 6.27%
+                # fall. That 6.27% is the entire runway:
+                #
+                #     2.5% stop  -> Rs -10,000   3.77% of room left
+                #     3.5% stop  -> Rs -14,000   2.77% of room left
+                #     5.0% stop  -> Rs -20,000   1.27% of room left
+                #     no stop    -> tail is -90% on a single trade
+                #
+                # The extra Rs 261/trade a 3.5% stop earns is the money
+                # you would pay to sit 2.77% from a broker margin call on
+                # every open position. Reassess if leverage ever drops to
+                # 2X -- the runway doubles and 3.5% becomes correct.
+                #
+                #     "from 1% (too noise) to 2.5% (some may hit stop
+                #      losses but thats part of the game)"
+                #                             -- operator, 1 August 2026
+                #
+                # The candle-low rule below is KEPT. Measured across
+                # 1,445,619 one-minute candles (27-31 July), a candle low
+                # sits more than 2.5% under its close 64 times -- 0.004%.
+                # It is a fire alarm for the one violent bar, not a rule
+                # that binds. Both of his 31 July SHADOWFAX buys had
+                # candle lows 0.12% and 0.37% away; the floor won both.
+                floor_low = price * (1 - HARD_STOP_FROM_ENTRY_PCT)
                 if last_candle and last_candle["low"] < price:
                     seed_low = min(last_candle["low"], floor_low)
                 else:
                     seed_low = floor_low
-                qty = self._risk_sized_qty(price, price - seed_low)
+                # HIS CLICK, HIS SIZE. The risk cap governs what the
+                # BOT chooses on its own; a manual buy is a decision he
+                # has already made, and silently handing him 47 shares
+                # when the margin book says 67 would be the bot
+                # overruling him at his own keyboard.
+                qty = self._manual_qty(
+                    self._risk_sized_qty(price, price - seed_low,
+                                         symbol, security_id,
+                                         cap_by_risk=False),
+                    asked=asked_qty)
                 self._enter(
                     symbol, security_id, price, seed_low, tick_time,
                     ENTRY_REASON_MANUAL_DASHBOARD, LONG, qty=qty,
@@ -619,16 +997,26 @@ class Engine:
         # reasoning: bypasses news/sector checks, no pyramiding,
         # blocked past square-off.
         if self.trade_controller.is_short_requested(symbol):
+            # Read before clearing -- same trap as the BUY block above.
+            asked_short_qty = self.trade_controller.short_qty(symbol)
             self.trade_controller.clear_short(symbol)
             if symbol in self.open_positions:
                 warn(
                     f"[MANUAL_SHORT] {symbol} already has an open "
                     f"position -- request ignored, no pyramiding."
                 )
-            elif tick_time is not None and tick_time.time() >= SQUARE_OFF_T:
+            elif _entry_cutoff_reason(tick_time):
+                # Exact mirror of the manual BUY gate above. A SHORT is
+                # NOT an MTF position -- it cannot be carried overnight
+                # on delivery -- but the gate is left identical on
+                # purpose: whether a short may be opened at 15:20 is a
+                # question about the product and the broker's own RMS,
+                # not about a square-off the bot no longer performs.
+                # Two different rules on the two buttons would be a
+                # surprise nobody asked for.
                 warn(
-                    f"[MANUAL_SHORT] {symbol} skipped -- past square-off "
-                    f"time ({SQUARE_OFF_T}), no new positions today."
+                    f"[MANUAL_SHORT] {symbol} skipped -- "
+                    f"{_entry_cutoff_reason(tick_time)}."
                 )
             else:
                 last_candle = self.candle_engine.last_closed(symbol)
@@ -637,15 +1025,32 @@ class Engine:
                 # last closed candle's high can be stale or missing,
                 # same reasoning as the LONG side, just flipped.
                 # Mirror of the manual-buy floor above -- the seed
-                # sits at least MIN_STOP_DISTANCE_PCT ABOVE entry, so a
-                # short can't be handed a 0.02% stop off a barely-wide
+                # sits at least HARD_STOP_FROM_ENTRY_PCT ABOVE entry, so
+                # a short can't be handed a 0.02% stop off a barely-wide
                 # last candle. Whichever is HIGHER (more room) wins.
-                floor_high = price * (1 + MIN_STOP_DISTANCE_PCT)
+                #
+                # 2026-08-01: moved from MIN_STOP_DISTANCE_PCT (1%) to
+                # HARD_STOP_FROM_ENTRY_PCT (2.5%) with the BUY side. See
+                # the measured tables in the manual-buy block above. Kept
+                # identical to the BUY deliberately -- two different stops
+                # on the two dashboard buttons is exactly the surprise
+                # that made the operator ask where 1% came from.
+                #
+                # NOTE a SHORT is not an MTF hold and cannot be carried
+                # overnight, so the 4X coverage-runway argument that
+                # settled on 2.5% does not apply to this side. It is
+                # matched for predictability, not because the same
+                # arithmetic produced it.
+                floor_high = price * (1 + HARD_STOP_FROM_ENTRY_PCT)
                 if last_candle and last_candle["high"] > price:
                     seed_high = max(last_candle["high"], floor_high)
                 else:
                     seed_high = floor_high
-                qty = self._risk_sized_qty(price, seed_high - price)
+                qty = self._manual_qty(
+                    self._risk_sized_qty(price, seed_high - price,
+                                         symbol, security_id,
+                                         cap_by_risk=False),
+                    asked=asked_short_qty)
                 self._enter(
                     symbol, security_id, price, seed_high, tick_time,
                     ENTRY_REASON_MANUAL_SHORT_DASHBOARD, SHORT, qty=qty,
@@ -665,6 +1070,11 @@ class Engine:
         # stop (a real stop-out must win the race and be recorded as
         # such) and only closes a position that never got going.
         self._check_no_progress(symbol, price, tick_time)
+        # AFTER no-progress, because a position that never worked is
+        # dead money rather than a finished move, and the two would
+        # otherwise both claim the same exit. This one only ever fires
+        # on a WINNER whose run is over -- see _check_move_died.
+        self._check_move_died(symbol, price, tick_time)
 
         self._process_pending_manual_exits(symbol, price, tick_time)
 
@@ -794,6 +1204,54 @@ class Engine:
             return None
         return p if direction == LONG else -p
 
+    def _note_slot_refusal(self, symbol, direction, cap):
+        """Record a breakout refused purely because the book was full.
+
+        THE most important row in the journal. Everything else the bot
+        refuses, it refuses for a stated reason about the stock. This
+        one it refuses because ten other names arrived first, which is
+        an accident of timing, not a judgement.
+        """
+        try:
+            confirmations = self._confirmation_count(symbol)
+            self._note_breakout_block(
+                symbol, direction,
+                f"book full ({cap} positions) -- {confirmations} of 3 "
+                f"confirmations behind it")
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    def _confirmation_count(self, symbol, closed_candle=None):
+        """How many of the operator's three confirmations this setup
+        carries: good results, a volume surge, and news.
+
+            "as we are into long positions only we need some
+             confirmation before entries = 1) Results (good) +
+             2) Volume + 3) News"          -- operator, 29 July 2026
+
+        USED FOR RANKING ONLY -- never to block. Measured over his own
+        three sessions, requiring news or results would have refused 33
+        of the 35 trades that made Rs 18,389, to capture 2 worth
+        Rs 2,986. Per trade the confirmed ones paid 2.7x more, which is
+        why it ranks; two data points is why it does not gate.
+
+        Volume already gates on its own, separately.
+        """
+        try:
+            reason = self._capture_reason(symbol) or {}
+            count = 0
+            if (reason.get("results_grade") or "") in ("STRONG", "GOOD"):
+                count += 1
+            if reason.get("news_kind") or reason.get("filing_kind"):
+                count += 1
+            multiple = self._volume_multiple(symbol, closed_candle) \
+                if closed_candle is not None else None
+            if multiple and multiple >= VOLUME_SURGE_MULT:
+                count += 1
+            return count
+        except Exception:                                  # noqa: BLE001
+            return 0
+
     def _weakest_holder_for_rotation(self):
         """The open position with the LOWEST trend strength in its own
         direction -- the stalling laggard a stronger breakout should be
@@ -802,12 +1260,47 @@ class Engine:
         strength and is never selected here."""
         weakest = None
         for sym, pos in self.open_positions.items():
+            # 2026-07-29: skip what the bot is not allowed to close.
+            #
+            # Found by walking the operator through today's book. At
+            # 10:19 the ten open positions ranked like this:
+            #
+            #     CUB        YOU   -2.26%   <- weakest
+            #     INFY       YOU   +0.31%
+            #     MOBIKWIK   BOT   +0.45%   <- first the bot may touch
+            #     ...
+            #     EPACKPEB   BOT   +2.70%
+            #
+            # The weakest was HIS. This method used to return it anyway,
+            # _maybe_rotate_out then hit the manual-position guard and
+            # returned False -- so rotation was dead for the ENTIRE book
+            # for as long as one of his trades happened to be the
+            # laggard. CUB was the weakest from 09:30 onward, so that
+            # would have been all day.
+            #
+            # A protection meant to keep his positions safe was quietly
+            # disabling a completely separate feature. Skip and keep
+            # looking; MOBIKWIK is the honest answer.
+            if not self._can_rotate_out(sym):
+                continue
             s = self._symbol_strength(sym, pos.get("direction", LONG))
             if s is None:
                 continue
             if weakest is None or s < weakest[1]:
                 weakest = (sym, s)
         return weakest
+
+    def _can_rotate_out(self, symbol):
+        """True if the bot is allowed to give this position's slot away.
+
+        Quiet check -- unlike _bot_may_close it raises no alert, because
+        merely CONSIDERING a position for rotation and rejecting it is
+        not an event the operator needs to read about. The alert belongs
+        at the point of an actual attempted close.
+        """
+        if not MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE:
+            return True
+        return not self._is_manual_position(symbol)
 
     def _reconcile_early_orb_once(self, symbol):
         """Exchange-truth correction for the EARLY range, once per
@@ -863,6 +1356,288 @@ class Engine:
             return None                  # a broken memory never blocks trading
         reasons = self._memory_cache[1].get(symbol)
         return "; ".join(reasons) if reasons else None
+
+    def _capture_reason(self, symbol, on_date=None):
+        """What was KNOWN about this stock at the moment of entry.
+
+        The learning loop had four columns -- sector, hour, relative
+        strength, regime -- every one of them price context. It could
+        answer "do metals breakouts at 10am work", the price-and-volume
+        question the operator has already rejected, and could NEVER
+        answer the one he cares about:
+
+            "no info why gaining = no entry at all"
+
+        Six months of trades could not tell an ORDER_WIN entry from a
+        BROKER upgrade, or a STRONG results grade from a MIXED one,
+        because none of it was recorded.
+
+        Returns a dict stamped onto the position. Never raises -- a
+        bookkeeping lookup must not be able to block a trade.
+        """
+        out = {"news_kind": None, "filing_kind": None, "results_grade": None,
+               "days_since_results": None, "had_reason": 0,
+               "reason_summary": None}
+        parts = []
+        try:
+            if self.news_feed is not None:
+                item = self.news_feed.for_symbol(symbol)
+                if item:
+                    out["news_kind"] = item.get("kind")
+                    parts.append(f"news:{item.get('kind')}")
+        except Exception:                                  # noqa: BLE001
+            pass
+        try:
+            if self.announcements is not None:
+                filing = self.announcements.for_symbol(symbol)
+                if filing:
+                    out["filing_kind"] = filing.get("kind")
+                    parts.append(f"filed:{filing.get('kind')}")
+        except Exception:                                  # noqa: BLE001
+            pass
+        # ==========================================================
+        # THE PUBLISHED CHIP FIRST.  10 August 2026.
+        # ==========================================================
+        # Monday's session recorded 1,191 signals and NOT ONE carried a
+        # grade -- while Row 1 held 24 graded stocks all morning.
+        #
+        #     KNACK       EXCELLENT   grade_for() -> None
+        #     UNIVCABLES  GREAT       grade_for() -> None
+        #     SKYGOLD     GOOD        grade_for() -> None
+        #
+        # grade_for() computes its own grade from parsed QoQ/YoY numbers
+        # in core/quarterly_results.py. Those numbers exist for a small
+        # minority of stocks, so it answers None for almost everything
+        # -- and the whole results strategy never reached the signal
+        # path. Every one of Monday's 1,191 signals was a bare ORB
+        # breakout with no reason attached.
+        #
+        # This is the SAME disconnect I fixed in results_gate.block_
+        # reason() on 9 August and did not follow through to here: two
+        # sources for one question, and the weaker one wired in.
+        #
+        # The chip is what Earnings Pulse actually published, read from
+        # the same place Row 1 reads it. The computed grade is still
+        # consulted when there is no chip, so nothing is lost.
+        try:
+            if self.results_gate is not None:
+                grade = None
+                published = getattr(self.results_gate, "_published_grade", None)
+                if published is not None:
+                    grade = published(symbol)
+                if not grade:
+                    grade = self.results_gate.grade_for(symbol)
+                if grade:
+                    out["results_grade"] = grade
+                    parts.append(f"results:{grade}")
+        except Exception:                                  # noqa: BLE001
+            pass
+        out["had_reason"] = 1 if parts else 0
+        out["reason_summary"] = ", ".join(parts)[:160] or None
+        return out
+
+    def _no_reason_refusal(self, symbol):
+        """Why this stock has no event behind it today, or None if it
+        has one.
+
+        ---- THE RULE THAT WAS ONLY IN THE OTHER LANE. 12 Aug 2026. ----
+
+            "Opportunity Trader Bot = only trades when an event or real
+             opportunity arised in markets, NEVER in to random stocks"
+
+        BOT_SPEC.md has said this since it was written -- entry rule 2,
+        "a written reason exists: no mechanism, no trade". Two paths in
+        this bot can reach _enter(), and only one of them asked:
+
+            ranker -> auto_entry   refused a stock with no mechanism
+            engine ORB breakout    never looked
+
+        _capture_reason() below has gathered exactly this evidence since
+        28 July -- but only to STAMP it on the position afterwards, for
+        core/trade_memory.py to learn from. The engine was recording why
+        it bought and never requiring that there be a why. On 5 August
+        that lane fired 1,047 signals; on 10 August 1,191 signals
+        carried no grade at all.
+
+        So this asks the same question the same way, one moment earlier,
+        and refuses instead of noting.
+
+        NARROWER THAN THE RANKER, ON PURPOSE. See rules.ENGINE_REQUIRE_
+        REASON. The ranker can see volume and may accept an unexplained
+        mover carrying 2.5x its normal turnover. This lane sees a price
+        leaving a range, so a named event is the whole of its evidence.
+
+        ---- "NO EQUIPMENT" IS NOT "NO NEWS". ----
+
+        An empty feed and an ABSENT feed are different answers and this
+        must not confuse them:
+
+            wired, and silent      nobody published    REFUSE
+            not wired at all       cannot answer       allow, and SAY SO
+
+        The second case is tests, backtests and dashboard_preview, none
+        of which attach a news reader. Refusing there would not make
+        those safer, it would just make every one of them measure this
+        gate instead of what it was written to measure.
+
+        But it is also what a broken startup looks like in production --
+        main.py builds every one of these inside a try/except -- so it
+        is a WARNING, once, not a silence. A bot that cannot read a
+        reason should not be quietly trading as if it could.
+        """
+        from core.rules import ENGINE_REQUIRE_REASON
+        if not ENGINE_REQUIRE_REASON:
+            return None
+
+        if (self.news_feed is None and self.announcements is None
+                and self.results_gate is None):
+            if not self._warned_no_reason_sources:
+                self._warned_no_reason_sources = True
+                warn("[NO_REASON] No news feed, no filings watcher and no "
+                     "results gate are wired to this engine, so 'does this "
+                     "stock have an event today' cannot be answered and "
+                     "the rule is not being applied. Expected in tests and "
+                     "replays. IN A LIVE SESSION THIS MEANS THE BOT IS "
+                     "BUYING BREAKOUTS WITH NO REASON BEHIND THEM.")
+            return None
+
+        reason = self._capture_reason(symbol) or {}
+        if reason.get("had_reason"):
+            return None
+        return ("no event behind it -- no filing, no news and no "
+                "published grade for this stock today. The bot only "
+                "trades a reason")
+
+    def _record_breakout_signal(self, symbol, direction, closed_candle,
+                                tick_time=None):
+        """Put a structural signal on the Fresh Breakouts panel.
+
+        Called at the TOP of _try_structural_entry, before any gate, so
+        the panel shows what the bot SAW -- not the smaller set it was
+        allowed to act on. Fail-silent: a panel must never break a tick.
+        """
+        try:
+            orb_range = self.orb_engine.get_range(symbol) or {}
+        except Exception:                                  # noqa: BLE001
+            orb_range = {}
+
+        if self.breakout_feed is not None:
+            try:
+                self.breakout_feed.record(
+                    symbol, direction,
+                    price=closed_candle.get("close"),
+                    orb_high=orb_range.get("high"),
+                    orb_low=orb_range.get("low"),
+                    tick_time=tick_time,
+                )
+            except Exception:                              # noqa: BLE001
+                pass
+
+        # 2026-07-29: the panel above is memory only and dies at 15:30.
+        # This is the same event written to disk, so the question the
+        # operator asked -- "real movers are ignored" -- can finally be
+        # measured instead of argued. See core/signal_journal.py.
+        if self.signal_journal is not None:
+            try:
+                # The three confirmations the operator named on 29 July
+                # -- results, volume, news -- recorded on EVERY signal
+                # and gating on none of them here. Only volume gates,
+                # further down. The rest earn a vote only once two
+                # weeks of these rows say they deserve one.
+                reason = self._capture_reason(symbol) or {}
+                attempt = None
+                if self.breakout_feed is not None:
+                    try:
+                        attempt = self.breakout_feed.attempt_for(
+                            symbol, direction)
+                    except Exception:                      # noqa: BLE001
+                        attempt = None
+                self.signal_journal.record(
+                    symbol, direction,
+                    break_price=closed_candle.get("close"),
+                    orb_high=orb_range.get("high"),
+                    orb_low=orb_range.get("low"),
+                    open_positions=len(self.open_positions),
+                    when=tick_time,
+                    volume_mult=self._volume_multiple(symbol, closed_candle),
+                    news_kind=reason.get("news_kind"),
+                    filing_kind=reason.get("filing_kind"),
+                    results_grade=reason.get("results_grade"),
+                    attempt=attempt,
+                    sector=(self.sector_monitor.sector_of(symbol)
+                            if self.sector_monitor is not None else None),
+                )
+            except Exception:                              # noqa: BLE001
+                pass
+
+    def _note_breakout_block(self, symbol, direction, reason):
+        """Attach the reason a breakout was refused, so the operator can
+        see the disagreement instead of guessing at a silence."""
+        if self.breakout_feed is not None:
+            try:
+                self.breakout_feed.note_block(symbol, direction, reason)
+            except Exception:                              # noqa: BLE001
+                pass
+        if self.signal_journal is not None:
+            try:
+                self.signal_journal.record(symbol, direction,
+                                           refused_why=reason)
+            except Exception:                              # noqa: BLE001
+                pass
+
+    def _day_turnover_cr(self, symbol):
+        """This symbol's traded value TODAY, in crores, or None.
+
+        Feeds trading/slippage.py. Same circuit_monitor REST snapshot
+        that _has_liquidity() already reads -- turnover = last price x
+        day volume. None means "unknown", which slippage deliberately
+        treats as THIN.
+        """
+        if self.circuit_monitor is None:
+            return None
+        try:
+            info = (self.circuit_monitor.get_snapshot() or {}).get(symbol)
+            if not info:
+                return None
+            price = info.get("last_price") or info.get("ltp")
+            volume = info.get("volume")
+            if not price or not volume:
+                return None
+            return (float(price) * float(volume)) / 1e7
+        except Exception:                                  # noqa: BLE001
+            return None
+
+    def _live_price_for_order(self, symbol):
+        """The CURRENT traded price, for the pre-send drift check.
+
+        trading/live_execution.py refuses to send a market order if the
+        price has run away from the one the operator saw when he
+        clicked. It cannot do that without a live price, and it treats
+        None as "refuse", not as "assume fine" -- deliberately, because
+        a market order cannot be un-filled.
+
+        The tick feed FIRST: it is the freshest thing on the machine and
+        it is what the dashboard was showing when the button was
+        pressed. The circuit monitor's REST snapshot is the fallback --
+        it is seconds old rather than milliseconds, which is still far
+        better than blind.
+        """
+        if self.market_data is not None:
+            try:
+                price = self.market_data.get_latest_price(symbol)
+                if price:
+                    return float(price)
+            except Exception:                              # noqa: BLE001
+                pass
+        if self.circuit_monitor is not None:
+            try:
+                info = (self.circuit_monitor.get_snapshot() or {}).get(symbol)
+                price = (info or {}).get("last_price") or (info or {}).get("ltp")
+                if price:
+                    return float(price)
+            except Exception:                              # noqa: BLE001
+                pass
+        return None
 
     def _has_liquidity(self, symbol, price):
         """
@@ -999,6 +1774,20 @@ class Engine:
                 f"high/low: {before['high']:.2f}/{before['low']:.2f} -> "
                 f"{after['high']:.2f}/{after['low']:.2f} "
                 f"(the tick feed is sampled and had missed real trades)."
+            )
+
+        # The range now comes from the exchange, so a feed gap while it
+        # was being built no longer matters -- that doubt is exactly
+        # what the unreliable flag records, and it has been answered.
+        # 2026-07-28: the flag was set on 607 of 666 symbols and the bot
+        # took zero automated entries all day, many of them on ranges
+        # that had already been reconciled and were known-good.
+        if self.market_data is not None and \
+                self.market_data.clear_orb_window_unreliable(symbol):
+            decision(
+                f"[ORB_FIX] {symbol} is tradeable again -- its range was "
+                f"rebuilt from the exchange's own high/low, so the feed "
+                f"gap that flagged it no longer applies."
             )
 
     def _try_early_momentum_entry(self, symbol, security_id, closed_candle,
@@ -1298,6 +2087,73 @@ class Engine:
                 f"is judged on the intraday part only."
             )
 
+    def _position_ceiling(self):
+        """How many positions the CASH allows -- see core/capital.py.
+
+        ==========================================================
+        A COUNT WAS THE WRONG CONTROL. 8 August 2026.
+        ==========================================================
+
+            "we prepared the bot to search for better trading
+             opportunites not to keep the door shut after 3 positions
+             irrespective of pnl"
+
+        MAX_OPEN_POSITIONS = 3 was written on 7 August for ONE session
+        -- "2/3 is enough today, i'll trade cautiously" -- and never
+        came off. Replaying 4, 6 and 7 August, all three seats filled
+        by 09:30 every single day and the bot then went blind for six
+        hours. STOVEKRAFT made its high at 12:12 with the book full
+        since 09:30.
+
+        core/capital.py was written the same week to fix exactly this
+        and was imported by nothing. His rule, in his words:
+
+            "keep at least 1 lakh free cash & positions can be build
+             on remaining"
+
+        So the ceiling is cash: (capital - Rs 1 lakh) / Rs 30,000.
+        At Rs 4.31 lakh that is 11, not 3.
+
+        MAX_OPEN_POSITIONS survives as the FALLBACK for when the
+        balance cannot be read. A broker timeout must not silently
+        open the book -- it falls back to the cautious number.
+
+        ---- MEASURED BEFORE IT WAS ARMED. 8 August 2026. ----
+        Replaying 3-5 August through core/select.py with the 1:1 lock:
+
+            3 slots     9 trades   11% win   Rs -10,715
+            11 slots   33 trades   24% win   Rs -26,018
+
+        Opening the book did not find better opportunities. It found
+        eight times as many of the same ones. The hit rate is 24% and
+        a 2:1 payoff needs 33% to break even, so every extra seat is a
+        multiplier on a losing edge -- and the TOP-ranked three were
+        the worst of the eleven, which says the ranking is not sorting
+        by anything predictive yet.
+
+        So the gate is built, tested and OFF. It turns on the day the
+        selector shows an edge, not before. He asked for a bot that
+        searches for better opportunities; eleven seats on a 24%
+        selector is not that, it is the same bot losing faster.
+        """
+        if not ENABLE_CASH_SIZED_BOOK:
+            return MAX_OPEN_POSITIONS
+        capital = None
+        if self.portfolio is not None:
+            capital = getattr(self.portfolio, "starting_capital", None)
+        if not capital:
+            return MAX_OPEN_POSITIONS
+        try:
+            from core import capital as capital_rules
+            allowed = capital_rules.slots(
+                capital, held=len(getattr(self, "open_positions", {}) or {}))
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[SLOTS] Could not size the book from cash ({exc}); "
+                 f"falling back to MAX_OPEN_POSITIONS={MAX_OPEN_POSITIONS}")
+            return MAX_OPEN_POSITIONS
+        held = len(getattr(self, "open_positions", {}) or {})
+        return max(allowed.get("slots", 0) + held, 0)
+
     def _staged_position_cap(self, effective_time):
         """
         Max concurrent positions allowed at this time of day. Never
@@ -1306,15 +2162,16 @@ class Engine:
         the whole book to whatever twitched first. Returns the cap, or
         0 once past STAGED_NO_ENTRY_AFTER.
         """
+        ceiling = self._position_ceiling()
         if not self.enable_staged_entry or effective_time is None:
-            return MAX_OPEN_POSITIONS
+            return ceiling
         hhmm = effective_time.strftime("%H:%M")
         if hhmm >= STAGED_NO_ENTRY_AFTER:
             return 0
         for cutoff, cap in STAGED_POSITION_LIMITS:
             if hhmm < cutoff:
-                return min(cap, MAX_OPEN_POSITIONS)
-        return MAX_OPEN_POSITIONS
+                return min(cap, ceiling)
+        return ceiling
 
     def _already_attempted(self, symbol, direction):
         """One attempt per (symbol, direction) per day -- kills the
@@ -1326,6 +2183,137 @@ class Engine:
 
     def _mark_attempted(self, symbol, direction):
         self._attempted_today.setdefault(symbol, set()).add(direction)
+
+    def adopt_position(self, symbol, qty, direction, entry_price, stop,
+                       security_id, entry_time=None):
+        """Take a position HE opened into the bot's book, with a stop.
+
+        ==========================================================
+            "my goal is to stop manual trading & let the bot trade .
+             do not ask me how ? thats your job"
+                                    -- operator, 5 August 2026
+        ==========================================================
+
+        On the evening of 5 August the bot's own log read:
+
+            BERGEPAINT  100 at Dhan, opened outside the bot.
+                        the bot will not stop or exit it.
+            DEEPAKNTR   100 ...
+            MOREPENLAB 2000 ...
+
+        About Rs 2 lakh on MTF overnight with nothing watching it.
+        That came from a rule set on 3 August -- "why bot is concerned
+        on user trading - thats his choice" -- which was about NAGGING
+        him, not about leaving his money unprotected. He has since
+        asked for the opposite.
+
+        Once here, every existing exit applies: the trailing stop, the
+        circuit guard, MOVE_DIED and square-off. Nothing new manages
+        these; they simply stop being invisible to what already works.
+
+        Deliberately NOT an entry. It places no order and changes
+        nothing at the broker -- the position already exists. It only
+        makes the bot aware of something he already owns.
+        """
+        symbol = str(symbol).upper()
+        if symbol in self.open_positions:
+            return False
+        self.open_positions[symbol] = {
+            "security_id": security_id,
+            "qty": abs(int(qty)),
+            "entry_price": float(entry_price),
+            "sector": None,
+            "rel_strength": None,
+            "regime": self._last_logged_regime,
+            "entry_reason": ENTRY_REASON_ADOPTED,
+            "entry_time": entry_time,
+            "direction": direction,
+            "initial_stop": float(stop),
+            "fixed_target": None,
+            "stop_mode": STOP_MODE_SWING_TRAILING,
+        }
+        self.trailing_stop.start(symbol, float(stop), direction=direction,
+                                 entry_price=float(entry_price))
+        return True
+
+    def _check_move_died(self, symbol, price, tick_time):
+        """Exit a WINNING position whose move has stopped working.
+
+        ==========================================================
+            "ride untill the momentum stays - exit once it gone
+             ruthlessly + repeat the process on only high setups"
+                                    -- operator, core ideology
+        ==========================================================
+
+        The bot had every other exit -- stop, trail, target, circuit,
+        dead money -- and none of them answer "the move is finished".
+        On 5 August seventeen of nineteen positions reached neither
+        stop nor target and simply sat until 15:30.
+
+        This is the second half of his sentence. The first half, riding
+        while momentum stays, is what the trailing stop already does.
+
+        THREE CONDITIONS, ALL REQUIRED:
+
+            1. it is IN PROFIT by at least MOVE_DIED_MIN_GAIN_R of its
+               own risk -- below that it is the stop's business
+            2. liveness() says "fading" against the day's extreme
+            3. it is more than MOVE_DIED_OFF_EXTREME_PCT off that
+               extreme
+
+        Deliberately never fires on a losing position. Two exits
+        competing for the same trade is how a stop gets quietly
+        replaced by something tighter that nobody declared.
+        """
+        position = self.open_positions.get(symbol)
+        if position is None:
+            return False
+        entry = position.get("entry_price")
+        initial_stop = position.get("initial_stop")
+        if not entry or not initial_stop:
+            return False
+        risk = abs(entry - initial_stop)
+        if risk <= 0:
+            return False
+
+        direction = position.get("direction", LONG)
+        gain = (price - entry) if direction == LONG else (entry - price)
+        if gain < MOVE_DIED_MIN_GAIN_R * risk:
+            return False                     # not yet the stop's peer
+
+        extremes = {}
+        if self.market_data is not None:
+            try:
+                extremes = self.market_data.day_extremes(symbol) or {}
+            except Exception:                              # noqa: BLE001
+                return False
+        day_high = extremes.get("high")
+        day_low = extremes.get("low")
+        if not day_high or not day_low:
+            return False
+
+        from core.ranker import liveness
+        state, off_extreme = liveness({
+            "ltp": price, "day_high": day_high, "day_low": day_low,
+            "change_pct": 1.0 if direction == LONG else -1.0,
+        })
+        if state != "fading":
+            return False
+        if off_extreme is None or off_extreme < MOVE_DIED_OFF_EXTREME_PCT:
+            return False
+
+        if not self._bot_may_close(symbol, "its move has finished"):
+            return False
+
+        extreme = day_high if direction == LONG else day_low
+        decision(
+            f"[MOVE_DIED] {symbol} {direction} closed at {price:.2f} -- "
+            f"{off_extreme:.1f}% off the day's {extreme:.2f} and no "
+            f"longer moving. Banked {gain:+.2f} per share "
+            f"({gain / risk:.1f}R). Riding it further was giving it back."
+        )
+        self._exit(symbol, price, EXIT_REASON_MOVE_DIED, tick_time)
+        return True
 
     def _check_no_progress(self, symbol, price, tick_time):
         """
@@ -1359,6 +2347,9 @@ class Engine:
         if gain >= NO_PROGRESS_R * risk:
             return False                     # it IS working, leave it
 
+        if not self._bot_may_close(symbol, "it has not moved, to free a slot"):
+            return False
+
         decision(
             f"[NO_PROGRESS] {symbol} {direction} closed after "
             f"{held_min:.0f} min at {price:.2f} -- never reached "
@@ -1376,14 +2367,77 @@ class Engine:
         the weakest holder, a clear edge (ROTATION_MIN_STRENGTH_EDGE),
         and a real price to close the laggard at -- any missing input
         means no rotation (fall back to the plain full-book skip)."""
+        # ---- ROTATION IS AN ENTRY DECISION. 7 August 2026. ----
+        #
+        #     "why bot sold? it is not even falling"
+        #     "i turn off the trading bot since morning after market
+        #      opened . now didn't ON"           -- operator
+        #
+        # The switch was OFF all day and the bot still sent five real
+        # SELL orders. Two were rotations:
+        #
+        #     10:58  SELL KALYANKJIL  500 @  622.30   ROTATED_OUT
+        #     10:58  SELL HEROMOTOCO   50 @ 5792.00   ROTATED_OUT
+        #     BUYS that day: 0
+        #
+        # Exits deliberately ignore alert_only so a stop always
+        # protects him whether or not new buying is armed. That is
+        # right. But ROTATION IS NOT AN EXIT -- it is "sell the weakest
+        # to buy something better", an ENTRY decision with a sell
+        # attached. The sell rode out with the exits; the buy was
+        # correctly blocked by the switch.
+        #
+        # With trading OFF, rotation is therefore GUARANTEED to be a
+        # one-legged trade. It took him out of two positions for a
+        # purchase the bot was never allowed to make.
+        #
+        # No switch, no rotation. A full book simply refuses.
+        if getattr(self, "alert_only", True):
+            if not getattr(self, "_rotation_off_logged", False):
+                self._rotation_off_logged = True
+                decision(
+                    "[ROTATE] Bot trading is OFF -- no rotation. A full "
+                    "book refuses new signals rather than selling a "
+                    "holding for a buy that cannot happen.")
+            return False
+
+        # Hard cap on churn. Each swap pays slippage and charges, and
+        # sells a position the new no-trail rule was meant to let run.
+        if self._rotations_today >= ROTATION_MAX_PER_DAY:
+            if not self._rotation_cap_logged:
+                self._rotation_cap_logged = True
+                decision(
+                    f"[ROTATE] Daily swap limit reached "
+                    f"({ROTATION_MAX_PER_DAY}). No more slot rotation "
+                    f"today -- a full book now simply refuses, and every "
+                    f"refusal is journalled.")
+            return False
+
         challenger_strength = self._symbol_strength(challenger, direction)
         if challenger_strength is None:
             return False
+
+        # 2026-07-29: a challenger carrying the operator's confirmations
+        # -- good results, news -- needs less of a trend edge to take a
+        # laggard's seat. RANKING, not gating: a confirmed setup cannot
+        # enter on confirmations alone, it still has to be a stronger
+        # breakout. It just does not have to be as MUCH stronger.
+        edge = ROTATION_MIN_STRENGTH_EDGE
+        confirmations = self._confirmation_count(challenger)
+        if confirmations:
+            edge = ROTATION_MIN_STRENGTH_EDGE / (1 + confirmations)
         weakest = self._weakest_holder_for_rotation()
         if weakest is None:
             return False
         w_sym, w_strength = weakest
-        if challenger_strength <= w_strength + ROTATION_MIN_STRENGTH_EDGE:
+        if challenger_strength <= w_strength + edge:
+            return False
+
+        # Belt and braces. _weakest_holder_for_rotation already skips
+        # positions the operator opened, so this should be unreachable
+        # -- but if it ever is reached, his trade keeps its seat.
+        if not self._bot_may_close(
+                w_sym, f"a stronger breakout ({challenger}) wanted the slot"):
             return False
 
         price = None
@@ -1400,10 +2454,12 @@ class Engine:
 
         decision(
             f"[ROTATE] {w_sym} (trend {w_strength:+.2%}) rotated OUT for "
-            f"{challenger} {direction} (trend {challenger_strength:+.2%}) "
+            f"{challenger} {direction} (trend {challenger_strength:+.2%}, "
+            f"{confirmations} of 3 confirmations) "
             f"-- a stronger breakout needs the slot."
         )
         self._exit(w_sym, price, EXIT_REASON_ROTATED_OUT, tick_time)
+        self._rotations_today += 1
         return True
 
     def _daily_realized_pnl(self):
@@ -1459,24 +2515,133 @@ class Engine:
         """
         if closed_candle is None:
             return True
-        breakout_vol = closed_candle.get("volume")
-        if not breakout_vol or breakout_vol <= 0:
-            return True  # unknown volume -> don't block
 
-        # Recent closed candles BEFORE this one (exclude the breakout
-        # candle itself, which is the last element).
-        history = self.candle_engine.last_n_closed(symbol, VOLUME_AVG_CANDLES + 1)
+        # ==========================================================
+        # 2026-07-29 -- one candle in nine reported ZERO volume
+        # ==========================================================
+        # The operator, told that seven breakouts had "no volume data":
+        #
+        #     "what ? but without volume how the stock moves upside ?"
+        #
+        # He was right and the phrasing was wrong. The volume existed;
+        # the bot could not measure it. Counted across all three
+        # recorded sessions:
+        #
+        #     27 Jul   28,123 of 235,348 candles show volume 0  (11.9%)
+        #     28 Jul   24,135 of 230,047 candles show volume 0  (10.5%)
+        #     29 Jul   25,931 of 229,470 candles show volume 0  (11.3%)
+        #
+        # Impossible in reality. Dhan sends a RUNNING DAY TOTAL, and a
+        # candle's own volume is the difference between its first and
+        # last reading. If only ONE snapshot lands inside that minute,
+        # first == last and the subtraction gives zero. One photograph
+        # instead of two.
+        #
+        # Seven of the bot's 35 breakouts fired on such a minute -- IKS,
+        # NAVINFLUOR, DEEPAKNTR, ENDURANCE, GILLETTE, IFBIND, GANECOS --
+        # and the filter waved every one through, because it could not
+        # tell "no volume" from "not measured".
+        #
+        # THE FIX: measure over a WINDOW instead of one minute. A single
+        # minute can miss a snapshot; VOLUME_WINDOW_CANDLES of them
+        # cannot. Same feed, same data, wider ruler.
+        history = self.candle_engine.last_n_closed(
+            symbol, VOLUME_AVG_CANDLES + 1)
         prior = [
             c.get("volume") for c in history[:-1]
-            if c.get("volume") and c.get("volume") > 0
+            if c.get("volume") is not None and c.get("volume") > 0
         ]
+
+        # NO volume history for this symbol AT ALL -> the filter cannot
+        # run. That is a feed-mode fact (Ticker mode reports no volume
+        # for anything), not a fact about this breakout, and refusing
+        # every trade because of it would simply stop the bot. Fails
+        # open here, deliberately and narrowly.
         if len(prior) < MIN_VOLUME_CANDLES:
-            return True  # not enough volume history to judge -> allow
+            return True
 
         avg_vol = sum(prior) / len(prior)
         if avg_vol <= 0:
             return True
-        return breakout_vol >= VOLUME_SURGE_MULT * avg_vol
+
+        candle_vol = closed_candle.get("volume")
+        if candle_vol and candle_vol > 0:
+            # The normal path, unchanged since 24 July. A single-minute
+            # surge must stay visible AS a single-minute surge -- an
+            # early attempt at this fix averaged the breakout across
+            # five minutes and turned a real 3x spike into 1.4x, which
+            # would have refused exactly the trades worth taking.
+            return candle_vol >= VOLUME_SURGE_MULT * avg_vol
+
+        # THE ZERO-VOLUME MINUTE. Only one snapshot landed inside it, so
+        # its own delta is 0 -- 11% of all candles, and 7 of the bot's
+        # 35 breakouts. Fall back to the window, where the missing
+        # shares reappear in a neighbouring minute's difference.
+        window = self._window_volume(symbol, closed_candle)
+        if window is None:
+            # Silent across the whole window while this symbol normally
+            # reports volume. Under the operator's rule (29 July) that
+            # is a refusal, not a free pass.
+            return not VOLUME_REQUIRED_FOR_ENTRY
+        return (window / VOLUME_WINDOW_CANDLES) >= VOLUME_SURGE_MULT * avg_vol
+
+    def _volume_multiple(self, symbol, closed_candle):
+        """How many times its own recent average this breakout traded.
+
+        The same number the volume gate judges on, exposed so the
+        journal can record it for signals the gate never reached --
+        including the ones refused for a completely different reason.
+        None when it cannot be measured.
+        """
+        try:
+            if closed_candle is None:
+                return None
+            history = self.candle_engine.last_n_closed(
+                symbol, VOLUME_AVG_CANDLES + 1)
+            prior = [c.get("volume") for c in history[:-1]
+                     if c.get("volume") is not None and c.get("volume") > 0]
+            if len(prior) < MIN_VOLUME_CANDLES:
+                return None
+            avg = sum(prior) / len(prior)
+            if avg <= 0:
+                return None
+            volume = closed_candle.get("volume")
+            if not volume or volume <= 0:
+                window = self._window_volume(symbol, closed_candle)
+                if window is None:
+                    return None
+                volume = window / VOLUME_WINDOW_CANDLES
+            return round(volume / avg, 2)
+        except Exception:                                  # noqa: BLE001
+            return None
+
+    def _window_volume(self, symbol, closed_candle):
+        """Total volume over the last VOLUME_WINDOW_CANDLES minutes,
+        the breakout candle included. None when even the window has
+        nothing -- which means the feed really is silent, not that one
+        snapshot went missing.
+
+        Summing is exactly right for a cumulative-total feed: a minute
+        that reads 0 because it saw one snapshot has its shares counted
+        in the NEXT minute's difference, so the window total is correct
+        even when its individual minutes are not.
+        """
+        try:
+            history = list(self.candle_engine.last_n_closed(
+                symbol, VOLUME_WINDOW_CANDLES))
+            # The breakout candle has ALREADY been appended to the
+            # closed-candle history by the time entry is evaluated, so
+            # it is normally the last element here. Adding it again
+            # would double-count it -- caught by the window test, which
+            # read 500 where 450 was correct.
+            if not history or history[-1] is not closed_candle:
+                history.append(closed_candle)
+                history = history[-VOLUME_WINDOW_CANDLES:]
+            total = sum(c.get("volume") or 0 for c in history
+                        if (c.get("volume") or 0) > 0)
+            return total if total > 0 else None
+        except Exception:                                  # noqa: BLE001
+            return None
 
     def _try_structural_entry(self, symbol, security_id, closed_candle,
                                direction, entry_reason, tick_time=None):
@@ -1494,6 +2659,17 @@ class Engine:
         breakout confirmed by the very first tick of the 15:15 minute
         can't sneak an entry in past square-off (see #0 fix below).
         """
+        # FRESH BREAKOUTS PANEL (2026-07-28) -- recorded HERE, at the
+        # top, BEFORE every gate below. A breakout that gets refused is
+        # exactly as worth seeing as one that gets taken: on 2026-07-28
+        # the engine fired breakouts on TVSMOTOR, NTPCGREEN, KTKBANK and
+        # dozens more, the SHORT_ONLY regime refused every one in
+        # silence, and the operator watched TVS run with no idea his own
+        # bot had already spotted it. Recording after the gates would
+        # reproduce exactly that blindness.
+        # Never raises -- see core/breakout_feed.py.
+        self._record_breakout_signal(symbol, direction, closed_candle,
+                                     tick_time)
         # 2026-07-24 -- EXIT ALL dashboard popup's "Stop New Entries
         # + Exit All" option (trading/trade_controller.py's
         # request_pause_new_entries()). Cheapest possible check,
@@ -1528,22 +2704,32 @@ class Engine:
                 symbol, closed_candle["close"]):
             return
 
-        # Square-off entry block. 2026-07-24 (evening) #0 FIX: this now
-        # checks the ACTUAL processing tick_time, not the closing
-        # candle's label time. The bug: the final 15:14 candle only
-        # CLOSES when the first 15:15 tick arrives, but closed_candle
-        # ["time"] is ~15:14:59 (the last tick INSIDE it), so it slid
-        # past this guard and fired 10 fresh entries at 15:15:00-01 --
-        # racing main.py's one-shot flatten_all(), leaving them open
-        # (operator report). tick_time is that first-15:15 tick, so
-        # >= SQUARE_OFF_T correctly blocks it. Falls back to the
-        # candle label only if tick_time wasn't passed (older callers/
-        # tests). Silent skip -- fires every candle for the rest of
-        # the session once past square-off and would flood otherwise.
+        # Entry cutoff. 2026-07-24 (evening) #0 FIX: this checks the
+        # ACTUAL processing tick_time, not the closing candle's label
+        # time. The bug: the final 15:14 candle only CLOSES when the
+        # first 15:15 tick arrives, but closed_candle["time"] is
+        # ~15:14:59 (the last tick INSIDE it), so it slid past this
+        # guard and fired 10 fresh entries at 15:15:00-01 -- racing
+        # main.py's one-shot flatten_all(), leaving them open (operator
+        # report). tick_time is that first-15:15 tick. Falls back to
+        # the candle label only if tick_time wasn't passed (older
+        # callers/tests). Silent skip -- fires every candle for the
+        # rest of the session and would flood otherwise.
+        #
+        # 31 July 2026: the CUTOFF ITSELF moved into
+        # _entry_cutoff_reason(). It is no longer a bare 15:15 -- that
+        # was MIS machinery guarding a forced liquidation the bot
+        # stopped performing on 28 July. The race described above is
+        # unchanged and still guarded; only the time it guards is now
+        # derived from whether square-off is actually armed.
+        #
+        # Automatic entries are barely affected either way:
+        # STAGED_NO_ENTRY_AFTER (15:00) already stops the bot opening
+        # anything a quarter of an hour before this ever mattered.
         effective_time = tick_time or (
             closed_candle.get("time") if closed_candle else None
         )
-        if effective_time is not None and effective_time.time() >= SQUARE_OFF_T:
+        if _entry_cutoff_reason(effective_time):
             return
 
         # 2026-07-24 (evening) -- the 14:30 fresh-entry cutoff was
@@ -1581,9 +2767,34 @@ class Engine:
         # it. Still a plain dict lookup here; the tick path never touches
         # a database.
         candle_date = effective_time.date() if effective_time is not None else None
-        if candle_date is not None \
+
+        # RESULTS GATE, rewritten 2026-07-28 (core/results_gate.py).
+        #
+        # This used to be a flat "reporting today -> refuse", silently.
+        # The comment justifying it was honest: the ATR system could not
+        # tell a news reaction from organic momentum. That was true when
+        # written; the filing -> PDF -> grade chain now reads the
+        # numbers, so the premise expired.
+        #
+        # It also inverted the operator's entire strategy -- "entry only
+        # on real reasons: results genuinely better than previous
+        # quarter". CUB reported on 2026-07-28 and went +8.47%; this
+        # rule would have refused it. 27 companies reported that day.
+        #
+        # Now: BEFORE the filing lands it still blocks (unknown outcome
+        # is exactly the coin flip the rule was for). AFTER it lands and
+        # grades STRONG or GOOD, it allows. Every unknown blocks.
+        if self.results_gate is not None:
+            if not self.results_gate.allows(symbol, candle_date):
+                self._note_breakout_block(
+                    symbol, direction,
+                    self.results_gate.block_reason(symbol, candle_date))
+                return
+        elif candle_date is not None \
                 and symbol in self.earnings_calendar.get(
                     candle_date.isoformat(), ()):
+            # No gate wired (tests, dashboard_preview): fall back to the
+            # old blanket block. Safe direction.
             return
 
         # STOCK MEMORY (2026-07-25) -- the bot's own knowledge of what is
@@ -1600,6 +2811,20 @@ class Engine:
                     f"corporate action today -- {memory_reason}. Price is "
                     f"not comparable to yesterday's close"
                 )
+            return
+
+        # NO EVENT, NO TRADE (12 August 2026). See _no_reason_refusal().
+        # This is BOT_SPEC.md's entry rule 2, finally applied to the lane
+        # that could always place an order without it.
+        #
+        # NOTED, not _block_entry()'d: a stock with no news at 10:00 can
+        # have a filing at 14:00, and a hard block would keep it out for
+        # the rest of the day after the reason arrived. The breakout
+        # still appears on the panel with this sentence attached, which
+        # is the visibility the panel exists for.
+        no_reason = self._no_reason_refusal(symbol)
+        if no_reason is not None:
+            self._note_breakout_block(symbol, direction, no_reason)
             return
 
         # Frozen price (see FROZEN_PRICE_STREAK_CANDLES) -- a circuit
@@ -1633,7 +2858,9 @@ class Engine:
         # Silent skip, same reasoning as the frozen check -- this fires
         # on every candle close for as long as the approach lasts and
         # circuit_monitor itself already warns once per episode.
-        if self.circuit_monitor is not None and self.circuit_monitor.is_flagged(symbol):
+        if self.circuit_monitor is not None \
+                and self.circuit_monitor.is_flagged(symbol) \
+                and self._circuit_blocks(symbol, direction):
             return
 
         if direction in self.entry_blocked.get(symbol, {}):
@@ -1678,10 +2905,29 @@ class Engine:
 
         # Trade WITH the tape, never against it (item 1). A one-sided
         # market blocks the fighting direction entirely.
+        #
+        # OFF since 2026-07-28 (config.ENABLE_MARKET_REGIME_GATE). On
+        # that day 445 of 665 symbols were declining, the regime read
+        # SHORT_ONLY, and the operator -- who trades LONG ONLY -- had a
+        # bot that was structurally incapable of a single entry, in
+        # silence, all session. CUB reported and went +8.47% on that
+        # same tape; this gate would have refused it.
+        #
+        # A rule that switches the bot off on two-thirds of days makes
+        # it unmeasurable. Kept intact and one flag away: "trade with
+        # the tape" may prove right once there is data to judge it on.
+        #
+        # The breakout is recorded on the panel EITHER WAY, so what the
+        # gate would have refused is still visible.
         regime = self._market_regime()
         if (direction == LONG and regime == "SHORT_ONLY") \
                 or (direction == SHORT and regime == "LONG_ONLY"):
-            return
+            self._note_breakout_block(
+                symbol, direction,
+                f"against the tape ({regime})"
+                + ("" if ENABLE_MARKET_REGIME_GATE else " -- allowed anyway"))
+            if ENABLE_MARKET_REGIME_GATE:
+                return
 
         # Trend-rank entry priority (2026-07-24, operator's thesis):
         # trade WITH the leaderboard -- a LONG only in a current top-N
@@ -1731,12 +2977,36 @@ class Engine:
         # (3 before 10:00, 6 before 11:00, 10 after) so the book is
         # never committed in the opening minute, and closes entirely
         # after STAGED_NO_ENTRY_AFTER.
+        # CAPACITY GATES DO NOT APPLY IN ALERT-ONLY MODE. 30 July 2026.
+        #
+        # The slot cap and the staged ramp exist to limit how much money is
+        # committed. In alert-only mode the bot commits nothing -- it just
+        # tells the operator what it found -- so "the book is full" has no
+        # bearing on whether he should be told.
+        #
+        # This is not a nicety. The operator is carrying 10 positions into
+        # tomorrow and MAX_OPEN_POSITIONS is 10, so the book is full at
+        # 09:15. Without this bypass every single signal would have died at
+        # the check below and alert-only mode would have produced ZERO
+        # alerts all day -- a silent bot that looked like a quiet market.
+        #
+        # The QUALITY gates above and below still run in full: relative
+        # strength, circuit room, results timing, liquidity, panic sector,
+        # ATR sizing. Only capacity is skipped, and only when not trading.
         position_cap = self._staged_position_cap(effective_time)
-        if position_cap <= 0:
+        if not self.alert_only and position_cap <= 0:
             return
-        if len(self.open_positions) >= position_cap:
+        if not self.alert_only and len(self.open_positions) >= position_cap:
             if not (ENABLE_SLOT_ROTATION
                     and self._maybe_rotate_out(symbol, direction, effective_time)):
+                # 2026-07-29: say WHY, with the confirmations attached.
+                # The operator's complaint was "real movers are ignored
+                # by bot -- first see = buy & 10 slots filled", and it
+                # could not be checked because nothing recorded the
+                # refusals. Now the journal holds the name, the time,
+                # how many positions were already open, and whether
+                # this setup had news, results and volume behind it.
+                self._note_slot_refusal(symbol, direction, position_cap)
                 return
 
         # Daily guardrails (item 5): a realized day at/below the loss
@@ -1806,7 +3076,7 @@ class Engine:
             return
 
         stop_seed, target, qty, stop_mode = self._entry_stop_and_target(
-            symbol, direction, closed_candle["close"]
+            symbol, direction, closed_candle["close"], security_id
         )
         if stop_seed is None:
             # ATR unavailable/insufficient history, or the computed
@@ -1814,13 +3084,93 @@ class Engine:
             # docstring. Silent skip, same pattern as every other
             # "not a real signal yet" gate in this method.
             return
+        # ALERT ONLY -- 30 July 2026. The signal has passed every gate and
+        # WOULD have been bought. Instead it is reported, with the price,
+        # the size it would have taken and the reason, and the operator
+        # decides.
+        #
+        #     "we will stop completely bot from trade taking as of now.
+        #      it must show me the stock in alerts only."
+        #
+        # Placed HERE, at the last possible moment, on purpose: everything
+        # above still runs, so the journal still records the signal and
+        # every refusal reason, and the alert carries the same evidence the
+        # entry would have. Gating earlier would have made the bot blind
+        # as well as idle.
+        #
+        # Deliberately NOT the trade_controller pause, which skips in
+        # silence by design. Silence is the opposite of the requirement.
+        # ---- ONE SWITCH WAS ARMING TWO BUYERS. 6 August 2026. ----
+        #
+        #     "even morning i asked can bot trade ? u replied with all
+        #      rules . but again random entries taken"
+        #                                       -- operator
+        #
+        # He turned bot-trading ON having been told the RANKER's rules:
+        # up 1% or more, above its own open, a written reason, beating
+        # its sector, liquid enough for his size, MTF allowed.
+        #
+        # This path -- the structural breakout -- applies none of them.
+        # It buys a level break. Both paths read the same alert_only
+        # flag, so one switch armed both, and every one of the eight
+        # fills on 6 August came from THIS one:
+        #
+        #     EXIDEIND JAMNAAUTO BASF JKLAKSHMI RHIM BELRISE
+        #     VGUARD GMDCLTD          all STRUCTURAL_LONG_BREAKOUT
+        #
+        # while the ranker named nothing all day. He was told the rules
+        # of the path that never fired.
+        #
+        # So the breakout now needs its OWN arming, and it is off by
+        # default. Bot-trading ON means the ranker trades. This path
+        # alerts and waits for him, exactly as it did before the switch
+        # existed.
+        if self.alert_only or not getattr(self, "breakout_armed", False):
+            why_not = ("the bot is not trading" if self.alert_only else
+                       "bot trading is ON for the ranked list only -- "
+                       "breakout entries are not armed")
+            self._manual_alert(
+                symbol, f"alert-only-{direction}",
+                f"{symbol} {direction} would have been entered at "
+                f"{closed_candle['close']:.2f} "
+                f"(qty {qty}, stop {stop_seed:.2f}"
+                f"{f', target {target:.2f}' if target else ''}) -- "
+                f"{entry_reason}. ALERT ONLY: {why_not}. "
+                f"Use the dashboard BUY if you want it."
+            )
+            if self.signal_journal is not None:
+                try:
+                    self.signal_journal.record(
+                        symbol, direction,
+                        break_price=closed_candle["close"],
+                        taken=False,
+                        refused_why="ALERT ONLY -- bot not trading, "
+                                    "operator decides",
+                    )
+                except Exception:                          # noqa: BLE001
+                    pass
+            return
         self._enter(
             symbol, security_id, closed_candle["close"], stop_seed,
             closed_candle["time"], entry_reason, direction, target=target,
             qty=qty, stop_mode=stop_mode,
         )
+        # The signal made it all the way through. Drop the BUY button on
+        # the Fresh Breakouts panel -- the engine refuses pyramiding, so
+        # offering one on a position already open would be a lie.
+        if self.breakout_feed is not None:
+            try:
+                self.breakout_feed.mark_taken(symbol, direction)
+            except Exception:                              # noqa: BLE001
+                pass
+        if self.signal_journal is not None:
+            try:
+                self.signal_journal.record(symbol, direction, taken=True)
+            except Exception:                              # noqa: BLE001
+                pass
 
-    def _entry_stop_and_target(self, symbol, direction, entry_price):
+    def _entry_stop_and_target(self, symbol, direction, entry_price,
+                               security_id=None):
         """
         Returns (stop_price, target_price, qty, stop_mode) for a new
         STRUCTURAL entry. target_price is always None -- this bot's
@@ -1848,7 +3198,7 @@ class Engine:
         """
         if TOP_N_MOMENTUM_MODE and self.momentum_universe is not None:
             stop_price, target, qty = self._atr_entry_sizing(
-                symbol, direction, entry_price
+                symbol, direction, entry_price, security_id
             )
             return stop_price, target, qty, STOP_MODE_ATR_TRAILING
         return (
@@ -1856,26 +3206,179 @@ class Engine:
             LAYER1_FIXED_QTY, STOP_MODE_SWING_TRAILING,
         )
 
-    def _risk_sized_qty(self, price, stop_distance):
-        """
-        2026-07-24 (evening) -- shared risk-based sizing, now used by
-        MANUAL buy/short too (Audit #1 fix). qty risks about
-        RISK_PER_TRADE_RS given the stop distance, capped so notional
-        never exceeds MAX_NOTIONAL_PER_TRADE_RS. This is what stops a
-        manual APAR click from being 100 shares (Rs 14.6L notional /
-        Rs 2.92L margin, the Rs 53k loss) -- it becomes ~13 shares
-        (~Rs 1.9L notional / ~Rs 38k margin) instead. Returns at least
-        1 share (a manual override should still place *a* trade even
-        if sizing math rounds tiny), but never more than the notional
-        cap allows.
-        """
-        if stop_distance <= 0:
-            stop_distance = price * MIN_STOP_DISTANCE_PCT
-        by_risk = int(RISK_PER_TRADE_RS / stop_distance) if stop_distance > 0 else 1
-        by_notional = int(MAX_NOTIONAL_PER_TRADE_RS / price) if price > 0 else 1
-        return max(1, min(by_risk, by_notional))
+    def _manual_qty(self, sized, asked=None):
+        """The size for an order the OPERATOR asked for.
 
-    def _atr_entry_sizing(self, symbol, direction, entry_price):
+        ---- HE CAN NAME IT NOW. 2 August 2026. ----
+        `asked` is a quantity typed on the dashboard. It WINS over the
+        risk sizing, because a number he typed is a decision and the
+        sizing rule is a default. It does not win over
+        MANUAL_TEST_QTY -- that switch exists to make the first real
+        orders one share regardless of what anything else believes,
+        and a typo in a quantity box must not defeat it.
+
+        Every hard ceiling still applies downstream, in
+        trading/live_execution.py: LIVE_MAX_ORDER_VALUE_RS,
+        LIVE_MAX_ORDERS_PER_DAY, LIVE_MAX_OPEN_POSITIONS. Those are
+        enforced at the order, not here, precisely so that no caller
+        -- including this one -- can talk its way past them.
+
+
+            "Friday . we planned 1 manual share buying & selling in MTF
+             from our dashboard"
+
+        config.MANUAL_TEST_QTY overrides risk sizing for manual clicks
+        only. The first order this account ever sends through the bot
+        should be one share, not the two hundred that risk maths gives
+        on a Rs 300 stock.
+
+        Automated entries never reach here. That separation is the whole
+        point -- a test size must never quietly become the size the bot
+        trades.
+        """
+        if MANUAL_TEST_QTY:
+            try:
+                qty = int(MANUAL_TEST_QTY)
+            except (TypeError, ValueError):
+                return sized
+            if qty > 0:
+                warn(f"[MANUAL] config.MANUAL_TEST_QTY is set -- placing "
+                     f"{qty} share(s), not the risk-sized {sized}.")
+                return qty
+        if asked:
+            try:
+                asked = int(asked)
+            except (TypeError, ValueError):
+                return sized
+            if asked > 0:
+                decision(f"[MANUAL] {asked} share(s) requested from the "
+                         f"dashboard (the sizing rule said {sized}).")
+                return asked
+        return sized
+
+    def _risk_sized_qty(self, price, stop_distance, symbol=None,
+                        security_id=None, cap_by_risk=True):
+        """Shares to buy for ONE position.
+
+        OPERATOR'S RULE, 2026-07-28 -- replaces the old risk formula:
+
+            "Buy no of shares worth equal to 1 Lakh = mtf power. ex - as
+             of now if i want to buy coforge 1686 rs - qty 225 with
+             99657.31 rs worth."
+
+        A fixed Rs 1 lakh of HIS OWN margin goes into every position.
+        The share count falls out of whatever margin that stock requires
+        -- asked of Dhan, never estimated (core/mtf_margin.py).
+
+            COFORGE 1,686 -> 225 shares -> Rs 3,79,350 of stock
+                                        -> Rs   99,655 blocked
+
+        WHAT THIS REPLACED, and why it had to go: the old rule was
+        min(RISK_PER_TRADE_RS / stop_distance, MAX_NOTIONAL / price).
+        At the 1% stop floor those two are algebraically identical --
+        2000/(0.01*p) == 200000/p -- so every one of 2026-07-28's
+        eighteen trades came out at Rs 1.90-2.00 lakh. NILKAMAL, which
+        swings 11% a day, was given the same size as MANAPPURAM, which
+        swings 2%. The rule could not distinguish between any two
+        stocks in the universe.
+
+        stop_distance is kept in the signature (unused) so every caller
+        and test keeps working; the stop still governs the EXIT, it just
+        no longer governs the SIZE.
+
+        Falls back to own-cash sizing whenever the margin book is not
+        wired -- Rs 1 lakh buys Rs 1 lakh of stock. Never more.
+        """
+        try:
+            if self.mtf_margin is not None and symbol:
+                qty, pct, value = self.mtf_margin.quantity_for(
+                    symbol, security_id, price)
+                if qty > 0:
+                    return (self._cap_by_risk(qty, price, stop_distance,
+                                              symbol)
+                            if cap_by_risk else qty)
+            budget = MTF_MARGIN_PER_POSITION_RS
+            qty = max(1, int(budget // float(price))) if price else 1
+            return (self._cap_by_risk(qty, price, stop_distance, symbol)
+                    if cap_by_risk else qty)
+        except Exception:                                  # noqa: BLE001
+            return 1
+
+    def _cap_by_risk(self, qty, price, stop_distance, symbol=None):
+        """Shrink the position so a stop-out costs RISK_PER_TRADE_RS.
+
+        ---- THE SIZE NEVER LOOKED AT THE STOP. 7 August 2026. ----
+
+            "but with lower the stop loss 1.67% will kick us out
+             instantly right?"                        -- operator
+            "MADE TO LOOSE SMALL INCASE OF LOSS & WIN BIG ON WINNING
+             STOCKS. THATS THE CORE HEIRARCHY YOU MUST FOLLOW"
+
+        Size came from the MARGIN budget alone -- Rs 30,000 of his own
+        money, roughly Rs 1.2 lakh of stock -- and nothing asked how
+        far away the stop was. So the loss on a stop-out was whatever
+        the opening range happened to be that morning.
+
+        Measured on the eight fills of 6 August, entry to the range low:
+
+            JAMNAAUTO 1.26%   BELRISE 1.45%   EXIDEIND 1.72%
+            RHIM      2.10%   GMDCLTD 2.41%   VGUARD   3.82%
+            BASF      4.16%   JKLAKSHMI 6.42%
+
+        Rs 2,000 of risk on a Rs 1.2 lakh position allows 1.67%. Five
+        of the eight were wider. JKLAKSHMI at 6.42% would have cost
+        about Rs 6,623 on a stop-out -- three times the budget -- and
+        nothing anywhere would have refused it.
+
+        THE STOP IS NOT MOVED. That was his first worry and it is the
+        right one: a stop tightened to fit a budget is a guaranteed
+        loser, and this bot learned that on 24 July. The stop stays at
+        the opening range low, however far that is. The SHARE COUNT
+        comes down instead.
+
+            JKLAKSHMI   entry 618.00   stop 578.34
+                        was  167 shares -> Rs 6,623 at risk
+                        now   50 shares -> Rs 2,000 at risk
+                        same stop, same room to breathe
+
+        A tight range therefore gets a BIGGER position than before, not
+        a smaller one. That is the "win big" half of his rule, and it
+        is where it comes from.
+        """
+        try:
+            qty = int(qty)
+            price = float(price)
+            stop_distance = abs(float(stop_distance or 0.0))
+        except (TypeError, ValueError):
+            return qty
+        if qty <= 0 or price <= 0 or stop_distance <= 0:
+            # No stop distance to size against -- leave it alone rather
+            # than invent one. Silently guessing here would be worse
+            # than the gap it is closing.
+            return qty
+
+        affordable = int(RISK_PER_TRADE_RS / stop_distance)
+        if affordable >= qty:
+            return qty
+        if affordable < 1:
+            # Even one share risks more than the budget. That is a
+            # refusal, not a rounding -- and it is said out loud.
+            self._manual_alert(
+                symbol or "?", "stop-too-wide",
+                f"{symbol}: the stop is {stop_distance:.2f} away from "
+                f"entry, so a single share risks Rs {stop_distance:.0f} "
+                f"-- more than the Rs {RISK_PER_TRADE_RS:.0f} budget. "
+                f"Not taken.")
+            return 0
+        diagnostic(
+            f"[SIZE] {symbol}: {qty} -> {affordable} shares. The stop "
+            f"sits {stop_distance / price * 100:.2f}% away, so {qty} "
+            f"would risk Rs {qty * stop_distance:,.0f} against a "
+            f"Rs {RISK_PER_TRADE_RS:,.0f} budget. Stop unchanged.")
+        return affordable
+
+    def _atr_entry_sizing(self, symbol, direction, entry_price,
+                          security_id=None):
         """
         TOP_N_MOMENTUM_MODE only -- ATR-based initial stop and qty,
         2026-07-24, replacing the old flat qty / fixed rupee bracket
@@ -1913,18 +3416,63 @@ class Engine:
         if atr is None or atr <= 0:
             return None, None, None
 
-        raw_stop_distance = ATR_STOP_MULTIPLIER * atr
-        min_stop_distance = MIN_STOP_DISTANCE_PCT * entry_price
-        stop_distance = max(raw_stop_distance, min_stop_distance)
+        if ENABLE_BOT_TRAILING_STOP:
+            raw_stop_distance = ATR_STOP_MULTIPLIER * atr
+            min_stop_distance = MIN_STOP_DISTANCE_PCT * entry_price
+            stop_distance = max(raw_stop_distance, min_stop_distance)
+        else:
+            # 2026-07-29: with the trail gone this stop is the ONLY
+            # thing protecting the trade, so it is the operator's own
+            # number -- 2.5% from entry -- not an ATR reading that
+            # measured 1.06% in practice. Every variant in config's
+            # ENABLE_BOT_TRAILING_STOP table was measured with exactly
+            # this underneath it.
+            stop_distance = HARD_STOP_FROM_ENTRY_PCT * entry_price
 
-        qty = int(RISK_PER_TRADE_RS / stop_distance)
+        # 2026-07-29, operator-found live. The size now comes from the
+        # SAME rule his manual buys already use -- Rs 1 lakh of MTF
+        # margin per position, share count asked of Dhan
+        # (_risk_sized_qty / core/mtf_margin.py).
+        #
+        # What this replaced, and why it had to go: this method still
+        # carried the OLD formula that _risk_sized_qty was written on
+        # 2026-07-28 to abolish --
+        #
+        #     min(RISK_PER_TRADE_RS / stop_distance,
+        #         MAX_NOTIONAL_PER_TRADE_RS / entry_price)
+        #
+        # At the 1% stop floor those two are algebraically identical
+        # (2000 / (0.01 * p) == 200000 / p), so the notional cap bound
+        # on EVERY trade and the ATR reading did nothing at all. Proof
+        # from 29 July's own log -- 29 structural entries, every one of
+        # them pinned to the ceiling:
+        #
+        #     MANUAL_BUY_DASHBOARD        11   Rs   95,934 - 100,064
+        #     STRUCTURAL_LONG_BREAKOUT    29   Rs  197,041 - 200,382
+        #
+        # The operator's rule was in the code, tested, and simply not
+        # on the path the bot used. Manual buys obeyed it; the bot's
+        # own entries ran at double the agreed size.
+        #
+        # The ATR distance above is untouched -- the stop still governs
+        # the EXIT. It just no longer governs the SIZE.
+        #
+        # ---- AND THE RISK CAP IS OFF ON THIS PATH. 7 Aug 2026. ----
+        #
+        # TOP_N_MOMENTUM_MODE sizes from the ATR itself, a few lines
+        # up: a volatile stock already gets a wide stop and a small
+        # position through ATR_STOP_MULTIPLIER. Applying the Rs 2,000
+        # cap on top would be the same reduction taken twice, and it
+        # broke seven tests that pin this path's arithmetic.
+        #
+        # The cap belongs on the ORB path, where size came from the
+        # margin budget alone and nothing ever asked where the stop
+        # was -- that is the hole it was built for.
+        qty = self._risk_sized_qty(entry_price, stop_distance,
+                                   symbol, security_id,
+                                   cap_by_risk=False)
         if qty < 1:
             return None, None, None
-
-        max_qty_by_notional = int(MAX_NOTIONAL_PER_TRADE_RS / entry_price)
-        if max_qty_by_notional < 1:
-            return None, None, None
-        qty = min(qty, max_qty_by_notional)
 
         if direction == LONG:
             stop_price = entry_price - stop_distance
@@ -1932,6 +3480,203 @@ class Engine:
             stop_price = entry_price + stop_distance
 
         return stop_price, None, qty
+
+    # ==============================================================
+    # YOUR TRADES ARE YOURS  (2026-07-29)
+    # ==============================================================
+
+    def _is_manual_position(self, symbol):
+        """True if the OPERATOR opened this position, not the bot.
+
+        SMLMAH, 29 July: bought by hand at its upper circuit, closed
+        by the bot seconds later on a housekeeping rule. See config's
+        MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE for the full note.
+        """
+        position = self.open_positions.get(symbol)
+        if not position:
+            return False
+        return position.get("entry_reason") in (
+            ENTRY_REASON_MANUAL_DASHBOARD,
+            ENTRY_REASON_MANUAL_SHORT_DASHBOARD,
+        )
+
+    def _bot_may_close(self, symbol, what_it_wanted_to_do):
+        """False when the bot is about to close a position the operator
+        opened for a reason that isn't loss protection.
+
+        Says so in plain English rather than skipping silently -- the
+        operator's standing rule is that he must be able to read what
+        the bot is doing.
+        """
+        if not MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE:
+            return True
+        if not self._is_manual_position(symbol):
+            return True
+        self._manual_alert(
+            symbol, "HELD",
+            f"{symbol} -- you bought this one. The bot wanted to close "
+            f"it ({what_it_wanted_to_do}) and did NOT. Still open."
+        )
+        return False
+
+    def _check_news_on_holding(self, symbol, position, price):
+        """Tell the operator when a stock he HOLDS files something.
+
+        =====================================================
+        2026-07-29 -- information, deliberately not automation
+        =====================================================
+        PCBL filed results at 14:19 while the position was open. The
+        bot logged the filing, exited on the trail minutes later, and
+        the stock ran 12%. The obvious fix -- pause or widen the stop
+        when news lands -- was MEASURED against all 19 results filings
+        that day before being built, and it loses money:
+
+            fell 2.5% or more after filing :  5
+            rose 2.5% or more after filing :  8
+
+        The eight that rose never touched a 2.5% stop anyway, so a
+        pause does nothing for them. FOUR of the five that fell kept
+        falling -- SKMEGGPROD -6.39%, REFEX -6.07%, CARTRADE -5.62%,
+        BLACKBUCK -4.63% -- where the stop firing was correct and a
+        pause would have doubled the loss. Exactly one (REFEX) fell
+        through a stop and then recovered.
+
+        Saves you once in nineteen, hurts you four times in nineteen.
+        On results a stop is MORE useful, not less.
+
+        So the bot reports and the operator decides -- which is also
+        what the numbers say he is better at: on 29 July his own exits
+        beat holding by Rs 5,319 while the bot's trail cost Rs 47,324.
+
+        Fail-silent. A notification must never break a tick.
+        """
+        try:
+            for source, label in ((self.news_feed, "news"),
+                                  (self.announcements, "filing")):
+                if source is None:
+                    continue
+                item = source.for_symbol(symbol)
+                if not item:
+                    continue
+                kind = item.get("kind") or label.upper()
+                # Dedupe on the EVENT, not the symbol -- a second,
+                # different filing on the same stock is worth saying.
+                stamp = (item.get("filed_at") or item.get("at")
+                         or item.get("time") or kind)
+                self._position_news_alert(symbol, position, price,
+                                          label, kind, stamp, item)
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    def _position_news_alert(self, symbol, position, price, label, kind,
+                             stamp, item):
+        """One plain-English line, once per event."""
+        key = (symbol, label, str(stamp))
+        if key in self._news_alerted:
+            return
+        self._news_alerted.add(key)
+
+        entry = position.get("entry_price")
+        qty = position.get("qty")
+        move = ""
+        if entry and price:
+            move = f", now {price:,.2f} ({(price - entry) / entry * 100:+.2f}%)"
+        headline = (item.get("headline") or item.get("subject")
+                    or item.get("title") or "")
+        when = item.get("filed_at") or item.get("at") or ""
+        self.manual_alerts.append({
+            "symbol": symbol,
+            "kind": "NEWS",
+            "message": (f"{symbol} -- {kind} {label} {when} while you hold "
+                        f"{qty} shares from {entry:,.2f}{move}. "
+                        f"No action taken."
+                        + (f" [{headline[:80]}]" if headline else "")),
+            "at": datetime.now().strftime("%H:%M:%S"),
+        })
+        del self.manual_alerts[:-MANUAL_ALERT_HISTORY]
+        decision(f"[HOLDING] {self.manual_alerts[-1]['message']}")
+
+    def _trail_only_warns(self, symbol, price, stop_price):
+        """True when this trailing-stop breach should be REPORTED
+        rather than acted on -- i.e. the operator opened this position.
+
+        KAYNES, 29 July: in profit, dipped 2.5% off its high, sold by
+        the trail, then ran to 3,685. That day his own hand-made exits
+        returned +Rs 5,947 while the trail lost Rs 14,909 -- so on HIS
+        trades the message is worth more than the sale.
+
+        The HARD stop is untouched and still fires. This only silences
+        the trail, which is the one that sells winners.
+        """
+        if not MANUAL_POSITIONS_TRAIL_ALERTS_ONLY:
+            return False
+        if not self._is_manual_position(symbol):
+            return False
+        entry = (self.open_positions.get(symbol) or {}).get("entry_price")
+        move = ""
+        if entry:
+            move = f", {((price - entry) / entry * 100):+.2f}% from your entry"
+        self._manual_alert(
+            symbol, "TRAIL",
+            f"{symbol} has fallen back to {price:.2f} (trail level "
+            f"{stop_price:.2f}{move}). NOT sold -- it is your trade. "
+            f"Sell it from the dashboard if you want out."
+        )
+        return True
+
+    def _manual_alert(self, symbol, kind, message):
+        """Record a plain-English note about a manual position, once.
+
+        Repeats are suppressed per symbol per kind -- a trailing-stop
+        breach is true on every tick after it happens, and the operator
+        does not need the same sentence four hundred times.
+        """
+        key = (symbol, kind)
+        if key in self._manual_alerts_seen:
+            return
+        self._manual_alerts_seen.add(key)
+        self.manual_alerts.append({
+            "symbol": symbol,
+            "kind": kind,
+            "message": message,
+            "at": datetime.now().strftime("%H:%M:%S"),
+        })
+        del self.manual_alerts[:-MANUAL_ALERT_HISTORY]
+        decision(f"[YOUR TRADE] {message}")
+
+    def export_session_counters(self):
+        """Per-day counters that must survive a mid-session restart.
+
+        2026-07-29: found in the integration check. _rotations_today
+        reset to 0 on restart, so the 5-swap cap could be exceeded --
+        five before lunch, five more after. _news_alerted reset too,
+        so every filing already reported would be announced again.
+        """
+        return {
+            "rotations_today": self._rotations_today,
+            "news_alerted": ["|".join(k) for k in self._news_alerted],
+            "manual_alerts_seen": ["|".join(k)
+                                   for k in self._manual_alerts_seen],
+        }
+
+    def load_session_counters(self, saved):
+        """Restore them. Never raises -- bad state must not stop a
+        restart, it just means a counter starts fresh."""
+        try:
+            if not saved:
+                return
+            self._rotations_today = int(saved.get("rotations_today") or 0)
+            self._news_alerted = {tuple(k.split("|"))
+                                  for k in saved.get("news_alerted") or []}
+            self._manual_alerts_seen = {
+                tuple(k.split("|"))
+                for k in saved.get("manual_alerts_seen") or []}
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    def get_manual_alerts(self):
+        """Public read for the dashboard. Newest first."""
+        return list(reversed(self.manual_alerts))
 
     def _orb_stop_seed(self, symbol, direction):
         """
@@ -2021,6 +3766,15 @@ class Engine:
         if not self.circuit_monitor.is_flagged(symbol):
             return
 
+        # 2026-07-29: direction-aware. A LONG approaching its UPPER
+        # circuit is the day's best position, not a trapped one.
+        position = self.open_positions.get(symbol) or {}
+        if not self._circuit_blocks(symbol, position.get("direction", LONG)):
+            return
+
+        if not self._bot_may_close(symbol, "it is near a circuit limit"):
+            return
+
         flag = self.circuit_monitor.get_flag(symbol)
         detail = (
             f" ({flag['side']}, gap={flag['gap_pct'] * 100:.2f}%)"
@@ -2032,6 +3786,33 @@ class Engine:
         )
         self._exit(symbol, price, EXIT_REASON_CIRCUIT_PROXIMITY, tick_time)
 
+    def _circuit_blocks(self, symbol, direction):
+        """True when this circuit approach is genuinely against us.
+
+        LONG  + LOWER circuit  -> True   (no buyers if it locks)
+        LONG  + UPPER circuit  -> False  (no sellers -- that is the win)
+        SHORT + UPPER circuit  -> True
+        SHORT + LOWER circuit  -> False
+
+        Fails CLOSED on unknown data: if the side cannot be read, the
+        old blanket behaviour applies. An unreadable flag is not
+        evidence that the approach is favourable.
+        """
+        if not CIRCUIT_RULE_DIRECTION_AWARE:
+            return True
+        if self.circuit_monitor is None:
+            return True
+        try:
+            flag = self.circuit_monitor.get_flag(symbol) or {}
+            side = (flag.get("side") or "").upper()
+        except Exception:                                  # noqa: BLE001
+            return True
+        if side not in ("UPPER", "LOWER"):
+            return True
+        if direction == LONG:
+            return side == "LOWER"
+        return side == "UPPER"
+
     def get_circuit_flagged_symbols(self):
         """
         Public read for the dashboard (see dashboard/state.py's
@@ -2042,6 +3823,60 @@ class Engine:
         if self.circuit_monitor is None:
             return []
         return self.circuit_monitor.get_flagged_symbols()
+
+    # ----------------------------------------------------------
+    # What happened AFTER we sold
+    # ----------------------------------------------------------
+    #
+    #     "ltp is not place in closed positions so can't identify the
+    #      move after exit in stocks - this requested by me as wanted
+    #      but not done"          -- operator, 29 July 2026
+    #
+    # The bot forgot a stock the instant it sold it. On 29 July it
+    # trailed out of KAYNES at 3,398 and KAYNES went to 3,684.70;
+    # PCBL, KIRLPNU and EPACKPEB did the same thing. Every one of
+    # those was spotted by the operator watching his broker screen,
+    # because the bot had no idea and the dashboard had nothing to
+    # show.
+    #
+    # This is DELIBERATELY observation only. It records where a stock
+    # went after we left. It must never re-enter, never widen a stop,
+    # never influence a decision -- the moment "it went up after we
+    # sold" becomes an input, the bot is chasing its own regret.
+
+    def _watch_after_exit(self, symbol, exit_price, exit_time):
+        """Start following a symbol we have just sold."""
+        try:
+            exit_price = float(exit_price)
+        except (TypeError, ValueError):
+            return
+        # Re-exiting the same symbol later in the day restarts the
+        # clock -- the question is always "since the LAST exit".
+        self.post_exit[symbol] = {
+            "exit_price": exit_price,
+            "exit_time": exit_time,
+            "last": exit_price,
+            "peak": exit_price,
+            "trough": exit_price,
+            "peak_at": exit_time,
+        }
+
+    def _update_after_exit(self, symbol, price, tick_time):
+        """One dict lookup on the tick path. Nothing else."""
+        watch = self.post_exit.get(symbol)
+        if watch is None:
+            return
+        watch["last"] = price
+        if price > watch["peak"]:
+            watch["peak"] = price
+            watch["peak_at"] = tick_time
+        elif price < watch["trough"]:
+            watch["trough"] = price
+
+    def get_post_exit(self, symbol):
+        """Where a symbol went after we sold it, or None."""
+        watch = self.post_exit.get(symbol)
+        return dict(watch) if watch else None
 
     def get_circuit_snapshot(self):
         """
@@ -2076,6 +3911,69 @@ class Engine:
             f"[NO_TRADE] {symbol} {direction} skipped -- {reason}. "
             f"No {direction.lower()} trade for {symbol} today."
         )
+
+    def entry_blocked_reason(self, symbol, direction, at_time=None):
+        """Is a fresh entry into (symbol, direction) blocked right now,
+        and why -- or None if the risk layer has no objection.
+
+        `at_time` is the moment being asked about. It defaults to
+        datetime.now(), which is what every live caller wants.
+
+        ---- WHY IT IS A PARAMETER. 12 August 2026. ----
+        core/auto_entry.py's take() already carries its own `now` and
+        gates on it (FIRST_NEW_ENTRY, LAST_NEW_ENTRY). It then called
+        this method, which read the wall clock again. Two clocks in one
+        decision is the same class of split-brain as two rule files, and
+        it also made the two tests below fail after 15:30 every day --
+        they asked a real Engine whether TCS was blocked and got "the
+        market is closed", which is true and is not what they measure.
+        Commit 1691b16 fixed exactly this bug in two other files.
+
+        ---- THE CALL THAT WAS NEVER ANSWERED. 12 August 2026. ----
+
+        core/auto_entry.py's refuse_reason() has asked for this exact
+        method since it was written on 5 August ("the engine's own risk
+        layer has the last word"), via getattr(engine,
+        "entry_blocked_reason", None). Engine never had one, so
+        callable(None) was always False and that whole check was a
+        silent no-op on every ranked/early-bird entry -- the ranked path
+        was never actually asked whether square-off, the daily loss cap,
+        or a same-day news/sector block applied to it.
+
+        This does not re-implement those checks; it reads the same state
+        _try_structural_entry() already maintains (entry_blocked,
+        _daily_realized_pnl(), _entry_cutoff_reason()) so the two entry
+        paths can never disagree about whether the risk layer allows a
+        trade right now.
+        """
+        symbol = str(symbol or "").upper()
+        direction = str(direction or "").upper()
+
+        # _entry_cutoff_reason() calls .time() on what it's given, so it
+        # wants the full datetime, not an already-extracted time -- see
+        # its "now = at_time.time()" line. Passing datetime.now().time()
+        # here crashed with "'datetime.time' object has no attribute
+        # 'time'" on every single call, live, at 09:30 on 12 August --
+        # every ranked/early-bird entry that morning was refused by the
+        # very check meant to protect them, not by a real risk block.
+        cutoff = _entry_cutoff_reason(at_time or datetime.now())
+        if cutoff:
+            return cutoff
+
+        realized = self._daily_realized_pnl()
+        if realized <= -DAILY_MAX_LOSS_RS:
+            return (f"daily loss cap hit ({realized:.0f} <= "
+                    f"-{DAILY_MAX_LOSS_RS:.0f}) -- no new entries for the "
+                    f"rest of the session")
+        if realized >= DAILY_PROFIT_TARGET_RS:
+            return (f"daily profit target met ({realized:.0f} >= "
+                    f"{DAILY_PROFIT_TARGET_RS:.0f}) -- no new entries")
+
+        blocked = self.entry_blocked.get(symbol, {}).get(direction)
+        if blocked:
+            return blocked
+
+        return None
 
     # --------------------------------------------------
 
@@ -2174,6 +4072,12 @@ class Engine:
         if not result.get("success"):
             return
 
+        # What it actually filled at, not what we asked for. Everything
+        # downstream -- the stop, the target, the R, the P&L -- is
+        # measured from the entry price, so using the intended one puts
+        # the error into every number the trade ever produces.
+        price = self._filled_at(result, price)
+
         # One attempt per (symbol, direction) per day -- recorded the
         # moment a position is actually OPENED (not when a signal
         # merely fires), so a blocked/skipped signal never burns the
@@ -2195,6 +4099,10 @@ class Engine:
         except Exception:
             entry_rel = None
 
+        # WHY this trade was taken, captured NOW -- at entry, before
+        # anything is known about how it turns out (2026-07-28).
+        entry_reason_context = self._capture_reason(symbol)
+
         self.open_positions[symbol] = {
             "security_id": security_id,
             "qty": qty,
@@ -2202,6 +4110,7 @@ class Engine:
             "sector": entry_sector,
             "rel_strength": entry_rel,
             "regime": self._last_logged_regime,
+            **entry_reason_context,
             "entry_reason": entry_reason,
             "entry_time": entry_time,
             "direction": direction,
@@ -2258,7 +4167,33 @@ class Engine:
         # positions (manual buy/short, or structural entries outside
         # momentum mode) use core/trailing_stop.py at all.
         if target is None and stop_mode == STOP_MODE_SWING_TRAILING:
-            self.trailing_stop.start(symbol, stop_seed, direction=direction)
+            self.trailing_stop.start(
+                symbol, stop_seed, direction=direction, entry_price=price
+            )
+
+        # ---- REST A STOP AT THE BROKER, 2026-08-02 ----
+        #
+        # Everything above this line keeps the stop in RAM. This is the
+        # copy that survives the process dying. Placed at the HARD stop
+        # from entry, NOT at stop_seed -- stop_seed is the live level
+        # this process will manage and ratchet, and two stops at the
+        # same price would race for the same fill.
+        #
+        # Wrapped, and never allowed to matter: an entry that has
+        # already filled cannot be undone because a protective order
+        # failed, so the failure is LOUD and the trade stands.
+        if self.broker_stop is not None:
+            try:
+                from trading.broker_stop import hard_stop_price
+                resting = hard_stop_price(price, direction,
+                                          HARD_STOP_FROM_ENTRY_PCT)
+                if resting:
+                    self.broker_stop.place(symbol, security_id, qty,
+                                           resting, direction=direction)
+            except Exception as exc:                       # noqa: BLE001
+                warn(f"[BROKER_STOP] {symbol}: entry is filled but no "
+                     f"resting stop could be placed ({exc}). This "
+                     f"position is protected by THIS PROCESS ONLY.")
 
         if self.portfolio is not None:
             if direction == LONG:
@@ -2372,10 +4307,35 @@ class Engine:
             self._check_atr_trailing(symbol, position, price, tick_time)
             return
 
+        # PEAK TRAIL, 2026-07-28. Ratchet on EVERY tick, not on candle
+        # close -- a new high made mid-minute should lift the stop
+        # immediately rather than waiting up to 60 seconds for the bar
+        # to finish. Moves only on a new extreme, never on a pause.
+        previous = self.trailing_stop.get_stop(symbol)
+        moved = self.trailing_stop.update_on_price(symbol, price)
+        if moved is not None and previous is not None and moved != previous:
+            diagnostic(f"[TRAIL] {symbol} stop -> {moved:.2f} "
+                       f"(new high {price:.2f})")
+            # Let the resting stop at Dhan follow, but only when the
+            # trail has moved far enough to be worth an order-path call
+            # -- see BROKER_STOP_RESYNC_PCT. sync() never moves a stop
+            # DOWN, so a trail that somehow retreats leaves the broker's
+            # copy where it is, which is the safe side.
+            if self.broker_stop is not None:
+                try:
+                    self.broker_stop.sync(symbol, moved)
+                except Exception as exc:                   # noqa: BLE001
+                    diagnostic(f"[BROKER_STOP] {symbol}: sync failed "
+                               f"({exc}); the older trigger stands.")
+
         if not self.trailing_stop.is_hit(symbol, price):
             return
 
         stop_price = self.trailing_stop.get_stop(symbol)
+
+        if self._trail_only_warns(symbol, price, stop_price):
+            return
+
         decision(
             f"TRAILING STOP HIT: {symbol} stop={stop_price:.2f} "
             f"price={price:.2f}"
@@ -2405,6 +4365,9 @@ class Engine:
         if not hit:
             return
 
+        if self._trail_only_warns(symbol, price, stop_price):
+            return
+
         decision(
             f"ATR TRAILING STOP HIT: {symbol} stop={stop_price:.2f} "
             f"price={price:.2f}"
@@ -2424,6 +4387,15 @@ class Engine:
         enter), the existing stop is left exactly where it was
         rather than guessed at.
         """
+        # 2026-07-29, measured over 80 real trades: ratcheting this stop
+        # is what turned +Rs 21,374 of entries into -Rs 1,252. With the
+        # trail off the stop stays exactly where _atr_entry_sizing put
+        # it -- 2.5% below entry -- and still closes a losing trade. It
+        # simply stops selling the winners. See config's
+        # ENABLE_BOT_TRAILING_STOP for the full table.
+        if not ENABLE_BOT_TRAILING_STOP:
+            return
+
         candles = self.candle_engine.last_n_closed(symbol, ATR_PERIOD + 1)
         atr = compute_atr(candles, ATR_PERIOD) if candles else None
         if atr is None or atr <= 0:
@@ -2535,31 +4507,61 @@ class Engine:
             position["partial_exit_done"] = True
             return
 
-        exit_price = close
+        self._trim(symbol, position, trim_qty, close,
+                   EXIT_REASON_PARTIAL_PROFIT, closed_candle.get("time"))
+        position["partial_exit_done"] = True
+
+    def _trim(self, symbol, position, trim_qty, price, reason, exit_time):
+        """Close PART of a position and leave the rest running.
+
+        Extracted from _maybe_partial_exit() on 2 August 2026 so the
+        automatic ATR trim and the operator's own "sell half" go down
+        the SAME path. Two code paths that both reduce a position and
+        both write a closed_positions row is how the two start
+        disagreeing about what is still held.
+
+        The stop and the trail are deliberately NOT touched: the
+        remaining shares keep the level they had. Re-seeding a stop on
+        a trim would move risk on a position he did not re-enter.
+
+        Returns the filled price, or None if nothing was sold.
+        """
+        direction = position.get("direction", LONG)
+        entry_price = position["entry_price"]
+        total_qty = int(position.get("qty") or 0)
+        try:
+            trim_qty = int(trim_qty)
+        except (TypeError, ValueError):
+            return None
+        if trim_qty < 1 or trim_qty >= total_qty:
+            return None
+
+        exit_price = price
         pnl = None
         if direction == LONG:
-            self.execution.sell(
+            result = self.execution.sell(
                 position["security_id"], symbol, exit_price, trim_qty,
-                reason=EXIT_REASON_PARTIAL_PROFIT,
+                reason=reason,
             )
+            exit_price = self._filled_at(result, exit_price)
             if self.portfolio is not None:
                 pnl = self.portfolio.on_sell(entry_price, exit_price, trim_qty)
         else:
-            self.execution.buy(
+            result = self.execution.buy(
                 position["security_id"], symbol, exit_price, trim_qty,
-                reason=EXIT_REASON_PARTIAL_PROFIT,
+                reason=reason,
             )
+            exit_price = self._filled_at(result, exit_price)
             if self.portfolio is not None:
                 pnl = self.portfolio.on_cover(entry_price, exit_price, trim_qty)
 
-        exit_time = closed_candle.get("time")
         entry_time = position.get("entry_time")
         holding_seconds = None
         if entry_time is not None and exit_time is not None:
             holding_seconds = (exit_time - entry_time).total_seconds()
 
         decision(
-            f"\nPARTIAL PROFIT: {symbol}\n"
+            f"\n{reason}: {symbol}\n"
             f"Trimmed        : {trim_qty}/{total_qty} @ {exit_price:.2f}\n"
             f"Remaining qty  : {total_qty - trim_qty}"
         )
@@ -2575,7 +4577,7 @@ class Engine:
             "initial_stop": position.get("initial_stop"),
             "exit_price": exit_price,
             "exit_time": exit_time,
-            "exit_reason": EXIT_REASON_PARTIAL_PROFIT,
+            "exit_reason": reason,
             "holding_seconds": holding_seconds,
             "pnl": pnl,
         })
@@ -2586,7 +4588,25 @@ class Engine:
         # only bookkeeping change needed; the stop/trail state is
         # untouched.
         position["qty"] = total_qty - trim_qty
-        position["partial_exit_done"] = True
+
+        # The resting stop at Dhan is for the WHOLE position. After a
+        # trim it would sell more than is held -- on MTF the surplus is
+        # a short. Re-rest it at the same trigger for what is left.
+        if self.broker_stop is not None:
+            try:
+                resting = self.broker_stop.resting().get(symbol)
+                self.broker_stop.cancel(symbol, why=f"trimmed to "
+                                                    f"{position['qty']}")
+                if resting and position["qty"] > 0:
+                    self.broker_stop.place(
+                        symbol, position["security_id"], position["qty"],
+                        resting.get("trigger"), direction=direction)
+            except Exception as exc:                       # noqa: BLE001
+                warn(f"[BROKER_STOP] {symbol}: trimmed to "
+                     f"{position['qty']} but the resting stop could not "
+                     f"be resized ({exc}). CHECK DHAN -- it may still be "
+                     f"sized for the OLD quantity.")
+        return exit_price
 
     def _check_fixed_bracket(self, symbol, position, price, tick_time):
         """
@@ -2725,8 +4745,61 @@ class Engine:
             else:
                 continue
 
-            self._exit(pending_symbol, exit_price, EXIT_REASON_MANUAL, tick_time)
+            # ---- SELL SOME OF IT, NOT ALL OF IT. 2 August 2026. ----
+            #
+            #     "ride untill the momentum stays - exit once it gone
+            #      ruthlessly"
+            #
+            # Riding a move usually means trimming into strength, and
+            # this button could only ever sell the whole position. A
+            # size on the request now trims instead.
+            #
+            # None -- every caller before today, and the exit-all
+            # batch -- still means the whole position, unchanged.
+            want = self.trade_controller.exit_qty(pending_symbol)
+            position = self.open_positions[pending_symbol]
+            held = int(position.get("qty") or 0)
+            if want and 0 < want < held:
+                self._trim(pending_symbol, position, want, exit_price,
+                           EXIT_REASON_MANUAL_PARTIAL, tick_time)
+            else:
+                # want >= held is not an error -- it is "sell all of
+                # it", which is what he means by typing the full size.
+                self._exit(pending_symbol, exit_price,
+                           EXIT_REASON_MANUAL, tick_time)
             self.trade_controller.clear_exit(pending_symbol)
+
+    @staticmethod
+    def _filled_at(result, intended):
+        """The price the order ACTUALLY traded at.
+
+        THE 11x BUG, fixed 30 July 2026.
+        --------------------------------
+        Every execution call returns
+
+            {"success", "order_id", "price", "intent_price", "slippage_rs"}
+
+        where `price` is the FILL and `intent_price` is what the engine
+        asked for. The engine discarded the whole dict and carried on
+        using its own intended price, so slippage was modelled, printed,
+        written to fills.db -- and then thrown away before it reached
+        the P&L.
+
+        Measured over one session: gross on the fills was Rs 1,843.94,
+        modelled slippage was Rs 19,334.01, and the dashboard reported
+        Rs 21,177.95. The reported figure was the gross PLUS the cost
+        that should have been subtracted -- roughly 11x the truth, in
+        the flattering direction.
+
+        A paper run exists to estimate what live trading would do. A
+        paper run that quietly deletes its own costs estimates nothing.
+        """
+        try:
+            filled = float((result or {}).get("price"))
+        except (TypeError, ValueError):
+            return intended
+        # A zero or negative fill is a broken response, not a free trade.
+        return filled if filled > 0 else intended
 
     def _exit(self, symbol, price, reason, exit_time):
         position = self.open_positions[symbol]
@@ -2734,19 +4807,24 @@ class Engine:
 
         pnl = None
         if direction == LONG:
-            self.execution.sell(
+            result = self.execution.sell(
                 position["security_id"], symbol, price, position["qty"],
                 reason=reason,
             )
+            # Rebound to the FILL before anything else uses it -- the
+            # P&L, the closed_positions row, and the exit log all read
+            # `price` below.
+            price = self._filled_at(result, price)
             if self.portfolio is not None:
                 pnl = self.portfolio.on_sell(
                     position["entry_price"], price, position["qty"]
                 )
         else:
-            self.execution.buy(
+            result = self.execution.buy(
                 position["security_id"], symbol, price, position["qty"],
                 reason=reason,
             )
+            price = self._filled_at(result, price)
             if self.portfolio is not None:
                 pnl = self.portfolio.on_cover(
                     position["entry_price"], price, position["qty"]
@@ -2774,9 +4852,22 @@ class Engine:
             # Entry context, carried through so the learning loop can
             # ask "which CONDITIONS worked", not just "what was the P&L".
             "sector": position.get("sector"),
+            # THE REASON, as it was known AT ENTRY (2026-07-28). Stamped
+            # onto the position by _capture_reason() when the trade
+            # opened -- never re-read at exit, which would record what
+            # turned out to be true rather than what was known when the
+            # decision was made.
+            "news_kind": position.get("news_kind"),
+            "filing_kind": position.get("filing_kind"),
+            "results_grade": position.get("results_grade"),
+            "days_since_results": position.get("days_since_results"),
+            "had_reason": position.get("had_reason"),
+            "reason_summary": position.get("reason_summary"),
             "rel_strength": position.get("rel_strength"),
             "regime": position.get("regime"),
         })
+
+        self._watch_after_exit(symbol, price, exit_time)
 
         # LEARN -> MEMORY (the operator's architecture, slide 5). Purely
         # observational: this records the completed trade with the
@@ -2789,6 +4880,22 @@ class Engine:
                 self.trade_memory.record(self.closed_positions[-1])
             except Exception as exc:
                 diagnostic(f"[LEARN] Could not record {symbol}: {exc}")
+
+        # ---- PULL THE RESTING STOP. THE ONE THAT MUST NOT BE MISSED.
+        #
+        # A Forever Order left at Dhan after this exit would SELL STOCK
+        # THAT IS NO LONGER HELD -- on MTF that opens a short position
+        # nobody asked for. It goes before the local bookkeeping below
+        # so that even an exception in the rest of this teardown cannot
+        # leave the broker holding a live order.
+        if self.broker_stop is not None:
+            try:
+                self.broker_stop.cancel(symbol, why=reason)
+            except Exception as exc:                       # noqa: BLE001
+                warn(f"[BROKER_STOP] {symbol}: exit is done but the "
+                     f"resting stop could NOT be cancelled ({exc}). "
+                     f"CHECK DHAN -- it may still be live with no "
+                     f"position behind it.")
 
         del self.open_positions[symbol]
         self.trailing_stop.clear(symbol)
@@ -2990,14 +5097,72 @@ class Engine:
 
     def flatten_all(self, get_price):
         """
-        Called at SQUARE_OFF_TIME. get_price(symbol) ->
-        latest known price.
+        Called at SQUARE_OFF_TIME when FORCE_SQUARE_OFF_AT_CLOSE is on.
+        get_price(symbol) -> latest known price.
         """
         now = datetime.now()
         for symbol in list(self.open_positions.keys()):
-            price = get_price(symbol) or self.open_positions[symbol][
-                "entry_price"
-            ]
+            price = get_price(symbol)
+            if price is None:
+                # 2026-07-28: this used to fall back to the position's
+                # own ENTRY price, booking a perfectly flat P&L for a
+                # trade that had one -- a silent falsification of the
+                # book. Skip instead and say so; the belt-and-suspenders
+                # loop in main.py retries on the next pass.
+                warn(f"[SQUARE_OFF] {symbol} NOT closed -- no live price "
+                     f"available. Will retry. It is still open.")
+                continue
             self._exit(symbol, price, EXIT_REASON_SQUARE_OFF, now)
 
         decision("SQUARE OFF: all positions flattened.")
+
+    def report_carry_forward(self, get_price):
+        """MTF, 2026-07-28. What is being HELD overnight, and what it is
+        worth right now.
+
+        The operator moved to MTF to hold positions for days. Square-off
+        is MIS machinery and would liquidate every one of them daily --
+        it closed TVSMOTOR and CUB on 2026-07-28 for exactly that
+        reason. So instead of flattening, the bot reports.
+
+        Deliberately loud and itemised. A position carried overnight has
+        risk no stop can cover between 15:30 and 09:15, so the operator
+        should end every session knowing precisely what he is holding,
+        not discover it at the next open.
+        """
+        if not self.open_positions:
+            decision("[CARRY] Flat at the close -- nothing held overnight.")
+            return
+
+        total_value = 0.0
+        total_open_pnl = 0.0
+        decision(f"[CARRY] Holding {len(self.open_positions)} position(s) "
+                 f"overnight (MTF -- square-off is OFF):")
+        for symbol, position in sorted(self.open_positions.items()):
+            price = get_price(symbol)
+            entry = position.get("entry_price")
+            qty = position.get("qty") or 0
+            direction = position.get("direction", LONG)
+            stop = position.get("stop")
+            if price is None:
+                decision(f"[CARRY]   {symbol}: qty {qty} @ {entry} -- "
+                         f"no live price to value it against.")
+                continue
+            pnl = ((price - entry) if direction == LONG
+                   else (entry - price)) * qty
+            value = price * qty
+            total_value += value
+            total_open_pnl += pnl
+            move = ((price - entry) / entry * 100) if entry else 0.0
+            decision(
+                f"[CARRY]   {symbol:12} {direction:5} qty {qty:6} "
+                f"entry {entry:10.2f} now {price:10.2f} "
+                f"({move:+.2f}%)  open P&L {pnl:+10.0f}  "
+                f"stop {stop if stop is None else round(stop, 2)}"
+            )
+        decision(
+            f"[CARRY] Total carried: Rs {total_value:,.0f} of stock, "
+            f"open P&L Rs {total_open_pnl:+,.0f}. Overnight gap risk is "
+            f"NOT covered by the trailing stop -- it cannot fire between "
+            f"15:30 and 09:15."
+        )

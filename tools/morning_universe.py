@@ -46,8 +46,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.logger import decision, warn  # noqa: E402
 from core.master_loader import MASTER_CSV_PATH  # noqa: E402
 from core.subscribe_list import (  # noqa: E402
-    MIN_TURNOVER_RS, NO, YES, apply, build_bhav_index, find_new_listings,
-    read_master, write_master, write_new_stocks_md,
+    MIN_TURNOVER_RS, NO, TURNOVER_SESSIONS, YES, apply, build_bhav_index,
+    build_bhav_index_over, find_new_listings, read_master, write_master,
+    write_new_stocks_md,
 )
 from core.universe_builder import fetch_bhavcopy, fetch_excluded_symbols  # noqa: E402
 
@@ -68,14 +69,56 @@ def latest_bhavcopy(max_lookback=6, folder="data"):
     return [], None
 
 
+def recent_bhavcopies(sessions=TURNOVER_SESSIONS, folder="data",
+                      max_lookback=30):
+    """The last `sessions` trading days of bhavcopy, OLDEST FIRST.
+
+    ---- WHY MORE THAN ONE. 2 August 2026. ----
+    See core/subscribe_list.TURNOVER_SESSIONS. One previous session
+    decides the liquidity bar in both directions and gets it wrong both
+    ways: SIGMA traded Rs 31.74cr on its results day and its ten-day
+    median is Rs 0.15 crore. On the single-day rule that stock was
+    tradeable, on MTF, overnight, into a book you cannot get out of.
+
+    Reads from disk first -- fetch_bhavcopy() caches every file it
+    downloads into data/, and there are 35 of them there already, so a
+    normal morning does ONE download and reads the other nine.
+
+    Never raises and never returns fewer than it can: a holiday, a
+    missing file or a dead network simply gives a shorter list, and
+    build_bhav_index_over() reports how many sessions it really had.
+    """
+    got, day, checked = [], datetime.now(), 0
+    while len(got) < sessions and checked < max_lookback:
+        checked += 1
+        day = day - timedelta(days=1)
+        if day.weekday() >= 5:
+            continue
+        rows = fetch_bhavcopy(date=day, folder=folder, quiet=True)
+        if rows:
+            got.append((day, rows))
+    got.reverse()                                   # oldest first
+    return got
+
+
 def fetch_price_bands(date, folder="data"):
     """
-    {symbol: band_pct} from NSE's daily securities list. This is how the
-    bot learns, before the open, that a stock is under surveillance --
-    ASM/GSM names get banded down to 2% or 5%, and a 2% band cannot
-    produce a tradeable breakout.
+    ({symbol: band_pct}, {symbol: remarks}) from NSE's daily securities
+    list.
 
-    Fails open: {} on any problem, and the band check is then skipped.
+    THE BAND AND THE SURVEILLANCE FLAG ARE TWO DIFFERENT THINGS, and
+    the comment that used to be here said they were the same:
+
+        "ASM/GSM names get banded down to 2% or 5%"
+
+    Measured on the 30 July list, that is false. 655 scrips sit on a 5%
+    band and only 32 of them carry a GSM remark; 2,202 sit on 20% and
+    18 of those carry one. The band says how far the stock may move
+    today. The REMARKS column says whether the exchange has a problem
+    with the company. core/subscribe_list.decide() now reads both, and
+    reads them as separate questions.
+
+    Fails open: ({}, {}) on any problem, and both checks are skipped.
     """
     import csv as _csv
     try:
@@ -84,11 +127,11 @@ def fetch_price_bands(date, folder="data"):
             path = n.priceband_report(date=date, folder=folder)
     except Exception as exc:
         warn(f"[MORNING] Price-band report unavailable ({exc}). "
-             f"Surveillance/ASM check skipped -- no stock is marked NO "
-             f"because of it.")
-        return {}
+             f"Band and surveillance checks skipped -- no stock is "
+             f"marked NO because of it.")
+        return {}, {}
 
-    out = {}
+    bands, remarks = {}, {}
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             for row in _csv.DictReader(f):
@@ -97,22 +140,36 @@ def fetch_price_bands(date, folder="data"):
                 band = row.get("BAND") or row.get("PRICE BAND") or ""
                 if not symbol:
                     continue
+                note = str(row.get("REMARKS") or "").strip()
+                if note and note != "-":
+                    remarks[symbol] = note
                 try:
-                    out[symbol] = float(str(band).replace("%", "").strip())
+                    bands[symbol] = float(str(band).replace("%", "").strip())
                 except (TypeError, ValueError):
                     continue
     except Exception as exc:
         warn(f"[MORNING] Could not read the price-band report: {exc}")
-        return {}
-    return out
+        return {}, {}
+    return bands, remarks
 
 
-def fetch_corporate_actions(known_symbols):
+def fetch_corporate_actions(known_symbols, on_date=None):
     """
-    Symbols going ex-split / ex-bonus / ex-rights / ex-dividend TODAY.
-    Their price scale changes overnight, so every %-move against
-    yesterday's close is meaningless -- and would poison the gainers/
-    losers table and the sector ranking if left on the feed.
+    Symbols going ex-split / ex-bonus / ex-rights / ex-dividend on the
+    session this list is being built FOR. Their price scale changes
+    overnight, so every %-move against yesterday's close is meaningless
+    -- and would poison the gainers/losers table and the sector ranking
+    if left on the feed.
+
+    ---- on_date EXISTS BECAUSE THIS NOW RUNS AT NIGHT. 2 Aug 2026 ----
+
+        "every night we will complete the necessary works, & in morning
+         only small pending can be completed by bot within 15-20 mins"
+
+    price_distorting_symbols() defaults to TODAY. Run at 22:00 on a
+    Sunday that means Sunday -- and a stock going ex-split on MONDAY
+    would not be blocked on the Monday list this run is building. The
+    one job of this function, missed by a date.
 
     Fails open: empty set on any problem.
     """
@@ -121,7 +178,7 @@ def fetch_corporate_actions(known_symbols):
         from core.stock_memory import default_memory
         memory = default_memory()
         refresh(memory=memory, known_symbols=known_symbols)
-        return set(memory.price_distorting_symbols())
+        return set(memory.price_distorting_symbols(on_date=on_date))
     except Exception as exc:
         warn(f"[MORNING] Corporate-action refresh failed ({exc}). "
              f"Ex-date check skipped for today.")
@@ -167,6 +224,22 @@ def fetch_dhan_security_ids(symbols):
         return {}
 
 
+def next_session(today=None):
+    """The session this list is being built FOR.
+
+    Run in the morning that is today. Run the night before -- which is
+    the point of tools/nightly.py -- it is the next weekday. Getting it
+    wrong means the ex-date block is applied to the wrong day, and a
+    stock whose price scale changes overnight stays on the feed.
+    """
+    day = (today or datetime.now()).date()
+    if (today or datetime.now()).hour >= 16:      # after the close
+        day = day + timedelta(days=1)
+    while day.weekday() >= 5:                     # Sat / Sun
+        day = day + timedelta(days=1)
+    return day
+
+
 def main():
     decision("=" * 62)
     decision("  MORNING UNIVERSE -- pre-market subscribe list")
@@ -208,10 +281,37 @@ def main():
         warn(f"[MORNING] Daily-candle store failed ({exc}). Subscribe "
              f"list is unaffected.")
 
-    bhav_index = build_bhav_index(bhav_rows)
+    # ---- LIQUIDITY IS MEASURED OVER SESSIONS, NOT ONE DAY ----
+    #
+    # The reference day above still decides series, close and the T2T
+    # check -- those are facts about today. Only TURNOVER is pooled.
+    # See core/subscribe_list.TURNOVER_SESSIONS for the measurement.
+    #
+    # Degrades rather than fails: if only one bhavcopy can be read this
+    # is exactly the old behaviour, and the reason text on every block
+    # says how many sessions it spoke from.
+    history = recent_bhavcopies()
+    if len(history) > 1:
+        bhav_index = build_bhav_index_over([rows_ for _, rows_ in history])
+        span = f"{history[0][0]:%d %b} to {history[-1][0]:%d %b}"
+        decision(f"  Turnover window        : {len(history)} sessions "
+                 f"({span}), median per stock")
+    else:
+        bhav_index = build_bhav_index(bhav_rows)
+        warn("  Turnover window        : 1 session only -- could not read "
+             "enough recent bhavcopies, so a single quiet or busy day "
+             "decides the liquidity bar. Re-run when the network is up.")
     excluded = fetch_excluded_symbols()
-    bands = fetch_price_bands(bhav_date)
-    actions = fetch_corporate_actions(known)
+    bands, remarks = fetch_price_bands(bhav_date)
+    if remarks:
+        decision(f"  Under surveillance     : {len(remarks)} scrip(s) "
+                 f"carry a GSM remark on NSE's list")
+    for_day = next_session()
+    if for_day != datetime.now().date():
+        decision(f"  Building the list FOR : {for_day:%a %d %b} "
+                 f"(run after the close, so ex-dates are read for that "
+                 f"session, not tonight)")
+    actions = fetch_corporate_actions(known, on_date=for_day)
 
     decision(f"  NSE ETF/SGB/SME list   : {len(excluded)} symbols")
     decision(f"  Price bands            : {len(bands)} symbols"
@@ -265,7 +365,8 @@ def main():
 
     rows, summary = apply(rows, bhav_index, excluded=excluded, bands=bands,
                           corporate_actions=actions,
-                          min_turnover=MIN_TURNOVER_RS)
+                          min_turnover=MIN_TURNOVER_RS,
+                          remarks=remarks)
     write_master(rows, MASTER_CSV_PATH)
     md = write_new_stocks_md(new_listings, security_ids=sec_ids)
 

@@ -49,14 +49,14 @@ def test_etf_and_sgb_are_blocked():
     for symbol in ("SILVERBEES", "NIFTYBEES", "GOLDETF", "SGBAUG28"):
         ok, reason = decide(symbol, bhav=GOOD, sector="FUND")
         assert ok is False, symbol
-        assert "not company equity" in reason
+        assert "not on our board" in reason
 
 
 def test_nse_classified_etf_is_blocked_even_with_a_company_like_name():
     ok, reason = decide("MOTILALFUND", bhav=GOOD, sector="FINANCE",
                         excluded={"MOTILALFUND"})
     assert ok is False
-    assert "not company equity" in reason
+    assert "not on our board" in reason
 
 
 def test_real_companies_with_fund_like_names_survive():
@@ -67,12 +67,28 @@ def test_real_companies_with_fund_like_names_survive():
         assert ok is True, symbol
 
 
-def test_price_floor_and_ceiling():
-    ok, reason = decide("PENNY", bhav=dict(GOOD, close=45.0), sector="X")
-    assert ok is False and "below Rs 200" in reason
+def test_price_alone_no_longer_excludes_a_stock():
+    """Both bounds removed 2026-07-29 on the operator's instruction:
+    "Remove cap on below 200 & above 10,000 rs as we have moved from
+    MIS to MTF we left these two unchanged."
 
-    ok, reason = decide("MRF", bhav=dict(GOOD, close=130850.0), sector="X")
-    assert ok is False and "above Rs 10,000" in reason
+    Rs 200 was a tick-granularity argument and Rs 10,000 a sizing-
+    quantisation one. Both were about same-day round trips and neither
+    survives multi-day MTF holding."""
+    ok, _ = decide("PENNY", bhav=dict(GOOD, close=45.0), sector="X")
+    assert ok is True
+
+    ok, _ = decide("MRF", bhav=dict(GOOD, close=130850.0), sector="X")
+    assert ok is True
+
+
+def test_liquidity_still_excludes_a_cheap_scrip_that_barely_trades():
+    """Dropping the price floor must not quietly admit scrips nobody
+    can get out of. Turnover, not price, is the rule that matters."""
+    ok, reason = decide("PENNY", bhav=dict(GOOD, close=45.0, turnover=1.2e7),
+                        sector="X")
+    assert ok is False
+    assert "1.20cr" in reason
 
 
 def test_illiquid_is_blocked_and_the_reason_carries_the_number():
@@ -202,7 +218,9 @@ def test_apply_stamps_both_columns_and_counts():
 
 def test_apply_reports_what_flipped_since_yesterday():
     rows = [_row("FELL", subscribe=YES), _row("ROSE", subscribe=NO)]
-    index = {"FELL": dict(GOOD, close=50.0), "ROSE": GOOD}
+    # Was close=50.0 -- a price that no longer fails anything since
+    # the bounds were removed. Turnover is the rule that still bites.
+    index = {"FELL": dict(GOOD, turnover=1.2e7), "ROSE": GOOD}
     _, summary = apply(rows, index)
 
     assert summary["flipped_off"] and summary["flipped_off"][0][0] == "FELL"
@@ -245,7 +263,7 @@ def test_write_master_never_loses_the_hand_built_columns(tmp_path):
     row = _row("KEEPME", sector="PHARMA")
     row["KEYWORDS"] = "ONCOLOGY | GENERICS"
     row["THEMES"] = "HEALTHCARE"
-    rows, _ = apply([row], {"KEEPME": dict(GOOD, close=10.0)})   # -> NO
+    rows, _ = apply([row], {"KEEPME": dict(GOOD, turnover=1.2e7)})  # -> NO
     write_master(rows, path)
 
     back, _ = read_master(path)
@@ -259,7 +277,10 @@ def test_write_master_never_loses_the_hand_built_columns(tmp_path):
 # ---------------------------------------------------------------
 
 def test_find_new_listings_skips_what_we_already_have():
-    index = {"HAVE": GOOD, "NEW": GOOD, "PENNY": dict(GOOD, close=12.0)}
+    # PENNY at Rs 12 is a genuine new listing now that price alone
+    # excludes nothing -- ILLIQUID is the one that still gets skipped.
+    index = {"HAVE": GOOD, "NEW": GOOD,
+             "ILLIQUID": dict(GOOD, turnover=1.2e7)}
     found = find_new_listings(index, known_symbols={"HAVE"})
     assert [r["symbol"] for r in found] == ["NEW"]
 

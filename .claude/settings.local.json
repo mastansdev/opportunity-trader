@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sort -k6,7)",
+      "Bash(awk '{print $6,$7,$8,$9}')",
+      "Bash(timeout 100 py -m pytest tests/ -q)",
+      "Bash(py \"C:\\\\Users\\\\M\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Opportunity-Trader\\\\7b01342f-845c-48f0-9482-6d46d6b5b955\\\\scratchpad\\\\audit_orphans.py\")",
+      "Bash(py \"C:\\\\Users\\\\M\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\D--Opportunity-Trader\\\\7b01342f-845c-48f0-9482-6d46d6b5b955\\\\scratchpad\\\\audit_pipeline.py\")"
+    ]
+  }
+}

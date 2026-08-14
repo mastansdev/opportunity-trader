@@ -1,5 +1,10 @@
 # Trading Policy — Opportunity Trader
 
+> **SUPERSEDED — read [BOT.md](BOT.md) for the live rules.**
+>
+> Written 24 July 2026. The plain-language reasoning still holds; the
+> numbers have moved. `BOT.md` is generated from the code.
+
 *Written 2026-07-24, after the full trading-style revamp. This is the
 one document that states, in plain language, exactly how the bot
 decides. If the code and this document ever disagree, that's a bug —

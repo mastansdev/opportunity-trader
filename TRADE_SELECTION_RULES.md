@@ -1,5 +1,11 @@
 # Trade Selection — every rule, in the order the bot applies them
 
+> **SUPERSEDED — read [BOT.md](BOT.md) for the live rules.**
+>
+> States "live config as of 2026-07-25". It is not live config any more.
+> `BOT.md` regenerates its numbers from `config.py` and `core/rules.py`
+> every time it is written.
+
 Live config as of 2026-07-25. This is the complete list: if a stock is
 rejected, it was rejected by exactly one of the numbered rules below.
 

@@ -203,6 +203,114 @@ def build_name_index(csv_path=MASTER_CSV):
     return index
 
 
+# ---------------------------------------------------------------
+# WHICH WAY DOES IT CUT?
+# ---------------------------------------------------------------
+# 31 July 2026. The operator's own dashboard, row 8:
+#
+#     BAJFINANCE  up 8.10%  score 20.1
+#       NEWS BROKER: UBS issues 'sell' tag on Bajaj Finance
+#
+# UBS said SELL. The bot read it, matched it to the right company,
+# printed it on screen -- and added +4.0, because BROKER was a flat
+# score. An upgrade and a downgrade were worth exactly the same.
+#
+# Four of the nine categories have this defect, and all four are
+# categories where the SAME event type can be good news or bad:
+#
+#     BROKER      upgrade  <-> downgrade          was +4.0 either way
+#     GUIDANCE    raises   <-> cuts               was +3.0 either way
+#     LEGAL       wins case <-> insolvency        was -4.0 either way
+#     MANAGEMENT  appoints <-> CEO resigns        was -2.0 either way
+#
+# "Tata Power cuts FY27 guidance" scored the same as raising it.
+# "Company wins arbitration award" scored NEGATIVE, because the LEGAL
+# category assumed courts are bad news.
+#
+# The category says WHAT happened. This says which way it points. The
+# two are separate questions and were being answered by one number.
+#
+# ORDER IS DELIBERATE. The explicit analyst ACTION is read before any
+# rating word, because "downgrades to Hold from Buy" contains "Buy" --
+# the old rating, not the new one. Checking rating words first would
+# read that as good news.
+_BROKER_STANCE = [
+    (re.compile(r"\bdowngrade", re.I), "NEGATIVE"),
+    (re.compile(r"\bupgrade", re.I), "POSITIVE"),
+    (re.compile(r"\b(cuts?|lowers?|trims?|slashe[sd]?|reduces?)\b.{0,30}?"
+                r"\b(target|price\s+target|\bPT\b)", re.I), "NEGATIVE"),
+    (re.compile(r"\b(raises?|hikes?|lifts?|ups|boosts?)\b.{0,30}?"
+                r"\b(target|price\s+target|\bPT\b)", re.I), "POSITIVE"),
+    (re.compile(r"\b(sell|underperform|underweight|reduce)\b", re.I),
+     "NEGATIVE"),
+    (re.compile(r"\b(buy|outperform|overweight|accumulate|top\s+pick)\b",
+                re.I), "POSITIVE"),
+    (re.compile(r"\b(hold|neutral|equal\s*-?\s*weight|maintains?|"
+                r"reiterat)\b", re.I), "NEUTRAL"),
+]
+
+_GUIDANCE_STANCE = [
+    (re.compile(r"profit\s+warning|\b(cuts?|lowers?|trims?|slashe[sd]?|"
+                r"reduces?|scales?\s+back|withdraws?)\b", re.I), "NEGATIVE"),
+    (re.compile(r"\b(raises?|hikes?|lifts?|upgrades?|boosts?|"
+                r"increases?)\b", re.I), "POSITIVE"),
+]
+
+# The old rule read every court story as a disaster. An arbitration
+# award WON is a cash inflow and among the better things that can
+# happen to a mid-cap.
+_LEGAL_STANCE = [
+    (re.compile(r"\b(insolvenc|NCLT\s+admits|adverse|against\s+the\s+"
+                r"company|loses?\b|dismisse[sd]|penalt|contempt)", re.I),
+     "NEGATIVE"),
+    (re.compile(r"\b(wins?|won|favou?rable|in\s+(its|the\s+company'?s)\s+"
+                r"favou?r|relief|quashe[sd]|set\s+aside|award(ed)?\s+"
+                r"(Rs|damages))", re.I), "POSITIVE"),
+]
+
+# \b after "resign" does NOT match "resigns" -- there is no boundary
+# between n and s. The first version of this scored "Infosys CFO
+# resigns with immediate effect" as NEUTRAL, which is the exact class
+# of silent miss this whole change is meant to remove. Suffixed with
+# \w* wherever the verb inflects.
+_MANAGEMENT_STANCE = [
+    (re.compile(r"\b(resign\w*|quit\w*|steps?\s+down|stepping\s+down|"
+                r"exit\w*|ousted|sacked|terminated|offload\w*|"
+                r"pledg\w*|sells?\s+stake|stake\s+sale)\b", re.I),
+     "NEGATIVE"),
+    (re.compile(r"\b(appoint\w*|elevat\w*|names?\s+new|hire[sd]?|"
+                r"inducts?)\b", re.I), "POSITIVE"),
+]
+
+STANCE_RULES = {
+    "BROKER": _BROKER_STANCE,
+    "GUIDANCE": _GUIDANCE_STANCE,
+    "LEGAL": _LEGAL_STANCE,
+    "MANAGEMENT": _MANAGEMENT_STANCE,
+}
+
+
+def classify_stance(kind, headline):
+    """POSITIVE, NEGATIVE or NEUTRAL for the four two-way categories.
+
+    Returns None for the five categories whose sign is fixed by the
+    category itself -- a fire is never good news, an order win is never
+    bad -- so the caller knows to use the flat score for those.
+
+    NEUTRAL is a real answer, not a failure. "Jefferies maintains Hold"
+    is a genuine non-event and must score near zero rather than being
+    guessed either way.
+    """
+    rules = STANCE_RULES.get(kind)
+    if rules is None:
+        return None
+    text = str(headline or "")
+    for pattern, stance in rules:
+        if pattern.search(text):
+            return stance
+    return "NEUTRAL"
+
+
 def classify_impact(headline):
     """Which of the nine categories, or None for anything that is not a
     concrete event. Noise is checked first and wins."""
@@ -283,7 +391,10 @@ class NewsWatcher:
     """Poll RSS, keep only high-conviction items about our symbols."""
 
     def __init__(self, feeds=None, poll_seconds=180, fetcher=None,
-                 csv_path=MASTER_CSV, known_symbols=None):
+                 csv_path=MASTER_CSV, known_symbols=None, store=None):
+        # See core/feed_store.py. The collector passes one; main.py
+        # passes nothing and nothing about this class changes.
+        self.store = store
         self.feeds = list(feeds or DEFAULT_FEEDS)
         self.poll_seconds = poll_seconds
         self._fetcher = fetcher or self._fetch_http
@@ -333,12 +444,34 @@ class NewsWatcher:
                     continue                    # no named company we trade
                 fresh.append({
                     "symbols": symbols, "symbol": symbols[0], "kind": kind,
+                    "stance": classify_stance(kind, title),
                     "headline": title[:240], "link": link,
                     "source": urlparse(url).netloc.replace("www.", ""),
                     "seen_at": now.strftime("%H:%M:%S"), "published": pub[:31],
                 })
+        if fresh and self.store is not None:
+            self.store.save("news", fresh,
+                            lambda r: r.get("link")
+                                      or f"{r.get('symbol')}|"
+                                         f"{(r.get('headline') or '')[:90]}")
         with self._lock:
+            # ---- NEWEST FIRST, ACROSS ALL FEEDS. 3 August 2026. ----
+            #
+            #   "news & FILED not arranged properly"
+            #
+            # Prepending each poll's batch made the BATCHES newest-first
+            # and left the items INSIDE a batch in whatever order the
+            # feeds were walked. Several sources are polled together, so
+            # a 09:12 item from the third feed sat above a 09:41 item
+            # from the first, and the panel looked shuffled.
+            #
+            # core/announcement_watcher.py already did this correctly --
+            # it sorts on _filed_dt after prepending. This is the same
+            # two lines, which is what makes the omission worse.
             self._items = fresh + self._items
+            self._items.sort(key=lambda r: (r.get("published") or "",
+                                            r.get("seen_at") or ""),
+                             reverse=True)
             self._items = self._items[:200]
             for r in fresh:
                 for s in r["symbols"]:
@@ -346,7 +479,12 @@ class NewsWatcher:
             self._last_poll_at = now
             self._last_error = "; ".join(errors) if errors else None
         for r in fresh:
-            decision(f"[NEWSFEED] {'/'.join(r['symbols'])} -- {r['kind']}: "
+            # The stance is printed because the operator reads this log
+            # live. "BROKER" told him a broker said something;
+            # "BROKER/NEGATIVE" tells him what.
+            tag = (f"{r['kind']}/{r['stance']}" if r.get("stance")
+                   else r["kind"])
+            decision(f"[NEWSFEED] {'/'.join(r['symbols'])} -- {tag}: "
                      f"{r['headline'][:100]}")
         return fresh
 

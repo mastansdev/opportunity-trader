@@ -53,7 +53,63 @@ class TradeController:
         self._exit_symbols = set()
         self._buy_symbols = set()
         self._short_symbols = set()
+        # symbol -> shares, for requests that name a size. Absent means
+        # "the whole position" on an exit and "the standard Rs 1 lakh
+        # size" on an entry -- which is what every caller meant before
+        # a size could be named at all. See _remember_qty() below.
+        self._exit_qty = {}
+        self._buy_qty = {}
+        self._short_qty = {}
         self._entries_paused = False
+
+        # ACTION LOG, 2026-07-28. Every click, sent or failed, held
+        # SERVER-side.
+        #
+        # It lived in the browser first. The operator refreshed the page
+        # and the record vanished -- and he runs two or three screens,
+        # so a log only the clicking screen can see is not a record at
+        # all. He could click on one monitor, watch another, and never
+        # learn the click died.
+        #
+        # That matters because this IS the safety feature: on
+        # 2026-07-28 two BUY clicks were eaten by the 1-second panel
+        # rebuild, silently, and the second SUPREMEIND click filled
+        # Rs 87 higher. A row that survives a refresh, and appears on
+        # every screen, is the difference between noticing and not.
+        import threading as _threading
+        self._action_log = []
+        self._action_lock = _threading.Lock()
+
+    # --------------------------------------------------
+    # ACTION LOG
+    # --------------------------------------------------
+
+    MAX_ACTIONS = 40
+
+    def note_action(self, ok, text, at=None):
+        """Record one click. Never raises -- bookkeeping must not be
+        able to break a trade request.
+
+        `at` overrides the clock. Only core/session_replay.py passes
+        it, so a replayed session shows the time an order actually
+        went out rather than the time the replay was run -- a log
+        stamped 22:15 for a 09:31 order would be worse than no log.
+        """
+        try:
+            from datetime import datetime
+            with self._action_lock:
+                self._action_log.insert(0, {
+                    "at": at or datetime.now().strftime("%H:%M:%S"),
+                    "ok": bool(ok),
+                    "text": str(text)[:160],
+                })
+                del self._action_log[self.MAX_ACTIONS:]
+        except Exception:                                  # noqa: BLE001
+            pass
+
+    def actions(self):
+        with self._action_lock:
+            return list(self._action_log)
 
     # --------------------------------------------------
 
@@ -68,14 +124,60 @@ class TradeController:
 
     # --------------------------------------------------
 
-    def request_exit(self, symbol):
+    # ---- HOW MANY, NOT JUST WHICH. 2 August 2026. ----
+    #
+    #     "yes pls complete now."
+    #
+    # Every request here used to be a bare symbol in a set, so every
+    # buy was exactly the Rs 1 lakh margin rule and every sell was the
+    # WHOLE position. That second one contradicted his own method:
+    #
+    #     "ride untill the momentum stays - exit once it gone
+    #      ruthlessly"
+    #
+    # Riding a move usually means trimming into strength, and the
+    # dashboard could only ever sell all of it.
+    #
+    # The quantity is held BESIDE the set rather than replacing it, so
+    # every existing caller -- request_exit("TCS"), is_exit_requested,
+    # the exit-all batch -- behaves exactly as before. None still means
+    # "all of it" / "the standard size", which is what every one of
+    # those callers has always meant.
+    def _remember_qty(self, store, symbol, qty):
+        if qty is None:
+            store.pop(symbol, None)
+            return
+        try:
+            qty = int(qty)
+        except (TypeError, ValueError):
+            store.pop(symbol, None)
+            return
+        if qty > 0:
+            store[symbol] = qty
+        else:
+            store.pop(symbol, None)
+
+    def request_exit(self, symbol, qty=None):
+        self._remember_qty(self._exit_qty, symbol, qty)
         self._exit_symbols.add(symbol)
+
+    def exit_qty(self, symbol):
+        """Shares to close, or None for the whole position."""
+        return self._exit_qty.get(symbol)
+
+    def buy_qty(self, symbol):
+        """Shares to buy, or None for the standard Rs 1 lakh size."""
+        return self._buy_qty.get(symbol)
+
+    def short_qty(self, symbol):
+        return self._short_qty.get(symbol)
 
     def is_exit_requested(self, symbol):
         return symbol in self._exit_symbols
 
     def clear_exit(self, symbol):
         self._exit_symbols.discard(symbol)
+        self._exit_qty.pop(symbol, None)
 
     def get_exit_requested_symbols(self):
         """Copy of every symbol with a pending individual EXIT
@@ -85,7 +187,8 @@ class TradeController:
 
     # --------------------------------------------------
 
-    def request_buy(self, symbol):
+    def request_buy(self, symbol, qty=None):
+        self._remember_qty(self._buy_qty, symbol, qty)
         self._buy_symbols.add(symbol)
 
     def is_buy_requested(self, symbol):
@@ -93,16 +196,19 @@ class TradeController:
 
     def clear_buy(self, symbol):
         self._buy_symbols.discard(symbol)
+        self._buy_qty.pop(symbol, None)
 
     # --------------------------------------------------
 
-    def request_short(self, symbol):
+    def request_short(self, symbol, qty=None):
+        self._remember_qty(self._short_qty, symbol, qty)
         self._short_symbols.add(symbol)
 
     def is_short_requested(self, symbol):
         return symbol in self._short_symbols
 
     def clear_short(self, symbol):
+        self._short_qty.pop(symbol, None)
         self._short_symbols.discard(symbol)
 
     # --------------------------------------------------
@@ -127,8 +233,28 @@ class TradeController:
                     f.write("paused\n")
             elif os.path.exists(self.PAUSE_FLAG_PATH):
                 os.remove(self.PAUSE_FLAG_PATH)
-        except OSError:
-            pass          # never let bookkeeping break trading control
+        except OSError as exc:
+            # Control flow is UNCHANGED -- bookkeeping must never break
+            # trading control, and the in-memory pause is already set.
+            # But it is now reported, because the flag is what survives a
+            # restart: if it cannot be written, "Stop New Entries" holds
+            # for this process and is silently forgotten by the next one.
+            # The operator would restart believing entries were still off.
+            #
+            # Imported HERE, not at module scope. This file deliberately
+            # depends on nothing but `os` -- it sits in the trading
+            # control path and a module-level import of core.logger would
+            # add an import cycle risk for a message that only ever fires
+            # on a disk fault. The file already uses local imports for
+            # threading and datetime, so this matches its own idiom.
+            try:
+                from core.logger import warn
+                warn(f"[CONTROL] Could not persist the pause flag "
+                     f"({self.PAUSE_FLAG_PATH}): {exc}. Entries are paused "
+                     f"for THIS process only -- a restart will come back "
+                     f"with entries LIVE.")
+            except Exception:                              # noqa: BLE001
+                pass
 
     def restore_pause_state(self):
         """Called once at startup. Re-arms the pause if the operator

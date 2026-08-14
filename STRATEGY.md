@@ -1,5 +1,10 @@
 # Opportunity Trader — Strategy (live from 2026-07-27)
 
+> **SUPERSEDED — read [BOT.md](BOT.md) for the live rules.**
+>
+> Written 27 July 2026. Kept for the evidence behind each decision.
+> The decision path itself is now generated into `BOT.md`.
+
 The complete decision path, and the evidence behind each rule.
 Measurements: `FINDINGS.md`. Bench: `backtest/`.
 

@@ -50,11 +50,35 @@ def build(days=30, store=None, today=None):
 
     added_days = 0
     today = today or datetime.now()
-    day = today
+
+    # ---- TODAY WAS NEVER FETCHED. 4 August 2026. ----
+    #
+    # This was `day = today`, and the loop's first act is to subtract a
+    # day -- so the walk actually began at YESTERDAY and today's
+    # bhavcopy was never once requested. Not on any run, ever.
+    #
+    # It hid because the tool's own summary is about the archive, and
+    # the archive looked healthy: "2,464 days stored, 2016-08-23 ->
+    # 2026-08-03" on the evening of the 4th. One day short, every day,
+    # and the line that would have shown it is the one nobody reads.
+    #
+    # It surfaced as tools/verify_picks.py refusing to score the bot's
+    # picks -- "No daily bars for 2026-08-04 yet -- run
+    # build_daily_history.py first" -- after build_daily_history.py had
+    # just been run. Which would have made Phase 1 unverifiable
+    # tomorrow, and the day after, silently.
+    #
+    # Starting one day ahead means the first decrement lands on today.
+    day = today + timedelta(days=1)
     checked = 0
     holidays = []
     # Walk back over calendar days, skipping weekends, until we've
     # collected `days` trading days. The 2x cushion covers holidays.
+    #
+    # Asking for today mid-session is safe: NSE has not published yet,
+    # fetch_bhavcopy returns nothing, and the holiday check below only
+    # fires after RETRY_WINDOW_DAYS -- so today can never be recorded
+    # as a non-trading day and stop being retried.
     while added_days < days and checked < days * 2 + 20:
         day -= timedelta(days=1)
         checked += 1

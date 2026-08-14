@@ -43,6 +43,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 
 from core.db import resolve_database_url
+from core.logger import diagnostic
 
 
 def _utcnow():
@@ -86,6 +87,29 @@ class TradeMemory:
             Column("entry_hour", String(5), index=True),      # "09:34" -> "09"
             Column("rel_strength", Float),                     # vs market
             Column("regime", String(12)),
+            # ---- THE REASON, added 2026-07-28 ----
+            # The four columns above are all PRICE context: sector,
+            # hour, relative strength, regime. With only those, the
+            # memory can answer "do metals breakouts at 10am work" --
+            # the price-and-volume question the operator has already
+            # said is not enough -- and can NEVER answer the one he
+            # cares about:
+            #
+            #     "no info why gaining = no entry at all"
+            #
+            # Do ORDER_WIN entries beat BROKER upgrades? Does a STRONG
+            # results grade beat a MIXED one? Are entries WITH a reason
+            # better than entries without? None of that was being
+            # recorded, so six months of trades could not answer it.
+            #
+            # Stamped at ENTRY, not at exit -- what was known when the
+            # decision was made, never what turned out to be true.
+            Column("news_kind", String(24), index=True),   # ORDER_WIN, BROKER...
+            Column("filing_kind", String(24)),             # RESULTS, PAYOUT...
+            Column("results_grade", String(12), index=True),  # STRONG/GOOD/...
+            Column("days_since_results", Integer),
+            Column("had_reason", Integer, index=True),     # 1/0, the headline
+            Column("reason_summary", String(160)),         # human-readable
             Column("recorded_at", DateTime(timezone=True), default=_utcnow),
             # One row per symbol per direction per day -- matches the
             # engine's own one-attempt-per-day rule, so a re-run or a
@@ -94,6 +118,50 @@ class TradeMemory:
                              name="uq_trade_memory"),
         )
         self.metadata.create_all(self.engine)
+        self._add_missing_columns()
+
+    # ----------------------------------------------------------
+
+    #: Columns added after the table already existed in the wild.
+    #: create_all() creates MISSING TABLES -- it does not alter an
+    #: existing one, so a live trade_memory.db keeps its old shape and
+    #: every insert of a new field fails silently (record() swallows
+    #: exceptions by design, so nothing would ever be recorded again
+    #: and nobody would notice).
+    LATE_COLUMNS = {
+        "news_kind": "TEXT",
+        "filing_kind": "TEXT",
+        "results_grade": "TEXT",
+        "days_since_results": "INTEGER",
+        "had_reason": "INTEGER",
+        "reason_summary": "TEXT",
+    }
+
+    def _add_missing_columns(self):
+        """Idempotent, runs at every startup, never raises.
+
+        Added 2026-07-28 with the reason columns. The 28 trades already
+        stored keep their rows -- they simply have NULL in the new
+        fields, which is honest: nobody recorded a reason for them.
+        """
+        try:
+            from sqlalchemy import text
+            with self.engine.begin() as conn:
+                existing = {
+                    row[1] for row in conn.execute(
+                        text("PRAGMA table_info(trade_memory)")).fetchall()
+                } if self.url.startswith("sqlite") else set()
+                if not existing:
+                    return
+                for column, sql_type in self.LATE_COLUMNS.items():
+                    if column in existing:
+                        continue
+                    conn.execute(text(
+                        f"ALTER TABLE trade_memory ADD COLUMN {column} {sql_type}"))
+                    diagnostic(f"[LEARN] trade_memory: added column {column}.")
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[LEARN] Could not migrate trade_memory ({exc}). "
+                       f"Reason columns may not record.")
 
     # ----------------------------------------------------------
 
@@ -132,6 +200,13 @@ class TradeMemory:
                 entry_hour=hour,
                 rel_strength=closed_position.get("rel_strength"),
                 regime=closed_position.get("regime"),
+                # The reason, as it was known AT ENTRY (2026-07-28).
+                news_kind=closed_position.get("news_kind"),
+                filing_kind=closed_position.get("filing_kind"),
+                results_grade=closed_position.get("results_grade"),
+                days_since_results=closed_position.get("days_since_results"),
+                had_reason=1 if closed_position.get("had_reason") else 0,
+                reason_summary=closed_position.get("reason_summary"),
                 recorded_at=_utcnow(),
             )
             with self.engine.begin() as conn:

@@ -83,6 +83,7 @@ Author : H&M Opportunity Trader
 
 import csv
 import os
+import re
 from datetime import datetime
 
 from core.master_loader import MASTER_CSV_PATH, REQUIRED_COLUMNS
@@ -102,12 +103,147 @@ NO = "NO"
 # 2026-07-24's bhavcopy: Rs 2cr keeps 581 of our 750 but pulls in 384
 # new symbols to hand-classify; Rs 5cr keeps 543 and pulls in 247;
 # Rs 10cr keeps 474 and pulls in 152.
-MIN_TURNOVER_RS = 50_000_000
+# ---- THE BAR IS A SHARE OF THE DAY, NOT A RUPEE FIGURE ----
+#
+#     "whats your call on this? suggest"   -- operator, 2 August 2026
+#
+# My call is to KEEP the number and change its FORM. Measured on the
+# live store, dropping the bar from Rs 5cr to Rs 3cr buys:
+#
+#     channel-graded names   233 -> 251   (+18, of which 2 EXCELLENT)
+#     CANSLIM rated           54 ->  60
+#     CANSLIM EXCEPTIONAL      4 ->   4   (all four already clear it)
+#     CANSLIM STRONG          10 ->  11   (+1)
+#
+# Eighteen names, two of them well graded. That is a small gain, and
+# the standing rule on this book is that there is no room for error.
+#
+# What was wrong was the FORM. Rs 5 crore is meaningless on its own --
+# it only means anything next to the size of a position. His own rule
+# is Rs 1 lakh per MTF position, so Rs 5cr means:
+#
+#     my order is 0.2% of what the stock trades on a NORMAL day
+#
+# THAT is the invariant worth keeping, and a flat rupee constant does
+# not keep it: raise the position to Rs 2 lakh and the same Rs 5cr bar
+# silently becomes 0.4%, with nothing anywhere saying so. So the bar is
+# derived. Today it computes to exactly 50,000,000 and nothing changes;
+# the day position size moves, it moves with it.
+#
+# Why 0.2% and not the 1-5%-of-ADV rule of thumb: those assume exiting
+# over a whole session. This book exits at a 2.5% stop, in minutes, and
+# carries MTF overnight -- so the number that matters is what can be
+# sold in a hurry on a quiet day, not what can be worked all day.
+MAX_POSITION_SHARE_OF_DAY = 0.002        # 0.2% of a normal day's value
+
+try:
+    from config import MTF_MARGIN_PER_POSITION_RS as _POSITION_RS
+except Exception:                                          # noqa: BLE001
+    # ---- THE FALLBACK WAS THREE TIMES HIS REAL SIZE. 6 Aug 2026. ----
+    # config.MTF_MARGIN_PER_POSITION_RS moved to 30,000 and this
+    # hard-coded fallback stayed at the old 1,00,000. It only bites
+    # when config cannot be imported -- and that is precisely the
+    # moment nothing else is around to catch a position sized 3.3x too
+    # large. It tracks the live value now.
+    _POSITION_RS = 30_000.0              # his rule, as at 6 August 2026
+
+MIN_TURNOVER_RS = _POSITION_RS / MAX_POSITION_SHARE_OF_DAY
+
+# ---- ONE DAY WAS NOT A MEASUREMENT. 2 August 2026. ----
+#
+#     "fix both"
+#
+# CENTURYPLY was blocked as illiquid on Rs 1.76cr. That is its 30 July
+# figure. On 31 July it traded Rs 62.29 crore:
+#
+#     22 Jul  23 Jul  24 Jul  27 Jul  28 Jul  29 Jul  30 Jul  31 Jul
+#      1.25    2.64    2.68    2.94    1.66    6.29    1.76   62.29
+#
+# A single previous session decides both ways: one quiet day blocks a
+# liquid stock, one busy day passes an illiquid one. Measured over the
+# 106 names blocked as illiquid, 40 of them have a ten-session MEDIAN
+# above the bar -- KROSS Rs 18.62cr, INDOBORAX 14.77, VRLLOG 12.25,
+# ALKYLAMINE 10.16, DOMS 8.63. None of those is illiquid.
+#
+# MEDIAN, not mean. CENTURYPLY's mean over those eight sessions is
+# Rs 10.2cr and its median is Rs 2.66cr -- the mean is carried
+# entirely by the one 62-crore results day, which is exactly the kind
+# of day you cannot count on being able to exit into. The median
+# answers "on a normal day, can I get in and out", which is the
+# question the bar was written for.
+TURNOVER_SESSIONS = 10
+
+# Below this many sessions the median is not a median, it is a small
+# sample wearing one. A newly listed stock with two days of history
+# falls back to what it has, and the reason text says how many days it
+# is speaking from so a thin read is never mistaken for a firm one.
+TURNOVER_MIN_SESSIONS = 3
 
 # NSE publishes a price band per scrip in its daily securities list.
-# Anything banded at or below this cannot produce a tradeable ORB
-# breakout -- it just locks. Surveillance (ASM/GSM) names show up here.
-MIN_PRICE_BAND_PCT = 10.0
+# A band this tight or tighter cannot produce a tradeable ORB breakout
+# -- the stock locks before the move finishes, and a locked stock
+# cannot be exited.
+#
+# ---- THIS WAS 10.0 AND IT WAS WRONG. 2 August 2026. ----
+#
+#     "10% is not issue why block?"
+#
+# He was right, and the comment that used to sit here -- "surveillance
+# (ASM/GSM) names show up here" -- was the assumption doing the work.
+# Measured against NSE's own 30 July securities list:
+#
+#     band 20     2,202 scrips      18 with a GSM remark
+#     band 5        655             32
+#     band 10       201              6
+#     band 2         51              9
+#
+# A 10% band is not a surveillance flag. It is NSE's ordinary band for
+# a non-F&O scrip that has been a bit livelier than average, and only
+# 1 of the 57 in OUR master carried any GSM remark at all.
+#
+# Then measured on ten sessions of real bhavcopy -- day range as a
+# percentage of the previous close, and how often the stock actually
+# LOCKED at its limit:
+#
+#     band       median range   days locked   days with >=5% range
+#     No Band        2.13%          0.0%           4.4%
+#     20             2.95%          0.2%          17.8%
+#     10             3.92%          4.0%          32.3%
+#     5              3.59%         25.6%          32.4%
+#     2              2.57%         90.0%           0.0%
+#
+# A 10%-band stock is MORE volatile than the average listed name and
+# gives an ORB more room, not less. It locks one day in twenty-five.
+# The 5% band is the one that matters: it locks ONE DAY IN FOUR, and a
+# locked stock held overnight on MTF is a position you cannot close.
+#
+# What it was costing: 41 liquid names, among them INDOMIM at Rs 2,120
+# crore of median daily turnover, JSWINFRA 108, PARAS 84, ACMESOLAR 73,
+# JUSTDIAL 66, ICICIAMC 62. Calling those "too narrow for an ORB
+# breakout" was indefensible.
+MIN_PRICE_BAND_PCT = 5.0
+
+# ---- "WITHOUT ISSUES IN THEIR MANAGEMENT" ----
+#
+#     "we will trade NSE STOCKS, without issues in their management =
+#      trusted companies will be tradable"
+#                                    -- operator, 2 August 2026
+#
+# So the governance question is asked DIRECTLY instead of being
+# smuggled in through the band width, which is what the old rule was
+# doing badly. NSE's securities list carries the Graded Surveillance
+# Measure stage in its Remarks column, and GSM exists for exactly this
+# -- price/earnings disconnects, low net worth, auditor concerns.
+#
+# STAGE 0 COUNTS. It is the "shortlisted, no restriction yet" rung, and
+# on a book that runs 4X MTF overnight, being on the exchange's list at
+# all is the answer to "is this a company I trust". Three names in the
+# master carry it today and none of them was tradeable anyway, so this
+# costs nothing now and is there for when it does.
+#
+# Fails OPEN. A missing or unreadable Remarks column must not blank the
+# universe -- see the `remarks` default in decide().
+_SURVEILLANCE = re.compile(r"\bGSM\b|\bASM\b|SURVEILLANCE", re.I)
 
 # New listings are added to the master file so their SECURITY ID is
 # captured while we have it, but never traded until a human fills in
@@ -116,7 +252,8 @@ UNCLASSIFIED_REASON = "new listing -- awaiting sector classification"
 
 
 def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
-           corporate_actions=None, min_turnover=MIN_TURNOVER_RS):
+           corporate_actions=None, min_turnover=MIN_TURNOVER_RS,
+           remarks=None):
     """
     The whole YES/NO decision for one symbol. Pure function -- no I/O,
     no network, no clock. Returns (subscribe_bool, reason_string); the
@@ -137,7 +274,7 @@ def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
     # -- checks that need no market data, so they work even offline --
 
     if symbol in excluded or looks_like_a_fund(symbol):
-        return False, "ETF / fund / SGB -- not company equity"
+        return False, "ETF / SGB / SME -- not on our board"
 
     if not str(sector or "").strip():
         return False, UNCLASSIFIED_REASON
@@ -146,10 +283,18 @@ def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
         return False, ("corporate action today -- price scale changes, "
                        "%-moves vs yesterday are not comparable")
 
+    # ---- THE GOVERNANCE QUESTION, ASKED DIRECTLY ----
+    # Before the band, because "the exchange has this company under
+    # surveillance" outranks "how far can it move today".
+    flag = str((remarks or {}).get(symbol) or "").strip()
+    if flag and flag not in ("-", "nan") and _SURVEILLANCE.search(flag):
+        return False, (f"{flag} -- under exchange surveillance, "
+                       f"not a company to hold overnight on margin")
+
     band = bands.get(symbol)
     if band is not None and band <= MIN_PRICE_BAND_PCT:
-        return False, (f"{band:g}% price band (surveillance/ASM) -- "
-                       f"too narrow for an ORB breakout")
+        return False, (f"{band:g}% price band -- locks before the move "
+                       f"finishes, and a locked stock cannot be exited")
 
     # -- checks that need yesterday's bhavcopy --
 
@@ -175,7 +320,12 @@ def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
 
     turnover = bhav.get("turnover") or 0.0
     if turnover < min_turnover:
-        return False, (f"turnover Rs {turnover/1e7:.2f}cr below "
+        # Say what the number IS, so a block can be argued with. "days"
+        # is present when the index was built over several sessions.
+        days = bhav.get("turnover_days")
+        over = (f" median of {days} sessions" if days and days > 1
+                else " last session")
+        return False, (f"turnover Rs {turnover/1e7:.2f}cr{over} below "
                        f"Rs {min_turnover/1e7:.0f}cr -- too illiquid to "
                        f"enter and exit cleanly")
 
@@ -218,11 +368,68 @@ def build_bhav_index(rows):
     return out
 
 
+def build_bhav_index_over(day_rows, min_sessions=TURNOVER_MIN_SESSIONS):
+    """The same index, but turnover is the MEDIAN across several days.
+
+    `day_rows` is a list of raw bhavcopy row-lists, OLDEST FIRST. The
+    LAST one is the reference session: series, close and the T2T check
+    all come from it, because those are facts about today and a median
+    of them would be meaningless. Only TURNOVER is pooled.
+
+    Why -- see TURNOVER_SESSIONS above. CENTURYPLY was blocked on one
+    quiet day while its normal volume is many times the bar.
+
+    Each record gains `turnover_days`, the number of sessions the
+    median actually speaks from. A stock listed on Thursday has two,
+    and decide() prints that in the reason so a thin read is never
+    mistaken for a firm one.
+
+    Falls back cleanly: one day in, and this is build_bhav_index() with
+    turnover_days=1. Nothing in the caller has to know which it got.
+    """
+    import statistics
+
+    day_rows = [d for d in (day_rows or []) if d]
+    if not day_rows:
+        return {}
+
+    per_day = [build_bhav_index(rows) for rows in day_rows]
+    latest = per_day[-1]
+
+    out = {}
+    for symbol, rec in latest.items():
+        seen = [day[symbol]["turnover"] for day in per_day
+                if symbol in day and day[symbol].get("turnover") is not None]
+        # A day the stock did not trade at all is not a zero to average
+        # in -- it is a day with no reading. Bhavcopy only lists scrips
+        # that traded, so an absent day is simply dropped, and
+        # turnover_days says how many were really there.
+        if not seen:
+            out[symbol] = dict(rec, turnover_days=0)
+            continue
+        if len(seen) < max(1, min_sessions):
+            # Too few to call it a median. Use the WORST of what we
+            # have rather than the best: a two-day-old listing that
+            # traded heavily once has not shown it can be exited on a
+            # normal day, and this bar exists to answer that.
+            out[symbol] = dict(rec, turnover=min(seen),
+                               turnover_days=len(seen))
+            continue
+        out[symbol] = dict(rec, turnover=statistics.median(seen),
+                           turnover_days=len(seen))
+    return out
+
+
 def apply(rows, bhav_index, excluded=None, bands=None,
-          corporate_actions=None, min_turnover=MIN_TURNOVER_RS):
+          corporate_actions=None, min_turnover=MIN_TURNOVER_RS,
+          remarks=None):
     """
     Stamp SUBSCRIBE / SUBSCRIBE_REASON onto every row. Mutates and
     returns the rows, plus a summary dict for the operator.
+
+    `remarks` is {symbol: NSE's Remarks cell} -- the GSM surveillance
+    stage. Optional and fails open, so a file that predates the column
+    behaves exactly as before.
     """
     flipped_on, flipped_off = [], []
     yes = no = 0
@@ -239,6 +446,7 @@ def apply(rows, bhav_index, excluded=None, bands=None,
             bands=bands,
             corporate_actions=corporate_actions,
             min_turnover=min_turnover,
+            remarks=remarks,
         )
         row[SUBSCRIBE_COL] = YES if ok else NO
         row[REASON_COL] = "" if ok else reason

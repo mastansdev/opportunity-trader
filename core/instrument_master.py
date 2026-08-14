@@ -57,6 +57,51 @@ class InstrumentMaster:
             warn(f"No NSE equity match for symbol '{symbol}' -- skipping.")
             return None
 
+        # ---- iloc[0] WAS PICKING BLIND. 8 August 2026. ----
+        #
+        #     "BUT YOU NEED TO CHECK WITH NSE/CHROME FOR THE CHOLAFIN,
+        #      ELECTCAST, MOTHERSON . ID'S & CHECK WITH DHAN DATABASE"
+        #                                        -- operator
+        #
+        # Measured that morning with tools/probe_silent.py against the
+        # live account: Dhan refuses to quote CHOLAFIN (19257),
+        # ELECTCAST (18116) and MOTHERSON (25510) on NSE_EQ, while
+        # HINDALCO (1363) comes back at 1059.60 in the same call. All
+        # three had been passing tools/verify_master_database.py every
+        # night as CORRECT.
+        #
+        # They agreed because the verifier calls THIS function. If two
+        # rows match a symbol, iloc[0] took whichever pandas happened
+        # to order first, wrote it into the master, and then compared
+        # the master against itself and found no fault. A check that
+        # shares its bug with the thing it checks can never fail.
+        #
+        # Ambiguity now SAYS SO. Silence about a second candidate is
+        # how a stock the operator holds 2,000 shares of went six
+        # sessions with no price and nothing reported it.
+        ids = sorted({str(v) for v in match["SEM_SMST_SECURITY_ID"]})
+        if len(ids) > 1:
+            series = None
+            if "SEM_SERIES" in match.columns:
+                # An NSE cash listing trades in the EQ series. BE, BZ
+                # and the rest are restricted books and are not what
+                # the feed subscribes to.
+                preferred = match[match["SEM_SERIES"].astype(str)
+                                  .str.upper().str.strip() == "EQ"]
+                if len(preferred) == 1:
+                    series = str(preferred.iloc[0]["SEM_SMST_SECURITY_ID"])
+            warn(f"[INSTRUMENT_MASTER] '{symbol}' matches {len(ids)} NSE "
+                 f"equity rows in Dhan's master: {', '.join(ids)}. "
+                 + (f"Taking the EQ-series row ({series})."
+                    if series else
+                    "No single EQ-series row to break the tie -- "
+                    "REFUSING to guess. Run py tools/find_scrip.py "
+                    f"{symbol} and set it by hand."))
+            if series is None:
+                return None
+            self._security_id[symbol] = series
+            return series
+
         security_id = str(match.iloc[0]["SEM_SMST_SECURITY_ID"])
         self._security_id[symbol] = security_id
         return security_id

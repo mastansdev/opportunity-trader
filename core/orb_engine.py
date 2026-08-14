@@ -116,6 +116,27 @@ class OrbEngine:
                 state["complete"] = True
                 diagnostic(f"[ORB] {symbol} range complete: {state}")
             elif state is None and symbol not in self._no_range_warned:
+                # ---- YESTERDAY'S LAST TICK IS NOT TODAY'S. 7 Aug 2026. ----
+                #
+                #     "too many printed not only cmrgreen"
+                #
+                # On startup the feed delivers each symbol's LAST TRADED
+                # price, stamped with the time it traded -- 15:59:58,
+                # yesterday's close. This guard compares only the CLOCK,
+                # so 15:59:58 reads as "after the window closed" and
+                # every subscribed symbol prints a warning about having
+                # no opening range. Hundreds of them, at 06:50, before
+                # the market has opened at all.
+                #
+                # None of it is wrong about the range -- there genuinely
+                # isn't one yet. It is wrong about the moment. And a
+                # screen full of warnings that mean nothing is how a
+                # real one gets missed.
+                #
+                # If the wall clock says the ORB window has not closed
+                # yet TODAY, a "window-close tick" cannot be real.
+                if datetime.now().time() < ORB_WINDOW_END_T:
+                    return
                 self._no_range_warned.add(symbol)
                 warn(
                     f"[ORB] {symbol}: window-close tick arrived "
@@ -139,6 +160,77 @@ class OrbEngine:
                 state["high"] = price
             if price < state["low"]:
                 state["low"] = price
+
+    # --------------------------------------------------
+
+    def merge_official(self, symbol, high, low, tick_time):
+        """Widen the opening range with the EXCHANGE's own high and low.
+
+        =====================================================
+        2026-07-29 -- the range was always too narrow
+        =====================================================
+        The operator checked the bot's recorded candles against Dhan's
+        own charts. The prices matched to the paisa. The RANGES did
+        not, and they were wrong in one direction only:
+
+            symbol      bot high   Dhan high     bot low    Dhan low
+            INFY        1,151.80    1,152.00    1,128.50    1,128.40
+            COFORGE     1,745.60    1,748.00    1,714.70    1,713.00
+
+        The bot's high is always lower and its low always higher. Never
+        the reverse. That is the signature of a SNAPSHOT feed: Dhan
+        sends one packet per symbol roughly every 4.6 seconds, and the
+        true extreme happens between two packets. It was never in a
+        tick, so update() could never see it.
+
+        Why it costs money: COFORGE's real range topped at 1,748.00
+        and the bot thought 1,745.60. Price crossing 1,745.60 fired a
+        breakout WHILE THE STOCK WAS STILL INSIDE ITS REAL RANGE.
+        Every ORB entry triggers slightly early, on a break that has
+        not happened.
+
+        The same fault was diagnosed on 2026-07-24 (SONACOMS, a range
+        3.80 too narrow) and answered by BLACKLISTING the symbol --
+        defensive, not corrective, and on 28 July it blacklisted 607
+        of 666 names. This is the corrective version: the exchange's
+        own high and low were sitting in the REST quote all along,
+        polled every 3 seconds by core/circuit_monitor.py, and never
+        read.
+
+        WIDENS ONLY, NEVER NARROWS. Dhan's high/low is the running
+        SESSION extreme, which equals the opening-range extreme only
+        while the window is open -- so this is ignored outside it, and
+        a value that would shrink the range is refused outright.
+        """
+        if tick_time is None:
+            return
+        t = tick_time.time()
+        if t < MARKET_OPEN_T or t >= ORB_WINDOW_END_T:
+            # Outside the window Dhan's session high is no longer the
+            # opening-range high. Applying it there would silently turn
+            # the ORB into a day range.
+            return
+
+        state = self._ranges.get(symbol)
+        if state is None or state["complete"]:
+            return
+
+        try:
+            high = float(high) if high else None
+            low = float(low) if low else None
+        except (TypeError, ValueError):
+            return
+
+        if high and high > state["high"]:
+            diagnostic(f"[ORB] {symbol} high widened "
+                       f"{state['high']:.2f} -> {high:.2f} "
+                       f"(exchange saw it, our ticks did not)")
+            state["high"] = high
+        if low and 0 < low < state["low"]:
+            diagnostic(f"[ORB] {symbol} low widened "
+                       f"{state['low']:.2f} -> {low:.2f} "
+                       f"(exchange saw it, our ticks did not)")
+            state["low"] = low
 
     # --------------------------------------------------
 

@@ -1,0 +1,119 @@
+<style>
+*{box-sizing:border-box}
+.wrap{font-family:-apple-system,Segoe UI,sans-serif;color:var(--text-primary,#1a1a1a);max-width:1040px}
+h2{font-size:14.5px;margin:26px 0 10px;letter-spacing:.02em;text-transform:uppercase;opacity:.55;font-weight:600}
+.hero{display:flex;gap:10px;flex-wrap:wrap}
+.card{flex:1;min-width:128px;border:1px solid var(--border-default,#e3e3e0);border-radius:10px;padding:14px 16px}
+.card b{display:block;font-size:26px;font-weight:600;line-height:1.15}
+.card span{font-size:11.5px;opacity:.6}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.03em;opacity:.5;padding:0 7px 7px;font-weight:600}
+td{padding:9px 7px;border-top:1px solid var(--border-default,#ececea);vertical-align:middle}
+.ch{font-weight:600}.n{text-align:right;font-variant-numeric:tabular-nums;width:52px}.b{font-weight:600}
+.pc{width:86px;font-variant-numeric:tabular-nums;font-weight:600;font-size:12px}
+.bar{height:4px;background:var(--border-default,#ececea);border-radius:3px;margin-top:4px;overflow:hidden}
+.bar i{display:block;height:100%;border-radius:3px}
+.hi{color:#1a7f5a}.hi i{background:#1a7f5a}.mid{color:#b07a1e}.mid i{background:#b07a1e}.lo{color:#b4453a}.lo i{background:#b4453a}
+.v{font-size:11px;font-weight:500}
+.flow{display:flex;gap:0;flex-wrap:wrap;align-items:stretch}
+.step{flex:1;min-width:148px;border:1px solid var(--border-default,#e3e3e0);border-radius:9px;padding:12px 13px}
+.step h4{margin:0 0 5px;font-size:12px;font-weight:600}
+.step p{margin:0;font-size:11.5px;opacity:.68;line-height:1.5}
+.step em{font-style:normal;font-weight:600;opacity:1}
+.arw{display:flex;align-items:center;padding:0 7px;opacity:.3;font-size:17px}
+.kr{display:flex;align-items:center;gap:9px;margin:4px 0;font-size:12px}
+.kn{width:118px;font-weight:500}
+.kbar{flex:1;height:15px;background:var(--border-default,#f0f0ee);border-radius:3px;overflow:hidden}
+.kbar i{display:block;height:100%;background:#4a6fa5;border-radius:3px}
+.kv{width:44px;text-align:right;font-variant-numeric:tabular-nums;opacity:.65}
+.ev{border-left:2px solid var(--border-default,#e3e3e0);padding:7px 0 7px 13px;margin-left:5px;position:relative}
+.ev:before{content:'';position:absolute;left:-4.5px;top:13px;width:7px;height:7px;border-radius:50%;background:#4a6fa5}
+.ev .t{font-size:10.5px;opacity:.5;font-variant-numeric:tabular-nums}
+.ev .k{font-size:10px;font-weight:700;letter-spacing:.05em;margin-left:8px;color:#4a6fa5}
+.ev .g{font-size:9.5px;font-weight:700;margin-left:6px;padding:1.5px 5px;border-radius:3px;background:#1a7f5a;color:#fff}
+.ev .s{font-size:10.5px;opacity:.45;margin-left:8px}
+.ev .h{font-size:12px;margin-top:2px;line-height:1.45}
+.note{font-size:12px;line-height:1.65;opacity:.78;border-left:3px solid var(--border-default,#e3e3e0);padding:2px 0 2px 13px;margin:10px 0}
+</style>
+<div class="wrap">
+<div class="hero">
+ <div class="card"><b>3,175</b><span>messages, 9 channels</span></div>
+ <div class="card"><b>1,596 / 1,963</b><span>single-company posts that name their company</span></div>
+ <div class="card"><b>4,758</b><span>events in memory</span></div>
+ <div class="card"><b>733</b><span>stocks carrying memory</span></div>
+</div>
+
+<h2>How one message becomes memory</h2>
+<div class="flow">
+ <div class="step"><h4>1 · Arrive</h4><p>Telegram folder <em>PRO</em>. <em>2,537 of 3,175</em> are images, not text.</p></div><div class="arw">&rarr;</div>
+ <div class="step"><h4>2 · Read the picture</h4><p>Every word comes back <em>with its x,y box</em> — that is what separates two columns on a card.</p></div><div class="arw">&rarr;</div>
+ <div class="step"><h4>3 · Name the company</h4><p>The caption <em>#TAG wins</em>. Peers, customers and subsidiaries in the body get nothing.</p></div><div class="arw">&rarr;</div>
+ <div class="step"><h4>4 · Type it</h4><p>RESULT · ORDER · CONCALL · REPORTED · SETUP — <em>12 kinds</em>, each scored differently.</p></div><div class="arw">&rarr;</div>
+ <div class="step"><h4>5 · File it</h4><p>One row against <em>one symbol</em>, plus every finding on the card in <code>detail</code>.</p></div>
+</div>
+
+<h2>Every channel, counted honestly</h2>
+<table>
+<tr><th>Channel</th><th class="n">Msgs</th><th class="n">1-co posts</th><th class="n">Named</th><th>Rate</th><th class="n">Multi-co pages</th><th class="n">No co.</th><th class="n">Events</th><th class="n">Stocks</th><th>What that means</th></tr>
+<tr><td class="ch">Earnings 360</td><td class="n">432</td>
+      <td class="n">270</td><td class="n">270</td>
+      <td class="pc hi">100%<div class="bar"><i class="hi" style="width:100.0%"></i></div></td>
+      <td class="n">161</td><td class="n">1</td>
+      <td class="n b">536</td><td class="n">300</td>
+      <td class="v hi">every post names its company</td></tr><tr><td class="ch">Breakouts 🇮🇳</td><td class="n">200</td>
+      <td class="n">197</td><td class="n">197</td>
+      <td class="pc hi">100%<div class="bar"><i class="hi" style="width:100.0%"></i></div></td>
+      <td class="n">3</td><td class="n">0</td>
+      <td class="n b">201</td><td class="n">171</td>
+      <td class="v hi">every post names its company</td></tr><tr><td class="ch">Business Pulse</td><td class="n">110</td>
+      <td class="n">106</td><td class="n">106</td>
+      <td class="pc hi">100%<div class="bar"><i class="hi" style="width:100.0%"></i></div></td>
+      <td class="n">3</td><td class="n">1</td>
+      <td class="n b">104</td><td class="n">65</td>
+      <td class="v hi">every post names its company</td></tr><tr><td class="ch">OrderBook Pulse</td><td class="n">110</td>
+      <td class="n">98</td><td class="n">98</td>
+      <td class="pc hi">100%<div class="bar"><i class="hi" style="width:100.0%"></i></div></td>
+      <td class="n">12</td><td class="n">0</td>
+      <td class="n b">172</td><td class="n">62</td>
+      <td class="v hi">every post names its company</td></tr><tr><td class="ch">Earnings Pro</td><td class="n">537</td>
+      <td class="n">372</td><td class="n">371</td>
+      <td class="pc hi">100%<div class="bar"><i class="hi" style="width:99.7%"></i></div></td>
+      <td class="n">162</td><td class="n">3</td>
+      <td class="n b">1083</td><td class="n">376</td>
+      <td class="v hi">every post names its company</td></tr><tr><td class="ch">Earnings Pulse</td><td class="n">430</td>
+      <td class="n">346</td><td class="n">341</td>
+      <td class="pc mid">99%<div class="bar"><i class="mid" style="width:98.6%"></i></div></td>
+      <td class="n">60</td><td class="n">24</td>
+      <td class="n b">1377</td><td class="n">323</td>
+      <td class="v mid">about half name it</td></tr><tr><td class="ch">News Pulse</td><td class="n">820</td>
+      <td class="n">391</td><td class="n">210</td>
+      <td class="pc mid">54%<div class="bar"><i class="mid" style="width:53.7%"></i></div></td>
+      <td class="n">133</td><td class="n">296</td>
+      <td class="n b">333</td><td class="n">82</td>
+      <td class="v mid">about half name it</td></tr><tr><td class="ch">WLPulseBot</td><td class="n">28</td>
+      <td class="n">3</td><td class="n">1</td>
+      <td class="pc lo">33%<div class="bar"><i class="lo" style="width:33.3%"></i></div></td>
+      <td class="n">0</td><td class="n">25</td>
+      <td class="n b">26</td><td class="n">1</td>
+      <td class="v lo">names nothing — inferred</td></tr><tr><td class="ch">Day Trader Telugu</td><td class="n">508</td>
+      <td class="n">180</td><td class="n">2</td>
+      <td class="pc lo">1%<div class="bar"><i class="lo" style="width:1.1%"></i></div></td>
+      <td class="n">35</td><td class="n">293</td>
+      <td class="n b">766</td><td class="n">172</td>
+      <td class="v lo">names nothing — inferred</td></tr>
+</table>
+
+<div class="note"><b>Why the denominator matters.</b> <em>569</em> of these messages are multi-company pages — Market Sentiment Part 1-3, Pre-Earnings Expectations Page 1-13, TechnoFunda's 80-stock review. One caption tag would be <em>wrong</em> on those; each names its companies inline instead. Counting them against the tagging rate is what produced an earlier, wrong figure of 80% for Earnings Pro. On posts about a single company, the six Pulse channels name it <em>100%, 100%, 100%, 100%, 100% and 99%</em> of the time.</div>
+
+<div class="note"><b>Where it is genuinely unverifiable.</b> Day Trader Telugu (2 of 180) and untagged News Pulse (181) — <em>359 messages</em>. There the company is matched by name inside the text, with no publisher tag to check it against. That is the whole ambiguous population, and it is 11% of the traffic.</div>
+
+<h2>What kind of memory is being built</h2>
+<div class="kr"><span class="kn">RESULT</span><div class="kbar"><i style="width:100.0%"></i></div><span class="kv">1196</span></div><div class="kr"><span class="kn">NEWS</span><div class="kbar"><i style="width:81.8%"></i></div><span class="kv">978</span></div><div class="kr"><span class="kn">REPORTED</span><div class="kbar"><i style="width:59.0%"></i></div><span class="kv">706</span></div><div class="kr"><span class="kn">MACRO</span><div class="kbar"><i style="width:53.3%"></i></div><span class="kv">638</span></div><div class="kr"><span class="kn">EXPECTATION</span><div class="kbar"><i style="width:23.1%"></i></div><span class="kv">276</span></div><div class="kr"><span class="kn">AI_VERDICT</span><div class="kbar"><i style="width:22.3%"></i></div><span class="kv">267</span></div><div class="kr"><span class="kn">MARKET_ANSWER</span><div class="kbar"><i style="width:19.1%"></i></div><span class="kv">229</span></div><div class="kr"><span class="kn">ORDER</span><div class="kbar"><i style="width:16.3%"></i></div><span class="kv">195</span></div><div class="kr"><span class="kn">SETUP</span><div class="kbar"><i style="width:13.4%"></i></div><span class="kv">160</span></div><div class="kr"><span class="kn">CONCALL</span><div class="kbar"><i style="width:5.9%"></i></div><span class="kv">70</span></div><div class="kr"><span class="kn">FLOW</span><div class="kbar"><i style="width:3.4%"></i></div><span class="kv">41</span></div><div class="kr"><span class="kn">CALENDAR</span><div class="kbar"><i style="width:0.2%"></i></div><span class="kv">2</span></div>
+
+<h2>One stock, as the bot actually holds it — GAIL</h2>
+<div class="ev"><span class="t">2026-08-02 23:00</span><span class="k">SETUP</span><span class="s">CANSLIM</span><div class="h">CANSLIM MIXED -- 41 of 90 today (02 Aug)</div></div><div class="ev"><span class="t">2026-08-02 14:30</span><span class="k">AI_VERDICT</span><span class="s">Earnings Pro</span><div class="h">AI AUDIT BEAT: algo said Great -- GAIL delivered a massive Q1 operational beat</div></div><div class="ev"><span class="t">2026-08-01 23:00</span><span class="k">SETUP</span><span class="s">CANSLIM</span><div class="h">CANSLIM MIXED -- 41 of 90 today (01 Aug)</div></div><div class="ev"><span class="t">2026-08-01 18:00</span><span class="k">REPORTED</span><span class="s">Earnings Pulse</span><div class="h">REPORTED DURING THE SESSION (31 Jul)</div></div><div class="ev"><span class="t">2026-07-31 18:00</span><span class="k">REPORTED</span><span class="s">Earnings Pulse</span><div class="h">REPORTED DURING THE SESSION (31 Jul)</div></div><div class="ev"><span class="t">2026-07-31 09:14</span><span class="k">NEWS</span><span class="s">Earnings Pulse</span><div class="h">#GAIL — Earnings Update · Q1 FY27 Massive Turnaround in Gas Marketing and LPG </div></div><div class="ev"><span class="t">2026-07-31 08:57</span><span class="k">NEWS</span><span class="s">Day Trader Telugu</span><div class="h">CNBc CNBC-TV18 @ TV18 @CNBCTV18Live HIQWithCNBCTV18 | #GAIL reports its Q1 res</div></div><div class="ev"><span class="t">2026-07-31 08:57</span><span class="k">NEWS</span><span class="s">Day Trader Telugu</span><div class="h">HIQWithCNBCTV18 | #GAIL reports its Q1 results; Net Profit At 4,292 Cr Vs $1,2</div></div><div class="ev"><span class="t">2026-07-31 08:57</span><span class="k">NEWS</span><span class="s">Day Trader Telugu</span><div class="h">#GAIL reports its Q1 results; Net Profit At 4,292 Cr Vs $1,262 Cr (QoQ) Revenu</div></div><div class="ev"><span class="t">2026-07-31 08:55</span><span class="k">NEWS</span><span class="s">Breakouts 🇮🇳</span><div class="h">#GAIL.NS</div></div><div class="ev"><span class="t">2026-07-31 08:54</span><span class="k">RESULT</span><span class="g">EXCELLENT</span><span class="s">Earnings Pulse</span><div class="h">PAT +203% vs est, OP +210% vs est, Sales +10% vs est -- #GAIL - Strong Beat GA</div></div><div class="ev"><span class="t">2026-07-31 08:54</span><span class="k">RESULT</span><span class="g">EXCELLENT</span><span class="s">Earnings Pulse</span><div class="h">PAT +203% vs est, OP +210% vs est, Sales +10% vs est -- #GAIL - Strong Beat GA</div></div>
+
+<div class="note"><b>Read it downward.</b> Six independent channels, one symbol. Earnings Pulse filed the graded result, Day Trader Telugu carried the CNBC line, Breakouts flagged the chart, Earnings Pro's AI audited the algo's verdict, CANSLIM re-scored the setup nightly. That stack — not any single message — is what the panel means by <em>support</em>.</div>
+
+<div class="note"><b>What is still wrong here.</b> Four near-identical RESULT rows at 08:54. Writes are insert-only by design, so each parser improvement adds a version rather than correcting one. The panel reads newest-first so it shows the right one, but the duplicates are real and on disk.</div>
+</div>

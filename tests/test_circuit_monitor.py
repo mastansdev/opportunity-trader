@@ -273,3 +273,74 @@ def test_snapshot_replaced_fresh_each_poll_not_accumulated():
     monitor.set_universe({"2": "OTHER_CO"})
     monitor.poll_once()
     assert list(monitor.get_snapshot().keys()) == ["OTHER_CO"]
+
+
+# ---------------------------------------------------------------
+# DO NOT ASK A CLOSED MARKET FOR QUOTES
+# ---------------------------------------------------------------
+#     "[CIRCUIT_MONITOR] Quote request failed: {'error_code': None,
+#      'error_type': None, 'error_message': None}   Whats this error"
+#                                     -- operator, 5 August 2026
+#
+# Nothing was broken. There was no clock in the poll loop at all, so it
+# hit Dhan every cycle through the night and the pre-market and got a
+# refusal every time. And the warning printed `remarks` -- Dhan's empty
+# error envelope -- instead of `status`, so it could not say so.
+from datetime import datetime
+
+from core.circuit_monitor import (SHUT_AFTER_MINUTES, SHUT_BEFORE_MINUTES,
+                                  CircuitMonitor)
+
+
+def _monitor():
+    return CircuitMonitor(quote_fn=lambda payload: {}, exchange_segment="NSE_EQ")
+
+
+def test_it_does_not_poll_before_the_pre_open():
+    assert _monitor()._market_is_shut(datetime(2026, 8, 5, 6, 40)) is True
+
+
+def test_it_does_not_poll_overnight():
+    assert _monitor()._market_is_shut(datetime(2026, 8, 5, 23, 0)) is True
+
+
+def test_it_does_not_poll_at_the_weekend():
+    assert _monitor()._market_is_shut(datetime(2026, 8, 8, 11, 0)) is True
+
+
+def test_it_polls_through_the_whole_session():
+    monitor = _monitor()
+    for when in (datetime(2026, 8, 5, 9, 20),
+                 datetime(2026, 8, 5, 12, 0),
+                 datetime(2026, 8, 5, 15, 25)):
+        assert monitor._market_is_shut(when) is False, when
+
+
+def test_it_covers_both_auctions():
+    """The pre-open auction starts at 09:00 and the closing auction
+    runs past 15:30. A circuit flag matters most at exactly those
+    edges, so the window is deliberately generous at both ends."""
+    assert SHUT_BEFORE_MINUTES <= 9 * 60          # open before 09:00
+    assert SHUT_AFTER_MINUTES >= 15 * 60 + 30     # shut after 15:30
+    monitor = _monitor()
+    assert monitor._market_is_shut(datetime(2026, 8, 5, 9, 5)) is False
+    assert monitor._market_is_shut(datetime(2026, 8, 5, 15, 45)) is False
+
+
+def test_an_unreadable_clock_polls_anyway():
+    """FAIL-OPEN. A clock bug that silences circuit monitoring during
+    the session is far worse than a warning at dawn."""
+    assert _monitor()._market_is_shut("not a datetime") is False
+
+
+def test_the_warning_names_the_status_not_just_the_empty_remarks():
+    """The old line printed remarks -- all None -- and never status,
+    which is the field that says what happened. Two days of a warning
+    that reported nothing."""
+    src = open("core/circuit_monitor.py", encoding="utf-8").read()
+    code = "\n".join(line for line in src.splitlines()
+                     if not line.strip().startswith("#"))
+    block = code[code.find("Quote request failed") - 400:
+                 code.find("Quote request failed") + 400]
+    assert "status=" in block
+    assert 'response.get("status")' in block

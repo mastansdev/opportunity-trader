@@ -44,7 +44,13 @@ def test_a_holiday_is_recorded_and_never_retried(store, monkeypatch):
     available = {"2026-06-22", "2026-06-23", "2026-06-24", "2026-06-25"}
     fetch = fake_bhavcopy(available)
     monkeypatch.setattr(bdh, "fetch_bhavcopy", fetch)
-    today = datetime(2026, 7, 24)
+    # Was 2026-07-24, which sat exactly on the loop's own check budget
+    # (days * 2 + 20). Once the walk was fixed to START at today rather
+    # than yesterday, it reached one calendar day less far back and this
+    # went red -- the fixture was on the edge, not the logic. Moved
+    # close to the holiday so the test measures the holiday handling and
+    # nothing else.
+    today = datetime(2026, 7, 1)
 
     bdh.build(days=4, store=store, today=today)
     assert "2026-06-26" in store.no_data_dates()
@@ -101,3 +107,81 @@ def test_holidays_do_not_consume_the_day_budget(store, monkeypatch):
 
     stats = bdh.build(days=3, store=store, today=datetime(2026, 7, 24))
     assert stats["days"] == 3
+
+
+# ---------------------------------------------------------------
+# TODAY WAS NEVER FETCHED
+# ---------------------------------------------------------------
+#     $ py tools/build_daily_history.py
+#       Days stored : 2464  (2016-08-23 -> 2026-08-03)
+#     $ py tools/verify_picks.py
+#       No daily bars for 2026-08-04 yet -- run build_daily_history first
+#                                     -- operator, 4 August 2026
+#
+# `day = today` followed by a loop whose first act is `day -= 1`. The
+# walk began at YESTERDAY, so today's bhavcopy was never once
+# requested. It hid because the summary is about the archive, and the
+# archive looked healthy -- one day short, every day.
+#
+# It would have made Phase 1 unverifiable tomorrow, silently.
+class _Store:
+    def __init__(self):
+        self.marked = []
+
+    def dates(self):
+        return set()
+
+    def no_data_dates(self):
+        return set()
+
+    def mark_no_data(self, key):
+        self.marked.append(key)
+
+    def upsert_many(self, bars):
+        return len(bars)
+
+    def stats(self):
+        return {}
+
+
+def _dates_asked(monkeypatch, when, days=3):
+    from datetime import datetime
+
+    import tools.build_daily_history as mod
+    asked = []
+
+    def fake_fetch(date=None, folder=None, quiet=True):
+        asked.append(date.strftime("%Y-%m-%d"))
+        return None
+
+    monkeypatch.setattr(mod, "fetch_bhavcopy", fake_fetch)
+    store = _Store()
+    mod.build(days=days, store=store, today=datetime(*when))
+    return asked, store
+
+
+def test_todays_bars_are_asked_for_first(monkeypatch):
+    asked, _ = _dates_asked(monkeypatch, (2026, 8, 4, 17, 0))
+    assert asked[0] == "2026-08-04"
+
+
+def test_yesterday_is_still_reached(monkeypatch):
+    """The fix must not shift the whole window forward and drop the
+    oldest day it used to collect."""
+    asked, _ = _dates_asked(monkeypatch, (2026, 8, 4, 17, 0))
+    assert "2026-08-03" in asked
+
+
+def test_today_is_never_recorded_as_a_trading_holiday(monkeypatch):
+    """Run mid-session and NSE has simply not published yet. Marking
+    today as 'no session' would stop it ever being retried -- the bars
+    would never arrive and nothing would say why."""
+    _, store = _dates_asked(monkeypatch, (2026, 8, 4, 11, 30))
+    assert "2026-08-04" not in store.marked
+
+
+def test_a_weekend_is_still_skipped(monkeypatch):
+    asked, _ = _dates_asked(monkeypatch, (2026, 8, 8, 17, 0))   # Saturday
+    assert "2026-08-08" not in asked
+    assert "2026-08-09" not in asked
+    assert asked[0] == "2026-08-07"

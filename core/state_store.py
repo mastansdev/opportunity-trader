@@ -58,9 +58,29 @@ from core.logger import diagnostic, warn
 STATE_PATH = os.path.join("data", "session_state.json")
 
 
+def _json_safe(value):
+    """Datetimes out, everything else through.
+
+    A closed position carries entry_time and exit_time as datetimes and
+    json.dump refuses them. One refusal would fail the entire save --
+    the ORB ranges and the open positions with it -- so the conversion
+    happens here rather than being left to the caller to remember.
+    """
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
 def save(orb_ranges, open_positions, trailing_stops=None, portfolio=None,
          entry_blocks=None, momentum_universe=None,
-         orb_unreliable=None, path=STATE_PATH):
+         orb_unreliable=None, session_counters=None,
+         closed_positions=None, path=STATE_PATH):
     """
     orb_ranges     : dict symbol -> {"high":, "low":, "complete":}
     open_positions : dict symbol -> {"security_id":, "qty":, "entry_price":,
@@ -75,6 +95,13 @@ def save(orb_ranges, open_positions, trailing_stops=None, portfolio=None,
     orb_unreliable : list of symbols whose feed went dark INSIDE their own
                       opening-range window (optional -- core.market_data
                       .MarketData.export_orb_unreliable())
+    session_counters : per-day counters that must survive a mid-session
+                      restart (optional -- core.engine.Engine
+                      .export_session_counters()). Added 2026-07-29:
+                      without it the 5-swap rotation cap reset to zero
+                      on restart (five swaps before lunch, five more
+                      after) and every filing already reported was
+                      announced a second time.
 
     Optional params default to {} so existing callers keep
     working. Written atomically (write to a temp file, then
@@ -111,6 +138,20 @@ def save(orb_ranges, open_positions, trailing_stops=None, portfolio=None,
         "entry_blocks": entry_blocks or {},
         "momentum_universe": momentum_universe or {},
         "orb_unreliable": sorted(orb_unreliable or []),
+        "session_counters": session_counters or {},
+        # WHAT WE CLOSED TODAY, added 30 July 2026.
+        #
+        # The Performance panel and the Closed Trades table are both
+        # built from engine.closed_positions, which lived only in
+        # memory. Any restart -- and there were four on 30 July alone --
+        # emptied them, so the screen showed the day's results as
+        # whatever had happened since the last restart and looked
+        # exactly like a day with fewer trades in it.
+        #
+        # Datetimes are stringified here rather than at the call site:
+        # one un-encodable value would fail the whole save, taking the
+        # ORB ranges and the open positions down with it.
+        "closed_positions": _json_safe(closed_positions or []),
     }
 
     directory = os.path.dirname(path)
@@ -121,6 +162,96 @@ def save(orb_ranges, open_positions, trailing_stops=None, portfolio=None,
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(payload, f)
     os.replace(tmp_path, path)
+
+
+def load_holdings(path=STATE_PATH, today=None):
+    """What we OWN, carried across days. No date guard.
+
+    WHY THIS IS SEPARATE FROM load(), 30 July 2026
+    ----------------------------------------------
+    The bot had two halves of one feature contradicting each other:
+
+        config.FORCE_SQUARE_OFF_AT_CLOSE = False
+            -- positions are CARRIED, not liquidated. Deliberate: the
+               operator moved to MTF to hold for days, and square-off is
+               MIS machinery that closed TVSMOTOR and CUB on 28 July for
+               exactly that reason.
+
+        state_store.load()
+            -- refuses any file not dated today, returns None for
+               everything including open_positions.
+
+    So the bot held positions overnight, reported them loudly at 15:15,
+    and then forgot they existed at the next 09:00. In PAPER mode there is
+    no broker to reconcile against, so they simply ceased to be.
+
+    THE DISTINCTION THAT FIXES IT: session state versus holdings.
+
+      SESSION STATE expires at midnight and the date guard on load() is
+      CORRECT. A stale opening range is actively dangerous -- yesterday's
+      high is not today's breakout level -- and the same goes for the
+      momentum lock, entry blocks and session counters.
+
+      HOLDINGS do not expire. What you own at 15:30 is what you own at
+      09:15, and the calendar has no opinion about it.
+
+    So this reads the SAME file and returns ONLY the holdings from it,
+    whatever its date. It deliberately cannot return orb_ranges,
+    momentum_universe, entry_blocks or session_counters -- there is no
+    parameter that would let a caller ask for them, so a future edit
+    cannot accidentally resurrect a stale opening range through this door.
+
+    Returns (open_positions, trailing_stops, opened_on) -- opened_on is
+    the date the file was written, so the dashboard can say "held 2 days"
+    rather than implying the position was opened this morning.
+    """
+    if not os.path.exists(path):
+        return {}, {}, None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        warn(f"[HOLDINGS] Could not read {path}: {exc}. Nothing carried "
+             f"forward -- check the file before trading.")
+        return {}, {}, None
+    if not isinstance(payload, dict):
+        return {}, {}, None
+    positions = payload.get("open_positions") or {}
+    if not positions:
+        return {}, {}, None
+    saved_date = payload.get("date")
+    today = today or datetime.now().date().isoformat()
+    if saved_date == today:
+        # Same day -- load() already handled it, nothing to carry.
+        return {}, {}, None
+    diagnostic(
+        f"[HOLDINGS] Carrying {len(positions)} position(s) forward from "
+        f"{saved_date}. Session state from that day is NOT restored -- "
+        f"only what is owned."
+    )
+    return positions, (payload.get("trailing_stops") or {}), saved_date
+
+
+def load_closed_positions(path=STATE_PATH, today=None):
+    """Today's closed trades, so a restart does not empty the day.
+
+    Date-guarded: yesterday's trades are not today's performance.
+    """
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        warn(f"[STATE] Could not read closed trades from {path}: {exc}")
+        return []
+    if not isinstance(payload, dict):
+        return []
+    today = today or datetime.now().date().isoformat()
+    if payload.get("date") != today:
+        return []
+    rows = payload.get("closed_positions") or []
+    return rows if isinstance(rows, list) else []
 
 
 def load(path=STATE_PATH, today=None):
@@ -184,3 +315,20 @@ def load_orb_unreliable(path=STATE_PATH, today=None):
     if payload.get("date") != today:
         return []
     return list(payload.get("orb_unreliable") or [])
+
+
+def load_session_counters(path=STATE_PATH, today=None):
+    """The per-day counters, or {} when there is nothing usable.
+
+    Same shape and the same "today only" rule as load_orb_unreliable
+    above -- yesterday's rotation count must never carry into today.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+    today = today or datetime.now().date().isoformat()
+    if payload.get("date") != today:
+        return {}
+    return payload.get("session_counters") or {}

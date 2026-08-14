@@ -231,3 +231,120 @@ def test_warm_up_grace_keeps_the_console_quiet_during_the_connect_burst():
     # raised during warm-up -- and it won't emit a spurious "cleared"
     # line either, since it was never announced.
     assert md._systemic_stale_active is True
+
+
+# ---------------------------------------------------------------
+# PER-SYMBOL STALENESS, 2026-07-28.
+#
+# The flat 5s threshold was set BELOW the feed's own 4.63s average gap,
+# so half the universe was permanently "stale", the heartbeat reported
+# 157,069 "stale symbols" out of 666, and 607 symbols were locked out
+# of trading for the whole session. Dhan sends snapshots, not every
+# trade -- a quiet stock is not a broken feed.
+# ---------------------------------------------------------------
+
+def _warm(md, symbol, gap_seconds, ticks=40, start=None):
+    """Feed a symbol a steady rhythm so it learns its own normal."""
+    t = start or _t(10, 0, 0)
+    for i in range(ticks):
+        tick = t + timedelta(seconds=gap_seconds * i)
+        md.on_tick(symbol, 100.0, tick, now=tick)
+    return t + timedelta(seconds=gap_seconds * ticks)
+
+
+def test_a_quiet_stock_is_not_flagged_for_being_quiet():
+    """THE bug. A stock that genuinely trades every 20s used to be
+    permanently stale under a 5s rule."""
+    md = MarketData()
+    nxt = _warm(md, "QUIET", 20.0)
+    md.on_tick("QUIET", 100.0, nxt, now=nxt + timedelta(seconds=19))
+    assert "QUIET" not in md._stale_symbols
+
+
+def test_a_fast_stock_is_still_flagged_when_it_actually_stalls():
+    """Adaptive must not mean permissive. A stock that prints every 2s
+    and then goes silent for 30s is a real gap."""
+    md = MarketData()
+    nxt = _warm(md, "FAST", 2.0)
+    md.on_tick("FAST", 100.0, nxt, now=nxt + timedelta(seconds=30))
+    assert "FAST" in md._stale_symbols
+
+
+def test_the_learned_normal_matches_the_symbols_real_rhythm():
+    md = MarketData()
+    _warm(md, "STEADY", 12.0)
+    assert 11.0 <= md.typical_gap("STEADY") <= 13.0
+
+
+def test_no_normal_until_the_symbol_has_enough_history():
+    md = MarketData()
+    _warm(md, "NEW1", 12.0, ticks=3)
+    assert md.typical_gap("NEW1") is None
+
+
+def test_before_warmup_the_flat_threshold_still_applies():
+    """A brand-new symbol has no normal yet, so it must not be given a
+    free pass -- fall back to the old rule until it is warm."""
+    md = MarketData()
+    t = _t(10, 0, 0)
+    md.on_tick("COLD", 100.0, t, now=t + timedelta(seconds=20))
+    assert "COLD" in md._stale_symbols
+
+
+def test_a_fast_stock_is_never_flagged_below_the_floor():
+    """STALENESS_MIN_SECONDS stops a 0.5s-rhythm stock being flagged at
+    2s, which would just recreate the original noise problem."""
+    md = MarketData()
+    nxt = _warm(md, "TURBO", 0.5)
+    md.on_tick("TURBO", 100.0, nxt, now=nxt + timedelta(seconds=6))
+    assert "TURBO" not in md._stale_symbols
+
+
+def test_the_orb_flag_ignores_an_ordinary_quiet_gap():
+    """607 of 666 symbols were blacklisted on 2026-07-28 because the ORB
+    flag inherited the 5s threshold. A 10s gap is a quiet stock."""
+    md = MarketData()
+    stale_time = _t(9, 20, 0)
+    md.on_tick("QUIETMID", 100.0, stale_time,
+               now=stale_time + timedelta(seconds=10))
+    assert md.is_orb_window_unreliable("QUIETMID") is False
+
+
+def test_the_orb_flag_still_fires_on_a_real_sonacoms_sized_hole():
+    """The incident the rule exists for was ~30 seconds. That must still
+    blacklist the symbol -- a range built around a hole is not a range."""
+    md = MarketData()
+    stale_time = _t(9, 20, 0)
+    md.on_tick("SONACOMS", 100.0, stale_time,
+               now=stale_time + timedelta(seconds=35))
+    assert md.is_orb_window_unreliable("SONACOMS") is True
+
+
+def test_a_backwards_tick_does_not_poison_the_learned_normal():
+    """A replay stepping backwards, or two snapshots in the same second,
+    would drag the average to zero and make everything look stale."""
+    md = MarketData()
+    _warm(md, "REPLAY", 10.0)
+    before = md.typical_gap("REPLAY")
+    t = _t(9, 30, 0)
+    md.on_tick("REPLAY", 100.0, t, now=t)
+    assert md.typical_gap("REPLAY") == before
+
+
+def test_reconciling_the_range_clears_the_unreliable_flag():
+    """The flag means "we may have missed the true high/low". Rebuilding
+    the range from the exchange answers that doubt -- 2026-07-28, 607 of
+    666 symbols stayed blacklisted all day, many already reconciled."""
+    md = MarketData()
+    stale_time = _t(9, 20, 0)
+    md.on_tick("SONACOMS", 100.0, stale_time,
+               now=stale_time + timedelta(seconds=40))
+    assert md.is_orb_window_unreliable("SONACOMS") is True
+    assert md.clear_orb_window_unreliable("SONACOMS") is True
+    assert md.is_orb_window_unreliable("SONACOMS") is False
+
+
+def test_clearing_a_symbol_that_was_never_flagged_reports_nothing():
+    """So the caller logs "tradeable again" once, not on every tick."""
+    md = MarketData()
+    assert md.clear_orb_window_unreliable("NEVERFLAGGED") is False

@@ -59,10 +59,25 @@ Author : H&M Opportunity Trader
 import threading
 
 from config import CIRCUIT_PROXIMITY_PCT, CIRCUIT_POLL_INTERVAL_SECONDS
+import datetime as _dt
+
 from core.logger import diagnostic, warn
 
 UPPER = "UPPER"
 LOWER = "LOWER"
+
+
+# When the circuit poller is allowed to ask Dhan for quotes.
+# Generous at BOTH ends on purpose: the pre-open auction starts
+# at 09:00 and the closing auction runs past 15:30, and a circuit
+# flag matters most at exactly those edges.
+SHUT_BEFORE_MINUTES = 8 * 60 + 45      # 08:45
+SHUT_AFTER_MINUTES = 16 * 60           # 16:00
+
+
+# Dhan: "up to 1000 instruments per request". 900 leaves headroom so a
+# universe that grows again does not land on the edge.
+QUOTE_BATCH_SIZE = 900
 
 
 class CircuitMonitor:
@@ -143,6 +158,22 @@ class CircuitMonitor:
     def _run(self):
         while not self._stop_event.is_set():
             try:
+                # ---- DO NOT ASK A CLOSED MARKET FOR QUOTES. ----
+                #      5 August 2026.
+                #
+                # There was no clock here at all, so this hit Dhan
+                # every cycle through the night and the pre-market and
+                # got a refusal every time. The operator saw the
+                # warning at 06:40 and reasonably asked what was
+                # broken. Nothing was -- we were asking for prices that
+                # do not exist yet.
+                #
+                # FAIL-OPEN. Any doubt about the time and it polls. A
+                # clock bug that silences circuit monitoring during the
+                # session is far worse than a warning at dawn.
+                if self._market_is_shut():
+                    self._stop_event.wait(self._poll_interval)
+                    continue
                 self.poll_once()
             except Exception as e:
                 # A failed poll cycle must never take the circuit
@@ -154,6 +185,22 @@ class CircuitMonitor:
             self._stop_event.wait(self._poll_interval)
 
     # --------------------------------------------------
+
+    def _market_is_shut(self, now=None):
+        """True only when we are CERTAIN there is no session running.
+
+        Deliberately generous at both ends -- the pre-open auction
+        starts at 09:00 and the closing auction runs past 15:30, and a
+        circuit flag matters most around exactly those edges.
+        """
+        try:
+            now = now or _dt.datetime.now()
+            if now.weekday() >= 5:                 # Saturday, Sunday
+                return True
+            minutes = now.hour * 60 + now.minute
+            return minutes < SHUT_BEFORE_MINUTES or minutes > SHUT_AFTER_MINUTES
+        except Exception:                          # noqa: BLE001
+            return False                           # doubt -> poll
 
     def poll_once(self):
         """
@@ -167,13 +214,62 @@ class CircuitMonitor:
         if not security_ids:
             return
 
-        response = self._quote_fn(
-            {self._exchange_segment: [int(sid) for sid in security_ids]}
-        )
+        # ---- DHAN CAPS A QUOTE REQUEST AT 1000. 6 August 2026. ----
+        #
+        #     "printing every sec"
+        #
+        # This asked for every tracked id in ONE call. It worked while
+        # the universe was 958 names. This morning morning_universe
+        # widened it to 1,122 and every poll failed -- once a second,
+        # all session, with an empty error envelope because Dhan does
+        # not say why.
+        #
+        # The limit is in this file's own class docstring: "up to 1000
+        # instruments per request, 1 request/second". I wrote that line
+        # and then wrote a call that ignores it.
+        #
+        # 900 per batch, not 1000, so a universe that grows again
+        # tomorrow does not land exactly on the edge. The poll interval
+        # already spaces the cycles; two batches cost one extra request
+        # per cycle and keep circuit protection alive.
+        merged = {}
+        status = None
+        for start in range(0, len(security_ids), QUOTE_BATCH_SIZE):
+            batch = security_ids[start:start + QUOTE_BATCH_SIZE]
+            response = self._quote_fn(
+                {self._exchange_segment: [int(sid) for sid in batch]}
+            )
+            if not isinstance(response, dict) \
+                    or response.get("status") != "success":
+                break
+            status = "success"
+            piece = response.get("data", {})
+            if isinstance(piece, dict) and "data" in piece:
+                piece = piece["data"]
+            piece = (piece.get(self._exchange_segment, {})
+                     if isinstance(piece, dict) else {})
+            if isinstance(piece, dict):
+                merged.update(piece)
+        if status == "success":
+            response = {"status": "success",
+                        "data": {self._exchange_segment: merged}}
 
         if not isinstance(response, dict) or response.get("status") != "success":
+            # ---- IT PRINTED THE WRONG FIELD. 5 August 2026. ----
+            #
+            #   "[CIRCUIT_MONITOR] Quote request failed: {'error_code':
+            #    None, 'error_type': None, 'error_message': None}
+            #    Whats this error"
+            #
+            # Fair question, and the line could not answer it. It
+            # printed `remarks` -- Dhan's error envelope, empty here --
+            # and never printed `status`, which is the field that says
+            # what actually happened. Two days of a warning that
+            # reported nothing.
+            status = response.get("status") if isinstance(response, dict) else None
             warn(
-                f"[CIRCUIT_MONITOR] Quote request failed: "
+                f"[CIRCUIT_MONITOR] Quote request failed. status="
+                f"{status!r} remarks="
                 f"{response.get('remarks') if isinstance(response, dict) else response}"
             )
             return

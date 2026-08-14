@@ -26,6 +26,28 @@ Fixing a seed cannot fix a ratchet.
 import config
 from core.trailing_stop import TrailingStopEngine
 
+import pytest
+import core.trailing_stop as _ts
+
+
+@pytest.fixture(autouse=True)
+def _use_the_legacy_rolling_window(monkeypatch):
+    """These tests cover the 5-candle rolling-low ratchet, REPLACED on
+    2026-07-28 by the percent-from-peak trail (config.PEAK_TRAIL_PCT).
+
+    The old rule is kept in the file and kept under test so
+    ENABLE_PEAK_TRAIL=False restores it intact -- but it is off in
+    production, so these tests have to switch it back on explicitly
+    rather than silently testing a code path nobody runs.
+
+    Why it was replaced: it took the lowest low of the last five
+    ONE-MINUTE candles, which crept the stop up during flat stretches.
+    AFFLE peaked at +Rs 3,087 on 2026-07-28 and exited at +Rs 590.
+    """
+    monkeypatch.setattr(_ts, "ENABLE_PEAK_TRAIL", False)
+
+
+
 
 def test_stop_never_ratchets_closer_than_the_floor():
     """The LAURUSLABS case, with its real numbers."""

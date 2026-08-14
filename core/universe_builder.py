@@ -58,9 +58,28 @@ from datetime import datetime, timedelta
 from core.logger import decision, diagnostic, warn
 
 # --- the rules, all measured (see the module docstring) ---
-MIN_PRICE = 200.0            # tick granularity, not lack of movement
-MAX_PRICE = 10_000.0         # sizing quantisation + declining movement
-MIN_TURNOVER_RS = 50_000_000   # Rs 5cr/day -- real liquidity, not a print
+# Price bounds REMOVED 2026-07-29, operator's decision: "Remove cap on
+# below 200 & above 10,000 rs as we have moved from MIS to MTF we left
+# these two unchanged." Both were MIS-era rules -- tick granularity
+# and sizing quantisation inside a same-day round trip -- and neither
+# argument survives the move to multi-day MTF holds.
+#
+# 0 and infinity rather than deleting the checks: the reasons still
+# print in SUBSCRIBE_REASON for every other rule, and restoring a
+# bound is a one-number change.
+#
+# THIS ONLY TAKES EFFECT ON A REBUILD. As of tonight the universe is
+# still the 668 symbols built under the old bounds. Rebuilding admits
+# 193 stocks under Rs 200 and 21 over Rs 10,000 -- a 32% larger,
+# entirely untested universe. That is a deliberate act, not a side
+# effect of editing this file. MIN_TURNOVER_RS below still applies to
+# all of them, so genuinely illiquid scrips stay out either way.
+MIN_PRICE = 0.0
+MAX_PRICE = float("inf")
+# Rs 5cr/day -- real liquidity, not a print. NOT the same rule as
+# config.MIN_TURNOVER_RS (Rs 2cr traded so far TODAY, read by the
+# engine); one is a property of the stock, the other of the session.
+from core.rules import MIN_UNIVERSE_TURNOVER_RS as MIN_TURNOVER_RS
 TRADEABLE_SERIES = {"EQ"}      # BE/BZ = trade-to-trade, NO intraday
 
 # ETFs, SGBs and SME scrips trade in the EQ series too, so the series
@@ -220,7 +239,7 @@ def classify(rows, current_symbols, excluded=None):
         # equity, and every selection rule here (sector, relative
         # strength, corporate actions, news) is meaningless for a fund.
         if symbol in excluded or looks_like_a_fund(symbol):
-            rec["reason"] = "ETF / fund / SGB -- not company equity"
+            rec["reason"] = "ETF / SGB / SME -- not on our board"
             rejected.append(rec); continue
         if close is None or close <= 0:
             rec["reason"] = "no usable close"

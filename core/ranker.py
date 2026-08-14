@@ -1,0 +1,874 @@
+"""
+==========================================================
+The best stock of the day, not the first one to trigger
+==========================================================
+
+    "it must not follow old logic of first come = first buy"
+    "yes 2 positions or even 1 is fine for now. but it must take the
+     best stock pick of the day."
+    "any specific stock is out winning others; why ? that stock is
+     moving ? whats the supporting factor to the rally in stock?"
+                                    -- operator, 4 August 2026
+
+WHY THE OLD SHAPE CANNOT WORK ON RS 30,000
+------------------------------------------
+core/engine.py decides inside process_tick(). A stock crosses its
+opening range, the tick arrives, the trade is taken. That is
+first-come-first-served, and with a large account it is survivable --
+the twelfth-best setup of the day still gets funded.
+
+With Rs 30,000 and one or two slots it is fatal. A 6-out-of-10 setup
+that triggers at 09:47 spends the capital that a 9-out-of-10 setup
+needed at 09:52. The bot would not be picking well; it would be
+picking EARLY, and calling the result a strategy.
+
+So this module does not react to ticks. It is asked, on a clock, one
+question:
+
+    of everything moving right now, which is the best, and why?
+
+WHAT "BEST" MEANS HERE
+----------------------
+Four questions, each answerable from data the bot already holds. No
+new feed, no new fetch, nothing invented.
+
+  1. IS IT BEATING ITS OWN SECTOR AND THE MARKET?
+     A stock up 3% in a sector up 3% has done nothing. Excess over the
+     sector is the first real evidence that something is happening to
+     THIS company rather than to everything.
+
+  2. IS MONEY BEHIND IT?
+     Today's traded value against its OWN normal day. 5x is a crowd;
+     0.4x is a drift on no participation. This is the operator's own
+     rule -- "volumes supports the data" -- made arithmetic.
+
+  3. IS THERE A REASON?  (MANDATORY -- NOT A SCORE)
+     A named mechanism from news_memory.db (1,408 stock links, each
+     with written reasoning) or a graded channel event. No mechanism,
+     no candidate. His ideology, unchanged since the first day:
+
+         "without any thing stock doesn't move, that something is we
+          need to find out"
+
+     This is the one input that can REJECT rather than merely subtract.
+
+  4. CAN WE ACTUALLY TRADE IT?
+     Liquidity known, not pinned to a circuit, not blocked upstream,
+     in the tradeable universe. A perfect setup on a stock the bot has
+     never seen trade is YASHO, and YASHO cost Rs 11,300.
+
+WHAT THIS MODULE DOES NOT DO
+----------------------------
+It does not place orders, size positions, set stops, or decide when to
+exit. It returns a ranked list with a sentence attached to each row.
+core/engine.py remains the only thing that trades.
+
+It also does not pretend the weights are proven. They are named
+constants, gathered in one place, and every pick is recorded so
+core/outcomes.py can eventually say which of them earned their keep.
+Right now they are my judgement, and that is a fact about them, not a
+feature.
+
+Author : H&M Opportunity Trader
+==========================================================
+"""
+
+import math
+
+from core.logger import diagnostic
+
+# ---------------------------------------------------------------
+# What a candidate has to clear before it is even considered
+# ---------------------------------------------------------------
+# ---- THE THRESHOLDS LIVE IN core/rules.py NOW. 11 August 2026. ----
+#
+# MIN_MOVE_PCT existed in FOUR files with three different values, and
+# MIN_VOLUME_RATIO in three with two. The name hid the fact that this
+# module and core/select.py are not even measuring the same thing: this
+# one measures against YESTERDAY'S CLOSE, select measures against
+# TODAY'S OPEN. So they are named apart now and neither is redeclared.
+from core.rules import (
+    MIN_MOVE_FROM_PREV_CLOSE_PCT as MIN_MOVE_PCT,
+    MIN_VOLUME_RATIO,
+    MIN_LIQUIDITY_CR,
+    MIN_TRADABLE_PRICE_RS,
+    NOT_A_REASON,
+    is_a_reason,
+    UNEXPLAINED_MIN_VOLUME_RATIO,
+    UNEXPLAINED_WEIGHT,
+    RANKER_W_EXCESS_SECTOR as W_EXCESS_SECTOR,
+    RANKER_W_SECTOR_LEAD as W_SECTOR_LEAD,
+    RANKER_W_VOLUME as W_VOLUME,
+    RANKER_W_MECHANISM as W_MECHANISM,
+    RANKER_W_PERSISTENCE as W_PERSISTENCE,
+)
+
+# Beating the sector by less than this is not leadership, it is
+# rounding. Measured against the sector's own average move.
+MIN_EXCESS_PCT = 0.5
+
+# ---- WHAT AN UNEXPLAINED MOVE HAS TO SHOW INSTEAD ----
+#
+# A stock with no published reason can still be where the money is
+# going -- MAZDOCK moved the whole defence sector on 6 August and no
+# channel had written a sentence the bot could read. But price alone
+# proves nothing: a drift on no volume is noise wearing a percentage.
+#
+# So an unexplained mover has to bring MONEY, not just movement --
+# meaningfully more volume than that stock normally does. 2.5x is
+# deliberately well above MIN_VOLUME_RATIO's 1.2, because a written
+# reason from his channels is worth something and a stock without one
+# must clear a higher bar to stand beside it.
+#
+# UNTESTED AT HIS HORIZON. Recorded on every pick so it can be scored
+# against what those stocks actually did. (Value: core/rules.py.)
+
+# A sector average built from one stock compares a stock to itself.
+MIN_SECTOR_PEERS = 3
+
+# NOT_A_REASON and the 15-character floor moved to core/rules.py on
+# 12 August 2026 and are imported at the top of this file. They were
+# declared here and nowhere else, so core/engine.py's ORB lane -- the
+# other path that can place an order -- had no way to apply them and
+# bought on no reason at all. One definition, both lanes.
+
+# ---------------------------------------------------------------
+# The weights are imported at the top of this file from core/rules.py,
+# where they are named RANKER_W_* so they cannot be confused with
+# core/select.py's, which score on a different scale entirely. Those
+# two disagreed under the same name for days and looked like a bug.
+# ---------------------------------------------------------------
+
+# A challenger must beat what we already hold by THIS much before the
+# bot swaps. Without it the ranking churns: two near-equal candidates
+# trade places every clock tick and the account pays brokerage for the
+# privilege of standing still.
+SWAP_MARGIN = 2.0
+
+# ---- IS THE MOVE STILL ON? 4 August 2026. ----
+#
+#   "some stocks will rally in opening 1/2 mins & sit in top gainers
+#    no use of such movement in stock for trader"
+#
+# RBA closed +18.2%, top of the gainers list all day, high made at
+# 09:16. Five hours of nothing. Day-change ranking loves that stock.
+#
+# More than 3% back from the day's extreme is a stock being sold into,
+# not one being bought. And a move that has done less than 0.15% in the
+# last window has stopped, whatever the day's number says.
+MAX_OFF_EXTREME_PCT = 3.0
+MIN_RECENT_PCT = 0.15
+
+# A fading move is not deleted -- it is pushed below every live one.
+# Deleting it teaches him nothing; showing it decay teaches him what a
+# dying move looks like before he buys the next one.
+FADING_PENALTY = 8.0
+
+# Within this much of the band there is no meaningful trade: the book
+# is one-sided and the fill is a queue, not a price. 0.5% rather than
+# 0 because a stock 0.2% from its limit is, in practice, at it.
+AT_CIRCUIT_PCT = 0.5
+
+# ---- NOTHING IS NAMED BEFORE THE OPENING RANGE EXISTS ----
+#      5 August 2026.
+#
+#     "some stocks will rally in opening 1/2 mins & sit in top gainers
+#      no use of such movement in stock for trader"
+#                                 -- operator, 4 August 2026
+#
+# On 5 August the ranker published DEEPAKNTR at 09:15:28 -- twenty-eight
+# seconds after the open, fifteen minutes before the opening range it is
+# supposed to trade closes. `volume_x 1.23` on 28 seconds of tape is not
+# a volume measurement, and `change_pct` against yesterday's close on a
+# gapped stock is not momentum.
+#
+# That day's five pre-09:30 picks averaged -2.71%. The eighteen from
+# 09:30 onwards averaged +1.51%. The two worst losses of the session,
+# DEEPAKNTR -6.05% and SFL -5.78%, were both named in the first five
+# minutes and both made their high inside the first sixty seconds.
+#
+# Empty for fifteen minutes is the correct answer, and it is his:
+#     "no trade is far more than a bad pick/wrong pick trade"
+RANK_FROM_TIME = "09:30"
+
+
+def _hhmm(now):
+    """A clock reading as "HH:MM", or None if there isn't one."""
+    if now is None:
+        return None
+    try:
+        return f"{now.hour:02d}:{now.minute:02d}"
+    except AttributeError:
+        text = str(now).strip()
+        return text[:5] if len(text) >= 5 and text[2] == ":" else None
+
+
+def _num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+class Candidate(dict):
+    """A ranked row. A dict so it serialises straight into the payload."""
+
+
+def sector_moves(gainers_losers, movers=None):
+    """{sector: average move}.
+
+    ---- IT WAS SILENTLY EMPTY. 4 August 2026. ----
+    Run against the real snapshot, every candidate came back with
+    "sector unknown" -- so `excess` was None, and the gate written as
+
+        if excess is not None and excess < MIN_EXCESS_PCT: refuse
+
+    never fired once. The whole point of the ranker -- is this stock
+    beating its own sector -- was being skipped, and the list was
+    ordered on volume and mechanism alone. It looked like it worked.
+
+    The sector_gainers/losers block is not always in the payload, but
+    EVERY mover row carries its own sector. So the averages are
+    computed from the movers themselves when the block is missing,
+    which is also the more honest number: it is the average of the
+    stocks actually moving, not of a precomputed basket.
+    """
+    out = {}
+    for key in ("sector_gainers", "sector_losers"):
+        for row in (gainers_losers or {}).get(key) or []:
+            name = row.get("sector")
+            move = _num(row.get("avg_change_pct"))
+            if name and move is not None:
+                out[name] = move
+    if out:
+        return out
+
+    buckets = {}
+    for row in (movers or []):
+        name = row.get("sector")
+        move = _num(row.get("change_pct"))
+        if not name or move is None:
+            continue
+        buckets.setdefault(name, []).append(move)
+    for name, moves in buckets.items():
+        # One stock is not a sector. With a single name the "excess"
+        # would be zero by construction and the gate meaningless.
+        if len(moves) >= MIN_SECTOR_PEERS:
+            out[name] = _baseline(moves)
+    return out
+
+
+def _baseline(moves):
+    """What the sector did, WITHOUT the outliers doing it.
+
+    ==========================================================
+        "MOREPEN LAB HIT CIRCUIT , BASF , STYRENIX, ALKYLAMINE ,
+         got good results none of them were shown by bot"
+                                -- operator, 4 August 2026
+    ==========================================================
+
+    BASF, STYRENIX and ALKYLAMINE are all CHEMICALS. On 4 August all
+    three rose hard on their own results. The mean of that sector was
+    8.5%, so every one of them failed "not beating its sector" -- each
+    was measured against a baseline it had itself created. The ranker
+    returned an empty list on the best day of the week:
+
+        sector avg  -> {'CHEMICALS': 8.5}
+        ranked      -> []
+
+    The gate was not wrong. The baseline was. "What did this sector do
+    today" means the DRIFT -- what a chemicals stock with no news of
+    its own did. A handful of names moving on their own earnings are
+    the signal being looked for; letting them set the bar they must
+    clear is circular.
+
+    The median is the fix, and it is the standard one: it is the middle
+    stock, so a few big movers cannot drag it. With CHEMICALS at
+    6/7/9/12, the mean is 8.5 and the median 8.0 -- and once the real
+    sector's untouched names are in the list (most of a sector does
+    NOT report on any given day), the median sits near zero where it
+    belongs while the mean is still pulled up by the reporters.
+    """
+    ordered = sorted(moves)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return round(ordered[middle], 2)
+    return round((ordered[middle - 1] + ordered[middle]) / 2.0, 2)
+
+
+def market_move(gainers_losers, indices=None, movers=None):
+    """One number for 'the market'. NIFTY when the feed has it, the
+    average of every sector when it does not.
+
+    Deliberately not breadth: breadth says how MANY are up, and this
+    needs to know how FAR the average stock moved, so a stock's excess
+    means something.
+    """
+    nifty = (indices or {}).get("nifty") or {}
+    if nifty.get("available") and _num(nifty.get("pct")) is not None:
+        return _num(nifty["pct"])
+    sectors = sector_moves(gainers_losers, movers)
+    if not sectors:
+        return 0.0
+    return round(sum(sectors.values()) / len(sectors), 2)
+
+
+def volume_ratio(row, adv_cr):
+    """Today's traded value against this stock's own normal day.
+
+    None when we cannot say -- which is NOT the same as 'quiet', and
+    must never be scored as if it were.
+    """
+    volume = _num(row.get("volume"))
+    price = _num(row.get("ltp"))
+    if volume is None or price is None or not adv_cr:
+        return None
+    traded_cr = volume * price / 1e7
+    return round(traded_cr / adv_cr, 2)
+
+
+def _at_circuit(row, side):
+    """Locked, or so close to it that there is no trade left.
+
+    MOREPEN went limit-up on results and stayed there. A BUY button on
+    that row is a lie -- there is nothing to buy, only a queue to join.
+    """
+    room = (row.get("headroom_up_pct") if side == "BUY"
+            else row.get("headroom_down_pct"))
+    room = _num(room)
+    if room is None:
+        return None
+    return room <= AT_CIRCUIT_PCT
+
+
+def liveness(row):
+    """Is this move STILL HAPPENING, or did it finish hours ago?
+
+    ==========================================================
+        "some stocks will rally in opening 1/2 mins & sit in top
+         gainers no use of such movement in stock for trader"
+                                -- operator, 4 August 2026
+    ==========================================================
+
+    The single most important thing this table gets wrong today. RBA
+    closed +18.2% and sat at the top of the gainers list all day -- it
+    made its high at 09:16 and did nothing for the next five hours.
+    Ranking on day-change puts that stock first every time, and there
+    was never a trade in it.
+
+    Three readings, all from data already on the row:
+
+        off_high_pct   how far it has given back from the day's high.
+                       A stock 4% off its high is being sold.
+        recent_pct     what it did in the last window. Near zero means
+                       the move is over whatever the day says.
+        above_vwap     are buyers still paying up.
+
+    Returns one of:
+
+        "alive"    still at or near its high, still moving
+        "fading"   well off the high, or the recent window has died
+        None       cannot say -- shown, never guessed at
+
+    "fading" does not hide the stock. It demotes it and labels it, so
+    he can see what a dying move looks like instead of being handed it
+    as a fresh idea.
+    """
+    high = _num(row.get("day_high"))
+    ltp = _num(row.get("ltp"))
+    recent = _num(row.get("recent_pct"))
+    vwap = _num(row.get("vwap"))
+    up = (_num(row.get("change_pct")) or 0) >= 0
+
+    off_high = None
+    if high and ltp:
+        # For a SHORT the "high" that matters is the day's low, so the
+        # same arithmetic is run against whichever extreme the trade is
+        # heading towards. Using the high for a faller would call every
+        # short "fading" the moment it bounced a rupee.
+        extreme = high if up else (_num(row.get("day_low")) or high)
+        if extreme:
+            off_high = abs((ltp - extreme) / extreme * 100.0)
+
+    if off_high is None and recent is None:
+        return None, None
+
+    dead = False
+    if off_high is not None and off_high > MAX_OFF_EXTREME_PCT:
+        dead = True
+    if recent is not None and abs(recent) < MIN_RECENT_PCT:
+        dead = True
+    if vwap and ltp:
+        # Below VWAP on a long means the average buyer today is under
+        # water. That is not a stock to be joining.
+        if (up and ltp < vwap) or (not up and ltp > vwap):
+            dead = True
+
+    return ("fading" if dead else "alive"), (
+        round(off_high, 2) if off_high is not None else None)
+
+
+def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
+         adv_of=None, blocked=None, held=None, mtf_of=None, top=6,
+         now=None, open_of=None):
+    """Everything moving right now, best first, with the reason.
+
+    mechanism_of(symbol) -> {"text": ..., "weight": 0..1} or None
+    adv_of(symbol)       -> average daily traded value in crore
+    blocked              -> symbols the risk layer has already refused
+    held                 -> symbols already in the book
+    now                  -> the clock. Before RANK_FROM_TIME nothing is
+                            named at all. None skips the check, so
+                            every existing caller and test behaves as
+                            before.
+    open_of(symbol)      -> today's opening price. A long below its own
+                            open is a falling stock whatever yesterday
+                            did. None skips the check.
+
+    Returns {"rows": [...], "market_pct": x, "note": ...}. Never raises.
+    """
+    rows = list(movers or [])
+    if not rows:
+        return {"rows": [], "market_pct": 0.0, "note": "nothing is moving"}
+
+    # ---- BEFORE 09:30 THERE IS NOTHING TO SAY ----
+    clock = _hhmm(now)
+    if clock is not None and clock < RANK_FROM_TIME:
+        return {"rows": [], "market_pct": 0.0,
+                "note": f"the opening range closes at {RANK_FROM_TIME} -- "
+                        f"nothing is ranked before then",
+                "refusals": {}}
+
+    sectors = sector_moves(gainers_losers, rows)
+    market = market_move(gainers_losers, indices, rows)
+    blocked = {str(s).upper() for s in (blocked or [])}
+    held = {str(s).upper() for s in (held or [])}
+    adv_of = adv_of or (lambda s: 0.0)
+    mechanism_of = mechanism_of or (lambda s: None)
+
+    out, rejected = [], {}
+    # ---- WHICH STOCK, NOT JUST HOW MANY. 11 August 2026. ----
+    # refuse() counted reasons and threw the SYMBOL away. So the
+    # dashboard could say "not moving enough x91" and never say which
+    # 91. On 11 August I built the board's refusal rows out of the
+    # counts dict, assumed it was {symbol: reason}, and put rows on his
+    # screen named "too thin to trade our size" with a volume of 65.
+    #
+    #     "not even one thing is as i wanted"
+    #
+    # The count is still useful -- it is the whole shape of a day. But
+    # the operator cannot argue with a number. He argues with a stock.
+    refused_by_symbol = {}
+
+    def refuse(symbol, why):
+        rejected[why] = rejected.get(why, 0) + 1
+        name = str(symbol or "").upper()
+        if name:
+            refused_by_symbol[name] = why
+
+    for row in rows:
+        symbol = str(row.get("symbol") or "").upper()
+        if not symbol:
+            continue
+
+        move = _num(row.get("change_pct"))
+        if move is None or abs(move) < MIN_MOVE_PCT:
+            refuse(symbol, "not moving enough")
+            continue
+
+        side = "BUY" if move > 0 else "SELL"
+
+        # ---- gates. these REFUSE, they do not subtract ----
+        if symbol in blocked:
+            refuse(symbol, "blocked upstream")
+            continue
+
+        # ---- THE PRICE FLOOR BELONGS HERE. 11 August 2026. ----
+        #
+        #     "why MSUMI & SEPC = 30 times bot tried to buy?"
+        #
+        # It was enforced only in Engine._enter, the very last line of
+        # the order path. This module had never heard of it. So on
+        # 5 August the ranker scored SEPC at Rs 6.29 nineteen times and
+        # MSUMI at Rs 41.07 eleven times, auto_entry cleared all thirty,
+        # and the order gate refused every one -- then nothing recorded
+        # that it had happened, so five minutes later it did it again.
+        #
+        # Thirty wasted candidate slots on one day for two stocks that
+        # could never be bought. A rule enforced at the bottom of a
+        # funnel does not stop work, it only stops orders.
+        price_now = _num(row.get("ltp")) or _num(row.get("price"))
+        if price_now is not None and price_now < MIN_TRADABLE_PRICE_RS:
+            refuse(symbol, f"under the Rs {MIN_TRADABLE_PRICE_RS:.0f} "
+                           f"floor -- never tradeable")
+            continue
+
+        # ---- A GAP IS NOT MOMENTUM. 5 August 2026. ----
+        #
+        #     "why it is taking trades in falling stock? DEEPAKNTR even
+        #      i took this without looking charts ; ICICIGI SAME STORY"
+        #
+        # `move` above is measured against YESTERDAY'S CLOSE, and that
+        # is the only thing this ranker ever looked at. A stock can gap
+        # up 5% at the open and bleed all day, and it reads as "up" the
+        # whole way down.
+        #
+        # ICICIGI, 5 August: previous close 1644.80, opened 1732.20,
+        # then fell nine minutes in a row. At 09:23 the bot recorded
+        # `change_pct 2.68%, state=alive` and called it a BUY -- while
+        # the chart showed an unbroken staircase down. He read it in one
+        # glance. The bot had no notion of the open at all.
+        #
+        # Of that day's nineteen sized entries exactly two were below
+        # their own open: DEEPAKNTR and ICICIGI. Both lost. He named
+        # both, unprompted, from memory.
+        #
+        # Against the OPEN, not the previous close, and only for the
+        # direction being proposed: a long must be above its open, a
+        # short below it.
+        if open_of is not None:
+            try:
+                day_open = _num(open_of(symbol))
+            except Exception:                              # noqa: BLE001
+                day_open = None
+            price = _num(row.get("ltp")) or _num(row.get("price"))
+            if day_open and price:
+                if side == "BUY" and price < day_open:
+                    refuse(symbol, "below its own open -- falling today")
+                    continue
+                if side == "SELL" and price > day_open:
+                    refuse(symbol, "above its own open -- rising today")
+                    continue
+
+        adv = _num(adv_of(symbol)) or 0.0
+        if adv < MIN_LIQUIDITY_CR:
+            # ---- A SIZE FILTER. NOT A "NEVER SEEN IT" FILTER. ----
+            #      Corrected 4 August 2026.
+            #
+            # I first called this "the YASHO gate" and justified it by
+            # saying the bot had never seen YASHO trade. That was my
+            # broken data source talking, not a fact about the stock:
+            # core/liquidity.py was reading a store frozen on 31 July.
+            # Against NSE's own bhavcopy YASHO averages Rs 61 crore a
+            # day and did Rs 175 crore the session before he traded it.
+            # It is perfectly liquid, and 191 of 954 names that looked
+            # unknown were all data rot -- the real count is zero.
+            #
+            # The gate still earns its place, but for the honest
+            # reason: at Rs 1.2 lakh of MTF buying power a stock doing
+            # Rs 3 crore a day means the operator IS the volume, and
+            # getting out costs more than getting in.
+            refuse(symbol, "too thin to trade our size")
+            continue
+
+        # VOLUME IS READ HERE, NOT 60 LINES DOWN. It used to be
+        # computed after the mechanism check, which was fine while a
+        # missing reason simply refused the stock. Now the tape can
+        # qualify a stock on its own, and the tape means volume -- so
+        # the number has to exist before the question is asked.
+        vratio = volume_ratio(row, adv)
+
+        mech = mechanism_of(symbol)
+        text = str((mech or {}).get("text") or "").strip()
+        if not mech or not text:
+            # ---- FOLLOW THE MONEY. THE REASON BACKS IT. ----
+            #      6 August 2026.
+            #
+            #     "my concern is not profit & loss at all. the only
+            #      concern is bot must know where the money is moving ?
+            #      to find that it must check with top gainers & orb
+            #      breakout stocks . details of them will get in
+            #      telegram channels"
+            #
+            # This was a veto, and on 6 August it refused 494 of the
+            # 605 stocks that actually moved. Every one of these was
+            # thrown away:
+            #
+            #     INDOMIM     +8.58%   Rs 1,730 Cr   closed ON its high
+            #     NAVINFLUOR  +8.58%   Rs   119 Cr   1.7% off its high
+            #     GVT&D       +7.11%   Rs   377 Cr
+            #     MAZDOCK     +6.32%   Rs   198 Cr   govt defence news
+            #
+            # The ranker named nothing all day and the operator got no
+            # list at all.
+            #
+            # The order was backwards. Money moves first and the
+            # channels explain it afterwards -- sometimes hours later,
+            # sometimes never. MAZDOCK moved the whole defence sector
+            # on government news the bot has no sentence for.
+            #
+            # So the tape leads. A stock carrying REAL money -- volume
+            # well above its own normal, not just a price that drifted
+            # -- qualifies on its own, and is marked as unexplained so
+            # it can never be mistaken for a stock with a written
+            # reason behind it.
+            #
+            # This is NOT the old "buy anything that moves". Price
+            # alone still proves nothing: without volume confirming
+            # that money actually changed hands, the refusal stands.
+            if vratio is None or vratio < UNEXPLAINED_MIN_VOLUME_RATIO:
+                refuse(symbol, "no reason found, and no volume behind it")
+                continue
+            mech = {
+                "text": (f"unexplained -- {vratio:.1f}x its normal volume, "
+                         f"no published reason yet"),
+                "weight": UNEXPLAINED_WEIGHT,
+                "direction": None,
+                "source": "the tape",
+                "unexplained": True,
+            }
+            text = mech["text"]
+
+        # ---- A LOOKUP RESULT IS NOT A MECHANISM ----
+        # core/news_impact.py writes "matched on: INDGN" when a story
+        # named a company and produced no reasoning. That is the
+        # matcher reporting its own work, and on the first real run it
+        # sailed through this gate and ranked sixth.
+        if not is_a_reason(text):
+            refuse(symbol, "reason is a lookup, not a mechanism")
+            continue
+
+        # ---- THE REASON MUST POINT THE SAME WAY AS THE TRADE ----
+        #      4 August 2026.
+        #
+        # The first real run ranked MUTHOOTFIN as a SELL and attached
+        # "Strong Q1 FY27 AUM and PAT growth signals..." to it. A
+        # bullish mechanism justifying a short is not a near miss; it
+        # is the bot telling the operator a reason that argues against
+        # the trade it is proposing.
+        #
+        # The stock was down 7.3% on the day, so the TAPE said sell and
+        # the READER said buy. That disagreement is exactly the MDR
+        # situation, and the rule settled then still holds: where the
+        # evidence points two ways, the bot has no view and offers no
+        # trade.
+        direction = str((mech or {}).get("direction") or "").upper()
+        if direction in ("POSITIVE", "NEGATIVE"):
+            wants = "POSITIVE" if side == "BUY" else "NEGATIVE"
+            if direction != wants:
+                refuse(symbol, "reason contradicts the move")
+                continue
+
+        # ---- the four measurements ----
+        sector_name = row.get("sector")
+        sector_move = sectors.get(sector_name)
+        # Excess is signed against the DIRECTION of the trade: a short
+        # candidate outperforms by falling faster than its sector.
+        if sector_move is None:
+            excess = None
+        else:
+            excess = (move - sector_move) if side == "BUY" \
+                else (sector_move - move)
+
+        if excess is not None and excess < MIN_EXCESS_PCT:
+            refuse(symbol, "not beating its sector")
+            continue
+
+        lead = None
+        if sector_move is not None:
+            lead = (sector_move - market) if side == "BUY" \
+                else (market - sector_move)
+
+        if vratio is not None and vratio < MIN_VOLUME_RATIO:
+            refuse(symbol, "no volume behind it")
+            continue
+
+        recent = _num(row.get("recent_pct"))
+
+        # ---- CAN HE BUY IT THE WAY HE BUYS? ----
+        #      "only trade in best set of stocks in MTF"
+        #
+        # The whole book runs on MTF. Dhan does not margin every scrip,
+        # and until now the ranker never asked -- so it could hand him
+        # a perfect-looking name he could only buy with cash, and he
+        # would find out at the click.
+        #
+        # This REFUSES rather than penalises, same as every other gate:
+        # a stock he cannot trade his way is not a better or worse
+        # candidate, it is not a candidate.
+        #
+        # No mtf_of supplied -- paper mode, backtests, the preview --
+        # means the question was not asked, and an unasked question
+        # must never read as a failed one.
+        mtf = mtf_of(symbol, row) if mtf_of else None
+        if mtf is not None and not mtf.get("eligible"):
+            refuse(symbol, "no MTF -- cash only")
+            continue
+
+        # ---- IS THE MOVE STILL HAPPENING? ----
+        #      "some stocks will rally in opening 1/2 mins & sit in top
+        #       gainers no use of such movement in stock for trader"
+        state, off_extreme = liveness(row)
+
+        # ---- the score ----
+        score = 0.0
+        score += W_EXCESS_SECTOR * (excess or 0.0)
+        score += W_SECTOR_LEAD * max(lead or 0.0, 0.0)
+        if vratio is not None:
+            # ---- 71x AND 5x SCORED THE SAME. 7 August 2026. ----
+            #
+            # The cap at 5.0 was there so a 40x reading could not swamp
+            # every other input, and that part was right. But it also
+            # made every stock above 5x identical, and on 6 August the
+            # whole unexplained row tied at 13.9 and came out in
+            # ALPHABETICAL order:
+            #
+            #     GMMPFAUDLR  71.2x        BLUESTARCO   5.0x
+            #     COHANCE     20.5x        ADVANCE      5.9x
+            #
+            # 71x its own normal volume is not the same event as 5x,
+            # and the ranker could not tell them apart -- which is the
+            # one job it exists to do.
+            #
+            # So: unchanged up to 5x, then a LOG bonus above it. 20x
+            # earns +0.6 over 5x, 71x earns +1.15. Real separation,
+            # and a 40x reading still cannot outweigh sector leadership
+            # and a written reason put together.
+            score += W_VOLUME * (min(vratio, 5.0)
+                                 + (math.log10(vratio / 5.0)
+                                    if vratio > 5.0 else 0.0))
+        score += W_MECHANISM * float(mech.get("weight") or 0.5) * 2.0
+        if recent is not None:
+            # Still moving NOW. A stock that gapped at 09:15 and has not
+            # ticked since is not a rally, it is a memory.
+            score += W_PERSISTENCE * (recent if side == "BUY" else -recent)
+
+        # A finished move ranks below every live one. Not deleted --
+        # RBA closing +18.2% with its high at 09:16 is worth SEEING,
+        # labelled, so he learns the shape. It is never worth being
+        # handed as today's best idea.
+        if state == "fading":
+            score -= FADING_PENALTY
+
+        out.append(Candidate({
+            "symbol": symbol,
+            "action": side,
+            "score": round(score, 2),
+            "change_pct": move,
+
+            # ---- THE PRICES HE ASKED FOR. 9 August 2026. ----
+            #
+            #     "still the CMP, Volume, Open, High, Low. is not
+            #      showed ?"
+            #
+            # They were never missing from the screen -- they were
+            # missing from the PAYLOAD. This row carried the score, the
+            # sector, the volume MULTIPLE and the reason, but not one
+            # actual price, so the dashboard had nothing to print even
+            # if it wanted to. It could show him why the bot liked a
+            # stock and not what the stock cost.
+            #
+            # Straight off the same mover row every other field is read
+            # from, so they cannot disagree with the tape.
+            "ltp": _num(row.get("ltp")),
+            "open": _num(row.get("day_open") or row.get("open")),
+            "high": _num(row.get("day_high") or row.get("high")),
+            "low": _num(row.get("day_low") or row.get("low")),
+            "volume": _num(row.get("volume")),
+            "turnover_cr": _num(row.get("turnover_cr")),
+            "prev_close": _num(row.get("prev_close")),
+            "recent_pct": recent,
+            "sector": sector_name,
+            "sector_pct": sector_move,
+            "excess_pct": None if excess is None else round(excess, 2),
+            "sector_lead_pct": None if lead is None else round(lead, 2),
+            "volume_x": vratio,
+            "adv_cr": round(adv, 1),
+            # Is the move alive, and can he trade it his way. Both are
+            # drawn on the row, so both have to reach the payload.
+            "state": state,
+            "off_extreme_pct": off_extreme,
+            # ROOM LEFT BEFORE THE CIRCUIT. 4 August 2026 --
+            #   "why bot or trader needs to wait till Circuit closing"
+            # At the circuit there are no sellers and the printed
+            # percentage understates the move. Headroom says whether
+            # there is still a trade or only a queue.
+            "headroom_pct": (row.get("headroom_up_pct") if side == "BUY"
+                             else row.get("headroom_down_pct")),
+            "at_circuit": _at_circuit(row, side),
+            "mtf_eligible": None if mtf is None else bool(mtf.get("eligible")),
+            "mtf_leverage": None if mtf is None else mtf.get("leverage"),
+            "mechanism": mech.get("text"),
+            "mechanism_weight": mech.get("weight"),
+            "held": symbol in held,
+            "why": explain(symbol, side, move, sector_name, sector_move,
+                           excess, vratio, mech.get("text")),
+        }))
+
+    # ---- A FINISHED MOVE CAN NEVER LEAD. 4 August 2026. ----
+    #
+    # FADING_PENALTY alone was not enough and could not be. Tested
+    # against the real case -- RBA +18.2%, high made at 09:16, 5% off
+    # it -- an eight-point penalty still left it FIRST, because an
+    # 18-point day move drives an excess score far larger than any
+    # constant I could pick. Raising the number until RBA lost would
+    # have been tuning to one example, and the next 25% mover would
+    # walk straight past it again.
+    #
+    # So it is structural, not numeric: liveness sorts BEFORE score.
+    # Every stock still moving outranks every stock that has stopped,
+    # whatever the day's percentage says. The penalty stays, to order
+    # the fading ones sensibly among themselves.
+    #
+    # Unknown liveness (no high, no recent window) sorts with the live
+    # ones. We did not measure it, so we must not demote it -- that is
+    # the same "unasked is not failed" rule the MTF gate follows.
+    out.sort(key=lambda c: (c.get("state") == "fading", -c["score"]))
+    if rejected:
+        diagnostic("[RANK] refused: " + ", ".join(
+            f"{k} x{v}" for k, v in sorted(rejected.items())))
+
+    return {"rows": out[:top],
+            "market_pct": market,
+            "considered": len(rows),
+            "kept": len(out),
+            # HOW MANY SETUPS EXIST PER DAY, AND WHAT TURNED THE REST
+            # AWAY. 4 August 2026 -- the operator's plan is ten
+            # positions a day at Rs 2 lakh each. Whether ten A-grade
+            # setups exist on an ordinary day is the number that plan
+            # lives or dies on, and it was being computed here and
+            # thrown away: rejected never left this function.
+            "refusals": dict(rejected),
+            # {SYMBOL: why}. Named separately from `refusals` on purpose:
+            # that key has meant {reason: count} since 4 August and
+            # anything already reading it must keep working.
+            "refused_by_symbol": dict(refused_by_symbol),
+            "note": "" if out else "nothing cleared the gates"}
+
+
+def explain(symbol, side, move, sector, sector_move, excess, vratio, mech):
+    """One sentence a human can act on.
+
+        "up 4.2% while IT is up 0.8% -- 5.1x its normal volume --
+         order win announced at 09:22"
+
+    Deliberately plain. The operator's standing rule is that the screen
+    shows the stock, the direction and the reason; the arithmetic that
+    produced the ranking stays in the background.
+    """
+    bits = []
+    bits.append(("up" if move > 0 else "down") + f" {abs(move):.1f}%")
+    if sector and sector_move is not None:
+        way = "up" if sector_move >= 0 else "down"
+        bits.append(f"while {sector.title()} is {way} {abs(sector_move):.1f}%")
+    elif excess is None:
+        bits.append("sector unknown")
+    if vratio is not None:
+        bits.append(f"{vratio:.1f}x its normal volume")
+    line = ", ".join(bits)
+    return (line + " — " + str(mech)[:110]) if mech else line
+
+
+def should_swap(current, challenger, margin=SWAP_MARGIN):
+    """Is the challenger enough better to be worth the round trip?
+
+    Without a margin the ranking churns: two candidates within a
+    rounding error of each other trade places on every clock tick and
+    the account pays brokerage to stand still. Charges are real and the
+    operator has watched them eat a day before.
+    """
+    if current is None:
+        return True
+    if challenger is None:
+        return False
+    return (challenger.get("score", 0) - current.get("score", 0)) >= margin

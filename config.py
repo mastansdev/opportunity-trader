@@ -31,6 +31,78 @@ DHAN_ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN", "")
 # Layer 1 (ORB PAPER trading) works fine without it.
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
+# ---------------------------------------------------------------------
+# EXTRA TELEGRAM CHANNELS -- the private / paid ones
+# ---------------------------------------------------------------------
+#     "i brought you some more promising pro channels of earnings
+#      pulse... those pro channels are not showing link to share"
+#                                     -- operator, 1 August 2026
+#
+# A PUBLIC channel has an @handle printed on its page. A PRIVATE one
+# has neither a handle nor a share link, and the only name it has is
+# its TITLE inside the account that joined it.
+#
+# Put those titles here, EXACTLY as `py tools/telegram_channels.py`
+# prints them. Nothing else needs editing -- core/telegram_feed.py
+# appends whatever is in this list to the four public channels.
+#
+#     EXTRA_TELEGRAM_CHANNELS = [
+#         "Earnings Pulse Pro",
+#         "Street Pulse Pro",
+#     ]
+#
+# WHAT THESE DEPEND ON. A private channel is reachable ONLY through the
+# Telegram API -- there is no public web page for it. So if the session
+# expires or the account is rate-limited, these go quiet while the four
+# public channels fall back to the web view and keep arriving. That is
+# a real difference in reliability, not a formality, and it is the
+# reason the public four are not moved off the web reader entirely.
+#
+# `kind` is "text" unless the channel is mostly screenshots, in which
+# case use a dict: {"handle": "Some Pro Channel", "kind": "image"}.
+EXTRA_TELEGRAM_CHANNELS = [
+    # ---- THE WATCHLIST BOT, 1 August 2026 ----
+    #
+    # The richest source in the whole subscription, and it arrives as a
+    # direct message rather than a channel. For up to 100 chosen stocks
+    # it pushes results, concall summaries, investor presentations,
+    # OrderBook filings, other announcements, price movements, broker
+    # ratings and watchlist news -- "Only your stocks. No firehose."
+    #
+    # Named here rather than left to the PRO folder scan because it has
+    # a public username, so it resolves directly and does not depend on
+    # Telegram listing a bot alongside channels in a folder -- which it
+    # did not appear to do when the folder was first read.
+    #
+    # core/telegram_client._is_readable_source() allows bots on purpose
+    # and still refuses human chats. See tests/test_folder_sources.py.
+    "WLPulseBot",
+]
+
+# ---------------------------------------------------------------------
+# ...OR JUST USE A TELEGRAM FOLDER
+# ---------------------------------------------------------------------
+#     "in my telegram . two folder - ALL CHATS & PRO
+#      if we want & feasible i will move our required telegram channels
+#      to PRO folder"               -- operator, 1 August 2026
+#
+# Feasible, and better than the list above. Put a folder name here and
+# every channel inside it is watched. Curation happens in the Telegram
+# app: drag a channel in and the bot reads it, drag it out and it
+# stops. Nothing to type exactly, no file to edit, and no way for a
+# list in the code to drift from what is actually being followed.
+#
+#     TELEGRAM_FOLDER = "PRO"
+#
+# Folders are an account setting, so this needs the API session -- a
+# public web page has no folders. Set it to "" to switch it off.
+#
+# ONLY CHANNELS AND GROUPS ARE READ. A personal chat dragged into that
+# folder is skipped: the bot has no business in one, and quietly
+# collecting private messages because somebody tidied their app would
+# be indefensible.
+TELEGRAM_FOLDER = "PRO"
+
 # ----------------------------------------------------------
 # Trading mode
 # ----------------------------------------------------------
@@ -38,7 +110,171 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # PAPER only until Layer 1 has been watched for real, live,
 # without placing a single real order, and the operator
 # trusts what it's doing.
+# ---- PAPER, ON REAL MARKET DATA. His call, 9 August 2026. ----
+#
+#     "lets bot trade in paper mode but dashboard must show me as
+#      we both agreed . i'll trade manually"
+#
+# This said LIVE, with I_UNDERSTAND_THIS_PLACES_REAL_ORDERS True,
+# so trading/execution.py built LiveExecution and dhan.place_order
+# was one call away. ALERT_ONLY_MODE and LIVE_ALLOW_BOT_ENTRIES
+# stopped the BOT -- but this file says in as many words that
+# "Manual dashboard clicks can" place a real order, and he asked
+# for paper.
+#
+# PAPER changes the EXECUTOR only. The WebSocket still carries
+# real ticks, the Telegram cards are real, the ranker sees the
+# real board and the dashboard shows the real session. Nothing
+# about the market data is simulated -- only the fills.
+#
+# His own manual trading in the Dhan app is completely unaffected;
+# this process never touches it.
 TRADING_MODE = "PAPER"
+
+# ----------------------------------------------------------
+# LIVE TRADING -- real money. 2026-07-28
+# ----------------------------------------------------------
+# TRADING_MODE = "LIVE" is NOT enough on its own. Both of these must be
+# true before a single real order can be placed. One switch is one typo
+# away from spending money by accident; two is a decision.
+I_UNDERSTAND_THIS_PLACES_REAL_ORDERS = True
+
+# Operator's decisions, 2026-07-28:
+#   1. MARKET orders   -- fills instantly, price not guaranteed
+#   2. He watches on 2-3 screens
+#   3. HIS CLICKS ONLY at first. "initially i'll trade with bot dashboard.
+#      once bot gets clarity shifts to bot (not autonomous - i'll be
+#      there 100%)"
+#
+# So the bot's own structural entries CANNOT place live orders until
+# this is turned on deliberately. Manual dashboard clicks can.
+LIVE_ALLOW_BOT_ENTRIES = False
+
+# ---------------------------------------------------------------
+# A STOP THAT SURVIVES THIS PROCESS DYING, 2026-08-02
+# ---------------------------------------------------------------
+#     "yeah pick that one. - pick the broker-side stop"
+#
+# Until now every stop lived in RAM, in core/trailing_stop.py, inside
+# the running process. Kill the process -- crash, sleep, power cut,
+# dead proxy -- and an open MTF position at up to 4X, held overnight,
+# had no stop anywhere. Dhan did not know one was intended.
+#
+# With this ON, every entry also rests a Forever Order (GTT) at Dhan
+# at the HARD stop. It sits BELOW the live trailing stop on purpose,
+# so the two cannot race for the same fill: in normal running the live
+# stop always fires first and this one is cancelled on the exit. It
+# only ever does anything when this process is not there to act.
+#
+# It places REAL resting orders in a real account, and a resting order
+# left behind after an exit would SELL STOCK THAT IS NOT HELD -- on MTF,
+# that is a short. trading/broker_stop.py cancels on every exit and
+# reconciles against Dhan's own list at startup.
+#
+# ---- TURNED ON, 12 AUGUST 2026. THE OPERATOR'S DECISION. ----
+#
+# It was OFF, and FORCE_SQUARE_OFF_AT_CLOSE below is also False. Those
+# two together meant an open MTF position had NO STOP ANYWHERE between
+# 15:30 and 09:15 -- not at Dhan, and not in this process if the machine
+# was off. That is not a theoretical gap. Six trades went straight past
+# the 2.5% hard stop overnight for -Rs 48,692:
+#
+#     CORONA     -7.48%    DEEPAKFERT -4.80%    YASHO     -5.19%
+#     DEEPAKNTR  -3.51%    DEEPAKFERT -4.81%    JKLAKSHMI -2.82%
+#
+# Asked which way to close it, he picked the resting stop over forced
+# square-off: the overnight hold is the strategy, so protect it rather
+# than abolish it.
+#
+# WATCH THE FIRST SESSION. The dashboard toggle (/api/broker_stop/on|off)
+# switches this live without a restart, so it can be turned off mid-
+# session if the resting orders look wrong.
+BROKER_STOP_ENABLED = True
+
+# How far the live trailing stop must ratchet above the resting trigger
+# before the resting order is moved up to follow it. Every move is an
+# API call on the order path; following every tick would be thousands
+# of calls a day for a protection that only matters when the process is
+# already dead. 1% keeps the backstop within one stop-width of the real
+# one without hammering the endpoint.
+BROKER_STOP_RESYNC_PCT = 0.01
+
+# Written into the resting order's correlationId so reconcile() can
+# tell OUR orders from ones the operator placed by hand in the Dhan
+# app. An order that is not ours is reported and left alone -- this bot
+# does not reach into his account and cancel a protection he set
+# himself.
+BROKER_STOP_TAG_PREFIX = "OTSTOP"
+
+# ---------------------------------------------------------------
+# THE STATIC IP, AND WHY IT IS ONLY ON THE ORDER PATH
+# ---------------------------------------------------------------
+# 31 July 2026. SEBI requires every API-placed order to leave from a
+# registered static IP. Three orders were refused DH-905 Invalid IP
+# before the cause was found; reads were never affected, which is
+# exactly why it hid for so long.
+#
+# The obvious fix -- move the whole bot to a cloud machine with a
+# static IP -- IS WRONG, and the operator knew it from experience:
+#
+#     "last time when deployed in railway - some rss not worked"
+#
+# He was right, and the code says why. This bot fetches from:
+#
+#     www.nseindia.com          5 places   BLOCKS datacenter IPs
+#     nsearchives.nseindia.com  3 places   BLOCKS datacenter IPs
+#     moneycontrol / ET / BS    5 places   bot protection
+#     api.dhan.co               5 places   needs the STATIC ip
+#     t.me, telegram            6 places   fine either way
+#
+# The two requirements point in OPPOSITE directions. NSE and the news
+# sites want a residential address; Dhan wants a registered static one.
+# A cloud VM satisfies the second and breaks the first -- which is the
+# Railway failure, reproduced at greater expense.
+#
+# So the proxy is applied to ONE client: the one that places orders.
+# Everything else -- the tick feed, circuit-monitor quotes, NSE, the
+# pre-open book, RSS, Telegram -- keeps going out over the home
+# connection exactly as it does today.
+#
+# StaticIP.in, bought 31 July 2026. Verified the same afternoon:
+#
+#     home line arrives as   157.50.99.165      (Jio -- NSE sees this)
+#     via the proxy          165.101.251.109    (Dhan sees this)
+#
+# 165.101.251.109 is the number whitelisted at Dhan. Valid to
+# 31 Aug 2026 -- RENEW BEFORE THEN or every order stops.
+#
+# Both http:// and https:// were tested and both carry traffic;
+# http:// is used because it is a plain CONNECT tunnel, which keeps
+# the Dhan access token encrypted end to end and unreadable by the
+# proxy operator.
+ORDER_PROXY = ("http://sip_310709bcebbdfd89:9VURw2Kt5f7qIkJE"
+               "@dc-mum-005.staticip.in:443")
+
+# HARD LIMITS. These are not risk management -- they are the guard rail
+# against a bug. A loop that fires fifty orders is the nightmare case,
+# and it has to be impossible rather than unlikely.
+LIVE_MAX_ORDER_VALUE_RS = 500_000.0   # refuse any single order above this
+LIVE_MAX_ORDERS_PER_DAY = 30          # refuse everything past this count
+LIVE_MAX_OPEN_POSITIONS = 12
+
+# A MARKET order cannot be cancelled once it fills, so the only place to
+# protect the fill price is BEFORE sending. If the live price has moved
+# more than this from the price the dashboard showed when the operator
+# clicked, the order is REFUSED and he is told why.
+#
+# The case this exists for: 2026-07-28, SUPREMEIND. First click was lost
+# (item 26), price ran from ~3,385 to 3,472.70 before the second click
+# went through -- Rs 5,000 on 57 shares. With a live market order that
+# would have been a real fill at a price he never agreed to.
+LIVE_MAX_PRICE_DRIFT_PCT = 0.005      # 0.5%
+
+# Every order carries a correlation ID. On a TIMEOUT the bot must query
+# by that ID before it even considers resending -- a blind retry is how
+# you end up holding two positions and knowing about one.
+LIVE_ORDER_TAG_PREFIX = "OT"
+LIVE_CONFIRM_TIMEOUT_SECONDS = 10
 
 # Equity only. No F&O in this bot, ever -- not a Layer 1
 # limitation, a permanent decision.
@@ -55,8 +291,77 @@ PRE_OPEN_BUFFER = "09:12"  # buffer -- NOT live
 
 MARKET_OPEN = "09:15"      # real continuous trading starts
 ORB_WINDOW_END = "09:30"   # opening range closes
-SQUARE_OFF_TIME = "15:15"  # flatten everything, intraday only
+# MIS/intraday only, and DORMANT while FORCE_SQUARE_OFF_AT_CLOSE is
+# False (which it is, for MTF). 31 July 2026: this time also used to
+# block every NEW entry after 15:15 -- correct when the bot flattened
+# at 15:15, meaningless once it stopped. The block now follows
+# FORCE_SQUARE_OFF_AT_CLOSE automatically. See
+# core/engine._entry_cutoff_reason().
+SQUARE_OFF_TIME = "15:15"
+
+# ----------------------------------------------------------
+# HOLD OVERNIGHT -- the MTF switch, 2026-07-28
+# ----------------------------------------------------------
+# SQUARE_OFF_TIME above is MIS machinery. main.py calls
+# engine.flatten_all() at 15:15 and closes EVERY open position, every
+# day, no exceptions.
+#
+# The operator moved to MTF specifically to hold positions for days:
+# "shifted to MTF (even more safer than MIS)", and the whole strategy
+# is "ride while momentum persists, exit ruthlessly when it dies" --
+# neither of which survives a daily forced liquidation. On 2026-07-28
+# it closed TVSMOTOR and CUB at 15:15 for exactly that reason.
+#
+# This is not cleanup. With square-off armed, the MTF strategy cannot
+# be run at all.
+#
+# WHAT STAYS ON when this is False:
+#   - No FRESH entries after NO_NEW_ENTRIES_AFTER (unchanged).
+#   - Trailing stops keep working, through the close and into the next
+#     session. A position is never unmanaged.
+#   - The end-of-day sweep still runs, but only REPORTS what is being
+#     carried instead of liquidating it.
+#
+# WHAT THE OPERATOR TAKES ON:
+#   - Overnight gap risk. An MTF position gaps against you with no stop
+#     able to fire between 15:30 and 09:15.
+#   - MTF interest from T+1 (~0.0342%/day on the funded amount).
+#   - Dhan's own RMS can still square off if coverage falls below 20%.
+#
+# Set True to restore the old MIS behaviour on any day you want to be
+# flat by the close.
+FORCE_SQUARE_OFF_AT_CLOSE = False
 MARKET_CLOSE = "15:30"
+
+# ---------------------------------------------------------------------
+# KEEP THE DASHBOARD UP AFTER THE CLOSE
+# ---------------------------------------------------------------------
+# 30 July 2026. The dashboard grew a POST-MARKET tab -- closed trades,
+# performance, and the refusal breakdown -- and then the operator asked
+# the obvious question nobody had asked:
+#
+#     "but main.py will auto close after market timings right?"
+#
+# It does. main.py's loop breaks the moment `now >= MARKET_CLOSE_T`, so
+# the review tab could only ever be read DURING the session, which is
+# precisely when nobody wants to read it. The tab was built for a screen
+# that no longer existed by the time it mattered.
+#
+# With this True the bot's TRADING day still ends at exactly 15:30 --
+# same break, same state save, feed closed, no order path alive -- but
+# the process stays up serving the dashboard read-only until Ctrl+C.
+# Nothing about the trading behaviour changes; only the process lifetime.
+KEEP_DASHBOARD_AFTER_CLOSE = True
+
+# ...and the hazard that creates. A process left running overnight has a
+# CLOSED feed and yesterday's opening ranges. If it were still serving at
+# 09:15 it would look live and be dead -- the single most dangerous state
+# this screen can be in, because every number on it is plausible.
+#
+# So it stops itself before the next session can start. A banner alone
+# was the alternative and it was rejected for the right reason: a banner
+# is a thing you have to notice.
+DASHBOARD_AFTER_CLOSE_EXIT_AT = "09:00"
 
 # No FRESH structural entries after this time -- existing positions
 # are still managed (trail/partial/square-off) normally. 2026-07-24
@@ -73,7 +378,9 @@ MARKET_CLOSE = "15:30"
 # nothing in the data says 14:35 is different from 13:55. Entries now
 # close at 15:00, leaving 15 minutes before the 15:15 hard square-off.
 # Kept in lockstep with STAGED_NO_ENTRY_AFTER.
-LAST_ENTRY_TIME = "15:00"
+# Kept in lockstep with STAGED_NO_ENTRY_AFTER -- both moved to
+# 15:15 on 8 August when the square-off argument stopped applying.
+LAST_ENTRY_TIME = "15:15"
 
 # Any tick timestamped before MARKET_OPEN must never be
 # treated as live data for ORB building or entries. This is
@@ -87,6 +394,59 @@ LAST_ENTRY_TIME = "15:00"
 # than this, it's stale -- log it loudly, don't act on it
 # silently.
 MAX_TICK_STALENESS_SECONDS = 5
+
+# ----------------------------------------------------------
+# PER-SYMBOL STALENESS, 2026-07-28
+# ----------------------------------------------------------
+# The flat 5-second threshold above was set BELOW the feed's own
+# natural rate. Measured live on 2026-07-28:
+#
+#     ~8,900 ticks/min across 666 symbols
+#     = 13.4 ticks per symbol per minute
+#     = one tick every 4.63 seconds, on average
+#
+# So the threshold sat 0.37s above the average gap. Poisson arrivals
+# put ~34% of symbols past 5s at any instant even with a PERFECT feed;
+# bursty arrivals took the live figure to 50%. The alarm was measuring
+# the threshold, not the feed.
+#
+# What it actually cost, all four from the same constant:
+#     "333/666 symbols (50%) are stale AT ONCE" fired all session
+#     "stale symbols flagged: 157,069"  (there are 666 symbols)
+#     2,446 disk writes a MINUTE into a 369 MB unrotated log
+#     607 of 666 symbols locked out of trading -- see below
+#
+# Dhan sends periodic SNAPSHOTS, not every trade, and tick_time is the
+# last TRADE time. So a quiet mid-cap that genuinely hasn't traded for
+# 20 seconds reports 20s of "staleness" while the feed is perfectly
+# healthy. One number cannot serve a Rs 3,000-crore stock and a Rs
+# 30-crore one.
+#
+# Each symbol now learns its OWN typical gap and is flagged only when
+# it exceeds that by a wide multiple. A stock that ticks every 2s is
+# flagged at 2s x multiple; one that ticks every 25s is not flagged for
+# behaving normally.
+STALENESS_ADAPTIVE = True
+STALENESS_MULTIPLE = 4.0          # flag at 4x the symbol's own normal gap
+STALENESS_MIN_SECONDS = 8.0       # never flag below this, however fast
+STALENESS_WARMUP_TICKS = 20       # fall back to the flat rule until then
+
+# ----------------------------------------------------------
+# ORB-WINDOW INTEGRITY, retuned 2026-07-28
+# ----------------------------------------------------------
+# is_orb_window_unreliable() blocks structural entries for the whole
+# session for any symbol that went stale inside 09:15-09:30. Correct
+# rule -- a range built around a hole in the feed is not a range.
+#
+# But it inherited the 5-second threshold, so on 2026-07-28 it
+# blacklisted 607 of 666 symbols and the bot took ZERO automated
+# entries all day. The three restarts inside the opening range made it
+# worse, but 5s alone would have flagged most of the universe anyway.
+#
+# The incident this rule exists for (SONACOMS, 2026-07-24) was a ~30
+# SECOND gap. That is the harm level. Anything under it is a quiet
+# stock, not a hole.
+ORB_WINDOW_MAX_GAP_SECONDS = 30.0
 
 # --- Feed staleness console-noise controls, 2026-07-24 (evening) #2 ---
 # The 5s threshold above trips constantly for two totally harmless
@@ -203,6 +563,46 @@ FROZEN_PRICE_STREAK_CANDLES = 3
 # this file.
 CIRCUIT_PROXIMITY_PCT = 0.02
 
+# ==========================================================
+# THE CIRCUIT RULE IS HALF RIGHT  (2026-07-29)
+# ==========================================================
+# Until now, a stock within CIRCUIT_PROXIMITY_PCT of EITHER limit got
+# no new entries and any open position closed -- "irrespective of
+# direction", in the log's own words.
+#
+# For a LONG the two limits are opposite situations:
+#
+#   LOWER   real danger. If it locks there are no buyers, the position
+#           cannot be exited at any price, and on MTF that is how a
+#           2.5% stop becomes a 20% loss. Closing early is correct.
+#
+#   UPPER   the best thing that can happen. Buyers with no sellers.
+#           Selling there means dumping the strongest position of the
+#           day, every time.
+#
+# The rule exists so the bot does not get trapped. Trapped in a RISING
+# stock is not a trap.
+#
+# WHAT IT COST, measured:
+#
+#   COFORGE 28 Jul   bought 1,648.10, rule sold at 1,648.30 for +Rs 24.
+#                    It then ran to 1,692.20 and closed 1,680.10.
+#                    Holding was worth Rs 3,872.
+#
+#   29 Jul           the day's two biggest movers were both structurally
+#                    off-limits:
+#                        SMLMAH      3,838 -> 4,566   +18.97%
+#                        APCOTEXIND    602 ->   709   +17.82%
+#                    The operator bought SMLMAH by hand and the bot sold
+#                    it within seconds. APCOTEX it never touched at all.
+#
+# THE KNOWN RISK, stated rather than hidden: a stock locked at its
+# upper circuit can open lower the next morning, and a stop does not
+# help when there are no buyers. Positions are carried overnight on
+# MTF deliberately, so that exposure is real -- it is just not a reason
+# to sell every winner the moment it becomes one.
+CIRCUIT_RULE_DIRECTION_AWARE = True
+
 # How often the circuit monitor polls Dhan's REST quote endpoint,
 # in seconds. Runs on its own thread (core/circuit_monitor.py),
 # entirely separate from the tick-processing hot path -- same
@@ -316,7 +716,38 @@ CIRCUIT_LOCK_TOLERANCE_PCT = 0.001
 # the margin/buying-power gate, NOT the news/sector checks a manual
 # override is allowed to bypass.
 # ----------------------------------------------------------
-MIN_TRADABLE_PRICE_RS = 200.0
+# REMOVED 2026-07-29, operator's decision: "Remove cap on below 200 &
+# above 10,000 rs as we have moved from MIS to MTF we left these two
+# unchanged."
+#
+# The rule was written on 2026-07-24 for MIS intraday, where a sub-Rs
+# 200 stock's tick granularity really did behave differently inside a
+# same-day round trip. MTF changes the holding period, and the
+# operator's own judgement on his own money governs which stocks he
+# is willing to own.
+#
+# 0.0 disables the gate without deleting the plumbing -- the check in
+# _enter() still runs, so putting a floor back is a one-number change
+# rather than a re-implementation.
+#
+# NOTE, and this matters: this gate only refuses stocks that are
+# ALREADY in the universe. The universe itself is still built with
+# its own price bounds (core/universe_builder.py). Until that is
+# rebuilt, the tradable list is unchanged.
+# ---- THE FLOOR IS BACK, AND IT IS HIS NUMBER. 6 August 2026. ----
+#
+#     "we need to refine the stocks which are having lower price than
+#      50 rs CMP. we/bot never trade in those stocks"
+#
+# It was 0.0 -- switched off -- and worse, nothing on the DECISION
+# path read it at all. core/ranker.py, core/watchlist_builder.py and
+# core/auto_entry.py never mentioned it, so only _enter() checked, and
+# only against a floor of zero. GTLINFRA at Rs 1.23 was in today's
+# result set with nothing to stop it being ranked.
+#
+# 50.0 now, applied at the WATCHLIST as well as at entry, so a stock
+# he will never trade never occupies a row he could have used.
+MIN_TRADABLE_PRICE_RS = 50.0
 
 # ----------------------------------------------------------
 # Console health signal
@@ -376,7 +807,50 @@ LAYER1_FIXED_QTY = 100
 # this replaces. 5 is a starting point, not a proven number --
 # tune it after watching real trades, same as everything else
 # in this codebase.
-TRAILING_STOP_WINDOW_CANDLES = 5
+TRAILING_STOP_WINDOW_CANDLES = 5   # LEGACY -- see PEAK_TRAIL_PCT below
+
+# ----------------------------------------------------------
+# PERCENT TRAIL FROM THE PEAK, 2026-07-28
+# ----------------------------------------------------------
+# REPLACES the 5-candle rolling-low trail above, which took the lowest
+# low of the last five ONE-MINUTE candles. That is a five-minute noise
+# window on a system that now holds positions for days, and it ratcheted
+# the stop up during flat stretches -- so an ordinary pause pulled the
+# stop right under the price and the next dip ended the trade.
+#
+# WHAT IT COST ON 2026-07-28, all three from the same rule:
+#     AFFLE       peaked +Rs 3,087, exited +Rs 590. Gave back Rs 2,497
+#                 in eight minutes. Simply holding beat it by Rs 886.
+#     NILKAMAL    entered 09:36, out 09:53 for +0.51%. The stock went
+#                 on to +7.63%.
+#     KALYANKJIL  stopped at 597.50. Closed at 608.85.
+#
+# WHY 2.5%. Measured on that same session: 51 stocks finished up 2% or
+# more, and their worst pullback ALONG THE WAY was --
+#
+#     median   1.84%      75th pct  2.50%
+#     average  2.03%      90th pct  3.45%
+#
+# A 1% trail was hit in 45 of those 51 winners. 2.5% survives three
+# normal pullbacks out of four. Wider catches more (CUB dipped 4.4%
+# before delivering 8.9%) but pays for it on every loser.
+#
+# BREAKEVEN IS AUTOMATIC, no second rule needed. Operator asked whether
+# the stop should jump to the buy price once the stock is +2.5% up. It
+# already does:
+#     peak = entry x 1.025  ->  stop = peak x 0.975 = entry x 0.9994
+#     peak = entry x 1.026  ->  stop = entry x 1.0004   ABOVE entry
+# So around +2.6% the trail crosses the buy price by itself, and keeps
+# climbing: at +5% the stop sits at +2.3%, at +9% it sits at +6.3%.
+#
+# NEVER TIGHTENS. It only moves on a NEW HIGH -- never on a pause. That
+# distinction is the whole fix.
+#
+# Operator, 2026-07-28: "keep 2.5% for now but my strong feeling is we
+# close much before this number touched." Correct use -- it is a
+# backstop, not a plan.
+ENABLE_PEAK_TRAIL = True
+PEAK_TRAIL_PCT = 0.025
 
 # Operator-approved 2026-07-23, after watching the first live
 # session whipsaw repeatedly: the initial stop used to be seeded
@@ -438,7 +912,13 @@ ORB_STOP_BUFFER_PCT = 0.2
 # OFF, so with the flag back ON nothing is dropped. It exists so that
 # turning the rule off in future actually turns it off, instead of
 # leaving yesterday's saved blocks silently enforcing a dead rule.
-BLOCK_REENTRY_AFTER_STOPOUT = True
+# REMOVED 2026-07-29 with ONE_TRADE_PER_SYMBOL_PER_DAY, same decision
+# and same reasoning (see that flag's note for the MTF assessment and
+# the measurement). These two together meant a single stop-out retired
+# a stock for the whole day; turning off only one of them would have
+# left the other still enforcing the rule, and the operator would have
+# been told it was removed while it was not.
+BLOCK_REENTRY_AFTER_STOPOUT = False
 
 # ----------------------------------------------------------
 # Top-N momentum mode (operator-designed 2026-07-23 evening, for
@@ -468,7 +948,63 @@ BLOCK_REENTRY_AFTER_STOPOUT = True
 # boundary-seeded dynamic trailing stop (core/trailing_stop.py)
 # completely untouched -- flip back instantly if Friday's read
 # says this isn't working, no code changes needed either way.
-TOP_N_MOMENTUM_MODE = True
+# ==========================================================
+# THE NAME IS A LIE  (2026-07-29)
+# ==========================================================
+# This flag has NOTHING to do with a momentum list any more. The
+# eligibility gate that used one was removed weeks ago -- core/engine.py
+# says so outright: "momentum_universe is no longer consulted for
+# eligibility at all."
+#
+# What it actually controls today is which SIZING AND STOP path an entry
+# takes:
+#
+#     True   -> ATR-derived stop, 2.5% hard stop from entry, MTF sizing
+#     False  -> LAYER1_FIXED_QTY shares and an ORB-boundary stop
+#
+# So anyone flipping this to False -- reasonably believing they are
+# switching off an unused momentum list -- would silently change every
+# entry's share count and stop. No error, no warning, just different
+# trades. It is read in 26 places across 7 files.
+#
+# ATR_ENTRY_SIZING below is the honest name. This one stays as an alias
+# so nothing breaks, and so a search for the old name still lands here.
+#
+# It already cost an argument: on 29 July the operator said the 09:30
+# momentum lock had been removed. It had. I argued back, because the
+# machinery was still running and still printing a tidy line at 09:30.
+ATR_ENTRY_SIZING = True
+TOP_N_MOMENTUM_MODE = ATR_ENTRY_SIZING     # alias -- see above
+
+# ==========================================================
+# THE 09:30 LOCK IS OFF  (2026-07-29, measured over 3 sessions)
+# ==========================================================
+# core/momentum_universe.py froze a top-25-gainers / top-25-losers list
+# at 09:30 every day, logged it, saved it to disk and restored it on
+# restart. NOTHING HAS READ IT FOR WEEKS.
+#
+# The operator asked the right question -- does the market only show its
+# strength at that time, or was that one day's test? Three sessions of
+# minute candles, counting how many of the day's CLOSING top 20 were
+# already top 20 at each hour:
+#
+#     date             09:30    10:00    11:00    12:00    13:00    14:00
+#     2026-07-27        8/20     8/20    10/20    12/20    12/20    13/20
+#     2026-07-28        9/20    10/20    11/20    14/20    13/20    15/20
+#     2026-07-29        2/20     7/20     7/20     8/20     8/20     9/20
+#
+# At 09:30 roughly a THIRD of the day's eventual leaders are visible --
+# and on 29 July, two of twenty. Even at 14:00 it is only about 60%.
+#
+# There is no good hour to freeze a list. Early misses most of them;
+# late sees more but leaves less time to profit. The earlier evidence
+# (TMB at rank 95 at noon, closing 2nd, 98% of its volume after 13:00)
+# was one day. This is three, and it says the same thing louder.
+#
+# The dashboard never needed it: Top 50 Gainers/Losers and the Sector
+# Heatmap build from the circuit monitor's live snapshot, and the
+# Shortlist rebuilds continuously by design.
+ENABLE_MOMENTUM_LOCK = False
 
 # How many symbols on each side. Locked ONCE, right when the ORB
 # window closes (ORB_WINDOW_END above) -- see
@@ -544,7 +1080,23 @@ MIN_ATR_CANDLES = 5
 # of charges came to eat 14.7% of everything risked. Paired with the
 # 1.0% stop floor below, Rs 2,000 / 1% = exactly the Rs 200,000
 # notional cap, which is what that cap was sized for.
-RISK_PER_TRADE_RS = 2000.0
+# ---- NOT THE OWNER ANY MORE. 12 August 2026. ----
+#
+# core/rules.py owns the live risk budget and says 1,500 -- the number
+# he approved on 11 August. This said 2,000, and BOTH were live:
+# core/engine.py sized its entries from this one and
+# core/position_plan.py sized the ranker's from that one, so the same
+# bot risked a different amount depending on which half of itself found
+# the trade.
+#
+# Re-exported from core/rules.py rather than deleted, because
+# backtest/replay.py and backtest/monday_replay.py read `cfg.RISK_PER_
+# TRADE_RS` and a replay measuring 2,000 while the bot trades 1,500 is
+# how twelve days of results came to describe a bot that does not
+# exist. One value, every reader.
+#
+# To change the risk budget, edit core/rules.py. Not here.
+from core.rules import RISK_PER_TRADE_RS       # noqa: E402  (= 1500.0)
 
 # Initial stop distance, in ATR multiples, from entry.
 # 2026-07-24 (evening) WIDENED from 1.5x to 2.5x after the operator's
@@ -643,6 +1195,153 @@ MIN_STOP_DISTANCE_PCT = 0.01
 MAX_NOTIONAL_PER_TRADE_RS = 200_000.0
 
 # ----------------------------------------------------------
+# MTF POSITION SIZING, 2026-07-28 -- operator's own rule
+# ----------------------------------------------------------
+# "Buy no of shares worth equal to 1 Lakh = mtf power. ex - as of now
+#  if i want to buy coforge 1686 rs - qty 225 with 99657.31 rs worth."
+#
+#     COFORGE 1,686 x 225 shares = Rs 3,79,350 position
+#     margin Dhan actually blocks =  Rs   99,657   (26.27%)
+#
+# So the operator commits a FIXED Rs 1 lakh of his own margin per
+# position, and the share count falls out of whatever margin that stock
+# happens to require. He made the point himself: leverage is not fixed
+# -- "some stocks may give more leverage & some none".
+#
+#     qty = MTF_MARGIN_PER_POSITION_RS / (price x that stock's margin %)
+#
+# A stock at 25% margin gives a Rs 4L position. One at 50% gives Rs 2L.
+# One with no MTF gives Rs 1L, bought with his own cash. The commitment
+# is identical either way.
+#
+# The margin % is NOT estimated. dhanhq exposes /margincalculator with
+# product_type="MTF", which returns the same figure the order screen
+# shows -- so the bot asks Dhan rather than guessing, and self-corrects
+# when Dhan changes a stock's rate or drops it from the MTF list.
+#
+# REPLACES the old sizing entirely. RISK_PER_TRADE_RS / MIN_STOP_
+# DISTANCE_PCT produced Rs 2L on every trade regardless of the stock,
+# because at a 1% stop both formulas are algebraically identical
+# (2000/(0.01*p) == 200000/p). Every one of 2026-07-28's eighteen trades
+# landed at Rs 1.90-2.00 lakh -- NILKAMAL, which swings 11% a day, got
+# the same size as MANAPPURAM, which swings 2%.
+# ==========================================================
+# THE TRAIL SOLD THE WINNERS  (2026-07-29, measured)
+# ==========================================================
+# 80 real trades across 27, 28 and 29 July were replayed against
+# their own minute candles. Same entries every time; only the exit
+# rule changed. On the bot's own 35 structural entries:
+#
+#     exit rule                  n    win     total   per trade
+#     what actually happened    35    43%    -1,252         -36
+#     1.5% trail                35    43%     8,856         253
+#     2.5% trail                35    46%    15,496         443
+#     3.5% trail                35    51%    21,374         611
+#     5.0% trail                35    51%    21,374         611
+#     7.5% trail                35    51%    21,374         611
+#
+# The entries were worth over Rs 21,000. The exit logic gave all of
+# it back and more.
+#
+# 3.5%, 5.0% and 7.5% are IDENTICAL because above 3.5% the trail
+# never fires at all -- 33 of 35 trades simply ran to the close. So
+# the finding is not "use a wider trail". It is "the trail should
+# not be there".
+#
+# WHAT THE BOT WAS ACTUALLY RUNNING, which is not what was agreed:
+# the operator approved 2.5% on 28 July, but structural entries used
+# an ATR trail (ATR_TRAIL_MULTIPLIER 1.2). Measured across all 16 of
+# its stop-outs, the drop from peak to exit was:
+#
+#     median 1.06%    min 0.65%    max 1.93%    under 2%: 16 of 16
+#
+# Not one reached 2.5%. His own words on 28 July -- "my strong
+# feeling is we close much before this number touched".
+#
+# With this False the stop is set once, HARD_STOP_FROM_ENTRY_PCT
+# below the entry, and never moves. It still closes a losing trade.
+# It just stops selling the winners.
+ENABLE_BOT_TRAILING_STOP = False
+
+# The stop that remains. 2.5% from the entry price, fixed for the
+# life of the trade -- the operator's own number, and the one every
+# variant above was measured with underneath it.
+HARD_STOP_FROM_ENTRY_PCT = 0.025
+
+# ==========================================================
+# YOUR TRADES ARE YOURS  (2026-07-29, operator-found live)
+# ==========================================================
+# SMLMAH. The operator saw it locked at its UPPER circuit -- no
+# sellers left, the strongest thing a stock can do -- and bought it
+# deliberately. The bot closed the position within seconds, because
+# a housekeeping rule says "near a circuit limit, get out".
+#
+# That rule protects nothing. It exists so the BOT doesn't get
+# trapped in its own inventory. Applying it to a position a human
+# opened on purpose means the operator's decision was overruled by
+# a tidy-up routine.
+#
+# Three exits are pure housekeeping and never protect anyone:
+#
+#   CIRCUIT_PROXIMITY  near either circuit band, close it
+#   NO_PROGRESS        flat too long, free the slot
+#   ROTATED_OUT        a better breakout wants this seat
+#
+# None of them fires because you are losing money. With this flag
+# on, none of them may touch a position you opened by hand.
+MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE = True
+
+# The trailing stop on a MANUAL position warns instead of selling.
+#
+# 29 July, the operator's own numbers:
+#
+#     exits he made by hand    18 trades   + Rs  5,947
+#     the bot's trailing stop  17 trades   - Rs 14,909
+#
+# Every rupee lost that day came from the trail. On his own trades
+# he is the better exit, so it tells him and he decides.
+#
+# THE HARD STOP STILL FIRES -- deliberately. The trail sells you out
+# of WINNERS; the fixed stop only fires on a real loss. It is the one
+# thing standing between a position and a bad afternoon away from the
+# desk. Alert-only on both was offered and refused.
+MANUAL_POSITIONS_TRAIL_ALERTS_ONLY = True
+
+# How many manual-position alerts to keep for the dashboard.
+# RAISED from 50, 30 July 2026. In ALERT_ONLY_MODE the alerts ARE the
+# product, not a side note about manual positions. Today's journal held
+# 717 signals; the ones that clear every quality gate are what get
+# alerted, and 50 would have silently dropped the earliest ones -- the
+# 09:31 breakouts, which are the ones worth seeing. Truncation that hides
+# the start of the day is worse than a long list.
+MANUAL_ALERT_HISTORY = 400
+
+# ---- FIRST REAL DAY, SMALLER SIZE. 5 August 2026. ----
+#
+#     "yes for tomorrow trade with lower capital . 30 K per position
+#      in MTF ."
+#
+# Was 100,000. The bot has never placed a real order in its life, so
+# the first live session runs the identical logic at under a third of
+# the size. Nothing else changes: the same gates, the same Rs 1,500
+# risk per trade, the same stops. Only the ceiling on how much margin
+# any one position may consume.
+#
+# Raise it back when the join has been watched for a few sessions.
+MTF_MARGIN_PER_POSITION_RS = 30_000.0
+
+# Cached per session: margin rates change rarely, and a live API call on
+# every click would put ~300ms between the operator pressing BUY and the
+# order going out -- the exact latency being removed elsewhere.
+# Re-checked on the first buy of each new day.
+MTF_MARGIN_CACHE_SECONDS = 21600      # 6 hours
+
+# When the margin call fails, or the stock has no MTF at all: buy with
+# the operator's own cash only. Rs 1 lakh buys Rs 1 lakh of stock (59
+# shares of COFORGE instead of 225). UNDER-leveraging is the safe error.
+MTF_FALLBACK_MARGIN_PCT = 1.0
+
+# ----------------------------------------------------------
 # 2026-07-24 REVAMP -- trading-policy gates (see TRADING_POLICY.md
 # for the complete decision path in plain language). These four
 # blocks together are the answer to POST_MARKET items 1, 4, 5 and
@@ -668,6 +1367,38 @@ MAX_NOTIONAL_PER_TRADE_RS = 200_000.0
 # snapshot right at 09:15 shouldn't lock the bot one-sided).
 REGIME_GATE_ENABLED = True
 REGIME_BREADTH_THRESHOLD = 0.60
+
+# ----------------------------------------------------------
+# MARKET REGIME GATE -- SWITCHED OFF 2026-07-28
+# ----------------------------------------------------------
+# The gate above refuses a LONG whenever REGIME_BREADTH_THRESHOLD of the
+# universe is declining, and a SHORT when it is advancing. "Trade with
+# the tape, never against it." Defensible for a two-sided intraday
+# system.
+#
+# It is wrong for THIS one, and it was costing entire sessions.
+#
+# 2026-07-28: 445 of 665 symbols declining -> SHORT_ONLY all day. The
+# operator trades LONG ONLY. So the bot was structurally incapable of
+# taking a single entry, silently, for the whole session -- one of the
+# three reasons it placed zero automated trades that day. And CUB
+# reported results and went +8.47% on that same 67%-red tape; this gate
+# would have refused it.
+#
+# The deeper problem: a rule that switches the bot off on two-thirds of
+# days makes it UNMEASURABLE. Nothing can be learned about entries,
+# exits or the reason gate on a day the bot cannot trade.
+#
+# Operator's decision, 2026-07-28, asked directly: "A" -- remove it for
+# longs so tomorrow's paper session can actually measure something.
+#
+# NOT DELETED. The gate is intact and one flag away, because "trade with
+# the tape" may well prove right once there is data to judge it on. It
+# is off because it is UNPROVEN and expensive, not because it is wrong.
+#
+# Blocked breakouts are still recorded on the Fresh Breakouts panel
+# either way, so the operator can see what the gate WOULD have refused.
+ENABLE_MARKET_REGIME_GATE = False
 REGIME_REFRESH_SECONDS = 30
 REGIME_MIN_SYMBOLS = 100
 
@@ -676,7 +1407,19 @@ REGIME_MIN_SYMBOLS = 100
 # (2026-07-23) is not a strategy, it's spray-and-pray -- and in live
 # trading each one ties up real margin. 10 forces the bot to be
 # selective: once full, new signals are skipped until a slot frees.
-MAX_OPEN_POSITIONS = 10
+# ---- THREE, FOR THE FIRST LIVE DAY OF THE RANKER. 7 Aug 2026. ----
+#
+#     "2/3 is enough today . i'll trade cautiously"
+#
+# Ten was sized for capital, and at Rs 4.31 lakh the capital genuinely
+# allows it. But 6 August filled EIGHT positions off the breakout path
+# before he noticed, and today is the first live session for the ranker
+# path -- which has never taken a single real trade.
+#
+# The point of three is not risk. Three entries he can read one by one
+# and judge whether the reason given was sound; ten he cannot. Raise it
+# once the picks have been scored against what those stocks did.
+MAX_OPEN_POSITIONS = 3
 
 # ==========================================================
 # TREND-RANK ENTRY PRIORITY + SLOT ROTATION  (2026-07-24)
@@ -722,6 +1465,252 @@ MAX_OPEN_POSITIONS = 10
 # RS_BAND_MIN below already requires the stock to be OUTPERFORMING the
 # market at entry (>= +0.4%), which is the real signal; the rank filter
 # was a cruder proxy for the same idea, applied to the wrong instant.
+# ----------------------------------------------------------
+# ALERT ONLY -- the bot stops trading and starts telling, 30 July 2026
+# ----------------------------------------------------------
+#     "we will stop completely bot from trade taking as of now. it must
+#      show me the stock in alerts only."      -- operator
+#
+# WHY, in his own words and the journal's numbers. On 30 July the bot
+# placed 16 of its 29 trades between 09:31 and 09:35, filling all ten
+# slots in four minutes, and then refused 665 signals for the rest of the
+# day. It took THYROCARE on 0.03x normal volume because a slot happened
+# to be free, and six minutes later refused KSB on 715x volume because
+# the book was full. Nothing compared the two.
+#
+# There are real gates per stock -- relative strength, circuit room,
+# results timing, liquidity -- but there is no ranking BETWEEN
+# candidates, so the winner is whoever ticks first. engine.py's own
+# comment calls a slot refusal "an accident of timing, not a judgement".
+#
+# Until that is fixed, the bot has no business choosing. So it does not
+# choose: every signal that would have been an entry becomes an ALERT
+# with the reason attached, and the operator decides.
+#
+# THIS IS NOT THE PAUSE FLAG. trade_controller's pause is a runtime
+# toggle that skips SILENTLY -- "no log line", by design, because it
+# fires on every candle close. Silence is exactly wrong here: the whole
+# point is to be told. Separate flag, separate behaviour.
+#
+# Manual BUY / SHORT from the dashboard still work. This gates the
+# AUTOMATED entry only.
+# ----------------------------------------------------------
+# TURNED BACK ON, IN PAPER, 12 August 2026.
+# ----------------------------------------------------------
+#     "i want a bot which checks for the opportunity in the live
+#      markets & do trade" -- operator
+#
+# The exact problem this flag was raised for on 30 July -- no ranking
+# between candidates, first-come-first-buy, THYROCARE taken on 0.03x
+# volume while KSB was refused on 715x -- is what core/ranker.py +
+# core/auto_entry.py were built to fix: every ranked pick is now scored,
+# sorted BEST FIRST (not first-fired-first), and REQUIRED to carry a
+# reason (core/why_moving.py) and pass a hard volume-ratio gate
+# (core/rules.MIN_VOLUME_RATIO) before it can reach an entry -- see
+# core/ranker.py's mandatory gates and core/auto_entry.py's early_rows()
+# (the 09:15-09:30 graded lane, wired into main.py the same day this
+# flag flipped). Both paths refuse a stock with no story to tell, which
+# is the rule this flag existed to enforce by hand.
+#
+# TRADING_MODE stays "PAPER" (above) -- this arms automated PAPER
+# entries only, on real live market data. No real order can result from
+# this flag alone; that still needs TRADING_MODE = "LIVE" AND
+# LIVE_ALLOW_BOT_ENTRIES = True, both separately, both untouched here.
+#
+# The legacy structural ORB-breakout path (core/engine.py's
+# _try_structural_entry(), reached when NOT coming through the ranker)
+# is UNCHANGED by this flag -- it still needs its own separate
+# `breakout_armed` switch, off by default, because it has no reason
+# requirement at all (see core/engine.py, "ONE SWITCH WAS ARMING TWO
+# BUYERS", 6 August 2026). Re-arming the ranked/early-bird paths here
+# does not re-arm that one.
+#
+# ==========================================================
+# BACK TO True. HIS INSTRUCTION, 12 August 2026.
+# ==========================================================
+#
+#     "by default bot trading = OFF (Bot Observing) when i start
+#      main.py . i can ON when i want bot to trade with the same rules"
+#
+# This was False, so main.py came up ARMED. The dashboard switch was
+# built to be the control -- and the thing it controls was already on
+# before he touched it.
+#
+# The switch's own docstring in dashboard/server.py has claimed the
+# opposite since 5 August:
+#
+#     "It is deliberately NOT written back to config.py. A restart
+#      returns to ALERT_ONLY_MODE, which is the safe value: if the bot
+#      dies at 11:00 and comes back while he is away from the desk, it
+#      must come back watching, not trading."
+#
+# That safety property was written against a True that had drifted to
+# False, so the restart-comes-back-safe guarantee was not true.
+# AUDIT_2026-08-12.md caught the drift ("rule book says True -- drifted")
+# and nobody moved it back.
+#
+# WHAT THIS DOES AND DOES NOT CHANGE
+#   - main.py starts with engine.alert_only = True  -> BOT OBSERVING
+#   - the dashboard ON button sets alert_only False -> BOT TRADING
+#   - OFF sets it back. Neither needs a restart.
+#   - a restart or a crash returns here: observing.
+#   - EXITS ARE UNAFFECTED. Stops, trails and targets run on anything
+#     already held whatever this says -- see core/engine.py's
+#     "Exits deliberately ignore alert_only so a stop always fires".
+ALERT_ONLY_MODE = True
+
+
+# =====================================================================
+# THE AI LAYER -- budget, scope, and what it is allowed to touch
+# =====================================================================
+#     "max .2500 per month is cap. & we need to use the best case of AI
+#      & trade by using the AI"          -- operator, 30 July 2026
+#
+# Costed against the bot's OWN measured volumes on 30 July: 82 news
+# stories, 133 Telegram messages and 731 ORB signals a day.
+#
+#     Haiku on news + telegram + events        Rs 1,084 / month
+#     Sonnet on ~30 shortlisted decisions      Rs 1,272 / month
+#     ------------------------------------------------------
+#     total                                    Rs 2,356 / month
+#     with prompt caching                      Rs   825 / month
+#
+# It fits. But it only fits because the model is asked about the ~30
+# stocks that survive the arithmetic, not all 731 signals. Sending every
+# signal to Sonnet costs Rs 28,369 a month -- twelve times more, for
+# worse answers, because most of those 731 are noise the cheap filters
+# already reject correctly.
+#
+# THAT IS THE DESIGN, not an optimisation: cheap deterministic filters
+# first, the model only on what survives.
+AI_ENABLED = False              # master switch. Nothing calls out while False.
+
+# HARD CEILING. When the month's recorded spend crosses this, every call
+# stops until the 1st. Not a warning -- a refusal.
+#
+# It exists because the failure mode is not "expensive", it is a retry
+# loop at 3am turning Rs 2,500 into Rs 25,000 while nobody is watching.
+# The bot already refuses to trade past its daily loss limit; this is
+# the same idea pointed at the API bill.
+AI_MONTHLY_BUDGET_RS = 2500.0
+AI_USD_INR = 88.0               # only to convert token cost into rupees
+
+# Below this the bot warns but keeps going; above it, it stops.
+AI_BUDGET_WARN_AT_PCT = 0.75
+
+# WHICH MODEL FOR WHAT.
+# Haiku classifies and extracts -- high volume, low judgement.
+# Sonnet decides -- low volume, high judgement.
+AI_MODEL_CHEAP = "claude-haiku-4-5-20251001"
+AI_MODEL_SMART = "claude-sonnet-5"
+
+# How many stocks reach the expensive model per day. The shortlist is
+# already ranked; this is the top slice of it.
+AI_DECISION_CANDIDATES_PER_DAY = 30
+
+# ---------------------------------------------------------------------
+# WHAT THE MODEL MAY AND MAY NOT DECIDE
+# ---------------------------------------------------------------------
+# The operator's goal is "trade by using the AI". These flags are the
+# staircase to that, one step at a time, and each one is a separate
+# decision he makes -- not a thing that arrives switched on.
+#
+# ---- WHICH OF THESE ARE ENFORCED, AND WHICH ARE A PLAN ----
+#      12 August 2026.
+#
+# AUDIT_2026-08-12.md listed five of these as dead constants and said
+# to delete them. Checked one by one instead, and "dead" is the wrong
+# word for two different situations that look identical in a grep:
+#
+#     AI_MAY_AFFECT_SCORE      READ BY CODE. A real gate.
+#     AI_NEWS_DIRECTION        read by nothing
+#     AI_SHOW_IN_SHORTLIST     read by nothing
+#     AI_MAY_RANK_ENTRIES      read by nothing
+#     AI_MAY_SIZE_POSITIONS    read by nothing
+#     AI_MAY_MOVE_STOPS        read by nothing
+#
+# The five unread ones are NOT protecting anything. They are the plan
+# written down, and the features they would gate do not exist yet -- so
+# "False" here is a statement of intent, not a lock.
+#
+# They are KEPT, because the staircase is the clearest description of
+# where this is going and deleting it would lose that. But the last two
+# say "leave False permanently", which reads like an enforced boundary
+# and is not one. If somebody builds AI position sizing tomorrow,
+# nothing in this file will stop them -- they have to come here and
+# read this. That is the honest state, and it is now written down
+# rather than implied.
+#
+# THE RULE FOR WHOEVER WIRES ONE OF THESE UP: add the `if not
+# config.AI_MAY_X: return` at the same time as the feature, in the same
+# change. A flag that arrives after the capability has already shipped
+# has never once been added.
+#
+# STEP 1  the model reads news and says what it means. Recorded, shown,
+#         and worth nothing to the score. This is where it starts.
+AI_NEWS_DIRECTION = False
+#
+# STEP 2  the model's view becomes a why-chip on the shortlist. Visible
+#         to the operator, still not scored.
+AI_SHOW_IN_SHORTLIST = False
+#
+# STEP 3  the model's view MOVES THE SCORE. Only after enough recorded
+#         calls have been checked against what the stock actually did.
+#         There is no honest way to skip this: on 30 July the bot's own
+#         arithmetic reported +Rs 9,498 on a day it really lost
+#         Rs 11,239, and an unchecked model on top of an unchecked
+#         scorer is two things nobody can audit.
+AI_MAY_AFFECT_SCORE = False
+#
+# STEP 4  the model chooses WHICH of several simultaneous breakouts to
+#         take. This is the real prize -- it replaces first-come-first-
+#         served, which on 30 July took THYROCARE at 0.03x volume and
+#         refused KSB at 715x.
+AI_MAY_RANK_ENTRIES = False
+
+# NEVER. Not a staircase step -- a boundary.
+#
+# The model does not size a position and does not move a stop. Those are
+# arithmetic on money at risk, they are exact, and a language model is
+# strictly worse at them than the code already is. A wrong direction
+# costs one trade; a wrong size costs the account.
+AI_MAY_SIZE_POSITIONS = False   # leave False permanently
+AI_MAY_MOVE_STOPS = False       # leave False permanently
+
+# ---------------------------------------------------------------------
+# THE FRIDAY TEST -- one share, by hand, from the dashboard
+# ---------------------------------------------------------------------
+#     "Friday . we planned 1 manual share buying & selling in MTF from
+#      our dashboard"                    -- operator, 30 July 2026
+#
+# A manual dashboard BUY normally sizes itself by risk (_risk_sized_qty),
+# which on a Rs 300 stock is hundreds of shares. That is correct for
+# real use and completely wrong for the first order this account has
+# ever sent through the bot.
+#
+# Set to a number and EVERY manual dashboard BUY/SHORT places exactly
+# that many shares, whatever the risk maths says. Set to None and normal
+# risk sizing applies.
+#
+# This deliberately does NOT touch automated entries. It cannot: the bot
+# is in ALERT_ONLY_MODE and takes none. If that changes, this stays a
+# manual-only override -- a test size must never quietly become the
+# size the bot trades.
+# ---- TURNED OFF 1 August 2026, ON THE OPERATOR'S INSTRUCTION ----
+#
+#     "i'll trade with 1 lakh not 1 share of qty.. from dashboard"
+#
+# With this None, a dashboard BUY is sized by _risk_sized_qty(): Rs 1
+# lakh of HIS OWN margin per position, share count asked of Dhan.
+#
+#     COFORGE 1,686 @ 26.3% margin -> 225 shares
+#                                  -> Rs 3,79,350 of stock
+#                                  -> Rs   99,655 blocked
+#                                  -> a 1% stop costs Rs 3,794
+#
+# Set it back to 1 for a day of testing the order path without size.
+MANUAL_TEST_QTY = None
+
 ENABLE_TREND_RANK_ENTRY = False
 TREND_RANK_TOP_N = 20
 TREND_RANK_REFRESH_SECONDS = 5   # recompute the leaderboard at most this often
@@ -739,7 +1728,37 @@ TREND_RANK_REFRESH_SECONDS = 5   # recompute the leaderboard at most this often
 # laggards for winners; it was closing positions at a loss and paying
 # Rs 117 for the privilege, 293 times. MULTIDAY_FINDINGS.md section 2.
 # It is also a rule we invented, not a market fact.
-ENABLE_SLOT_ROTATION = False
+# 2026-07-29, operator's call: turned ON for the two remaining paper
+# sessions before live on 3 August.
+#
+# What it is for, in his words: "real movers are ignored by bot. as
+# first see = buy & 10 slots filled." Today's book proves the point --
+# it sat at 9 or 10 positions from 09:30 until 14:00, so every breakout
+# in four and a half hours was refused for no reason except that ten
+# other names arrived earlier.
+#
+# WHO GETS SWAPPED: the weakest position THE BOT ITSELF opened, judged
+# on trend strength. Positions the operator opened by hand are skipped
+# entirely (see core/engine.py's _can_rotate_out). At 10:19 today that
+# meant MOBIKWIK at +0.45%, not CUB at -2.26%, because CUB was his.
+#
+# HAS NEVER RUN IN PRODUCTION. Thursday is its first live session, on
+# paper, with a hard cap below.
+ENABLE_SLOT_ROTATION = True
+
+# At most this many swaps a day.
+#
+# The edge required is only 0.4% (ROTATION_MIN_STRENGTH_EDGE), and a
+# challenger carrying the operator's confirmations needs as little as
+# 0.1%. That is easy to clear. With 666 symbols breaking out all day
+# and nothing counting the swaps, the bot could churn the whole book
+# repeatedly -- every swap paying slippage and charges, and every one
+# selling a position that the new no-trail rule was meant to let run.
+#
+# Nobody has measured what the right number is. Five is a deliberate
+# floor for two paper sessions, not a considered answer -- read
+# tools/refused_review.py on Friday and set it from the data.
+ROTATION_MAX_PER_DAY = 5
 ROTATION_MIN_STRENGTH_EDGE = 0.004   # challenger must lead by >0.4% move
 
 # ==========================================================
@@ -862,7 +1881,17 @@ STAGED_POSITION_LIMITS = [
 # 14:00 cutoff threw away the afternoon, and on 2026-07-24 the two BEST
 # trades of the day were entered at 13:50 and 13:51. Positions still
 # flatten at SQUARE_OFF_TIME (15:15) regardless.
-STAGED_NO_ENTRY_AFTER = "15:00"
+# ---- 15:15, NOT 15:00. His decision, 8 August 2026. ----
+#
+#     "15:15 & results gate open for the chips"
+#
+# The 15:00 cutoff existed for one reason, stated in its own
+# comment above: "a brand-new position opened at 14:50 has ~25
+# minutes to work before forced square-off". That reason is gone.
+# FORCE_SQUARE_OFF_AT_CLOSE is False and positions are held on MTF
+# overnight, so a 15:10 entry is not a coin flip with a deadline --
+# it is a position that carries. The gate outlived its argument.
+STAGED_NO_ENTRY_AFTER = "15:15"
 
 # --- One trade per stock per day --------------------------
 # A symbol gets ONE attempt per direction per day. Kills the
@@ -885,7 +1914,30 @@ STAGED_NO_ENTRY_AFTER = "15:00"
 # multi-day trade is a far stronger signal than a stop-out on a
 # six-minute one. Stays ON until it is assessed against MTF holding,
 # not removed on intraday reasoning that no longer applies.
-ONE_TRADE_PER_SYMBOL_PER_DAY = True
+#
+# ASSESSED AGAINST MTF AND REMOVED -- 2026-07-29, operator's decision:
+# "Remove stocks trading rule of 1 side 1 time."
+#
+# This is the assessment the note above asked for, not a repeat of the
+# old intraday argument. What changed is the stop, not the opinion:
+#
+#   the churn this rule stopped   CHENNPETRO 9x, CORONA 6x -- under a
+#                                 0.4% TRAIL FLOOR, where ordinary
+#                                 noise triggered the stop-out
+#   the stop today                2.5% HARD, trail off entirely
+#                                 (ENABLE_BOT_TRAILING_STOP = False)
+#
+# A stock must now genuinely fall 2.5% AND then break out again to
+# re-enter. That is a different event from being shaken out by 0.4%
+# of noise nine times.
+#
+# MEASURED on 2026-07-29: twelve symbols were refused a second
+# attempt. KAYNES was refused at 10:14 from 3,400 and reached
+# 3,684.70; EPACKPEB refused at 10:39 and gained 4.2%. But the median
+# refused symbol only gained 0.8% at its best and closed +0.3% -- so
+# this is NOT a clear win on one session's evidence. It is the tail
+# that pays, and the operator wants the tail.
+ONE_TRADE_PER_SYMBOL_PER_DAY = False
 
 # --- No-progress exit -------------------------------------
 # Dead money: a position that hasn't reached +NO_PROGRESS_R of its
@@ -992,6 +2044,13 @@ SHORTLIST_REFRESH_SECONDS = 30
 # costs the trade.
 SHORTLIST_COUNT = 25
 
+# Fresh Breakouts panel (core/breakout_feed.py), 2026-07-28. How many
+# rows the panel shows. Newest first, so this is "how far back can I
+# scroll", not "how many matter" -- a breakout more than ~20 old is
+# history, and the panel greys out failed ones rather than dropping
+# them so the list is not all live opportunities.
+BREAKOUT_PANEL_COUNT = 20
+
 # --- Candle recording (clean corpus for the replay bench) ---
 # Every session writes its real 1-minute OHLCV to
 # data/backtest_candles.db so the strategy can be replayed and
@@ -1043,13 +2102,81 @@ RECORDER_LAST_MINUTE = "15:28"
 # At Rs 2,000 risk the same Rs 8,000 is only FOUR stops, which on a
 # 40% win rate would halt the bot before 10:30 on most mornings.
 # Kept at 10 stops: 10 x Rs 2,000.
-DAILY_MAX_LOSS_RS = 20000.0
+# ==========================================================
+# RE-CHOSEN 2026-07-29, after leverage started working
+# ==========================================================
+# Rs 20,000 was set when a position was Rs 1 lakh of STOCK. The MTF
+# margin call had been failing silently on a NameError for weeks, so
+# every position was unleveraged and a 2.5% stop cost about Rs 2,500 --
+# eight losing trades before the day ended.
+#
+# With leverage working, one position controls ~Rs 3.8 lakh and the same
+# 2.5% stop costs about Rs 9,500:
+#
+#     one failed trade, 2.5% stop
+#       no leverage (what was really running)   Rs 2,500  -> 8.0 trades
+#       MTF working (from 30 July)              Rs 9,500  -> 2.1 trades
+#
+# Nobody decided to tighten this to two trades; it happened by
+# arithmetic. Rs 40,000 restores the ORIGINAL INTENT -- about four
+# failed trades -- rather than preserving a number that now means
+# something else. 4% of Rs 10 lakh.
+#
+# ---- AND THE ARITHMETIC ABOVE WAS WRONG. 11 August 2026. ----
+#
+# The "Rs 9,500 per failed trade" figure assumes one position controls
+# ~Rs 3.8 lakh. It does not. A position is capped at
+# MTF_MARGIN_PER_POSITION_RS (Rs 30,000) of margin, and at MTF_LEVERAGE
+# 4x that is Rs 1.2 lakh of stock, not Rs 3.8 lakh. The same 2.5% stop
+# therefore costs about Rs 3,000:
+#
+#     30,000 margin x 4 leverage x 2.5% stop  =  Rs 3,000
+#
+# So Rs 40,000 was never "about four failed trades". It was THIRTEEN --
+# and two separate tests have been failing on exactly that since:
+#
+#     tests/test_daily_limits.py                  14.0 trades, wants 3.5-5
+#     tests/test_manual_stop_is_the_hard_stop.py  13.3 trades, wants 3-5
+#
+# The kill switch is the one control that protects the worst day of the
+# year, and it was three times looser than the number written beside it
+# claimed. Rs 12,000 is four failed trades at the REAL per-trade loss,
+# which is what this was always meant to be:
+#
+#     12,000 / 3,000  =  4.0 failed trades
+#
+# If a position's margin or leverage changes, this number has to be
+# re-derived -- it is 4 x (MTF_MARGIN_PER_POSITION_RS x MTF_LEVERAGE x
+# HARD_STOP_FROM_ENTRY_PCT), not a round figure chosen for its own sake.
+#
+# It blocks NEW ENTRIES only. It has never closed an open position and
+# still does not.
+DAILY_MAX_LOSS_RS = 12000.0
 
 # The operator's own item-5 number: once the session's realized P&L
 # reaches this, stop taking new entries -- the day's goal is met,
 # don't hand it back. Same "existing positions still managed
 # normally" semantics as the loss switch above.
-DAILY_PROFIT_TARGET_RS = 30_000.0
+# RAISED 2026-07-29. The profit target was biting before the loss limit
+# ever did.
+#
+# All three recorded sessions, scored under the new exit rules and with
+# leverage working:
+#
+#     date          trades   x3.8 leverage
+#     2026-07-27        21           8,476
+#     2026-07-28        19          49,687   <- would have STOPPED at 30,000
+#     2026-07-29        40          24,552
+#
+# On 28 July the bot would have crossed Rs 30,000 partway through the
+# day and switched itself off, leaving Rs 19,687 on the table. That is
+# not a safety net firing -- it is the bot quitting in the middle of its
+# best day.
+#
+# Rs 75,000 keeps a ceiling for a genuinely wild session while letting a
+# normal good one run. Each position is already protected by its own
+# 2.5% stop, and the day is still protected by DAILY_MAX_LOSS_RS above.
+DAILY_PROFIT_TARGET_RS = 75_000.0
 # 2026-07-26: operator set this to Rs 30,000 (was 50,000).
 #
 # READ THIS BEFORE CHANGING IT AGAIN. This is a CEILING, not a target.
@@ -1094,7 +2221,39 @@ BREAKOUT_MIN_MARGIN_PCT = 0.001
 # SKIPPED and the trade proceeds -- it can never block trading just
 # because volume is absent. Flip ENABLE_VOLUME_FILTER False to turn
 # the whole thing off instantly.
+# 2026-07-29, operator's rule: "we need some confirmation before
+# entries ... Volume". Measured on his own three sessions, the single
+# worst trade of all 35 was the one that broke out on BELOW-average
+# volume -- Rs 4,994 lost on its own.
 ENABLE_VOLUME_FILTER = True
+
+# How many minutes of volume to add up for the breakout reading.
+#
+# One minute is not enough. Dhan reports a running day total and a
+# candle's volume is the difference between its first and last reading
+# inside that minute -- so a minute that received only ONE snapshot
+# reports zero. That happened to 11% of every candle recorded across
+# 27, 28 and 29 July, and to 7 of the bot's 35 breakouts.
+#
+# Five minutes cannot miss in the same way, and summing is exactly
+# right for a cumulative feed: shares missed by a one-snapshot minute
+# are counted in the next minute's difference, so the window total is
+# correct even when its individual minutes are not.
+VOLUME_WINDOW_CANDLES = 5
+
+# The change the operator asked for on 29 July: a breakout whose
+# volume genuinely cannot be measured is now REFUSED rather than
+# waved through.
+#
+# Before this, _breakout_has_volume() failed OPEN on every unknown --
+# "volume is a quality bonus, never a hard gate". His answer:
+#
+#     "without volume how the stock moves upside ?"
+#
+# A breakout nobody can see the volume behind is exactly the one not
+# to buy. Set False to restore the old permissive behaviour -- the
+# tests cover both paths.
+VOLUME_REQUIRED_FOR_ENTRY = True
 VOLUME_SURGE_MULT = 1.5
 VOLUME_AVG_CANDLES = 20
 MIN_VOLUME_CANDLES = 5
@@ -1227,7 +2386,31 @@ EARNINGS_CALENDAR = {
 # milestone while the remaining half keeps riding the ATR trail
 # (the "trailing STOP" half). The 5-day one-variable-per-session
 # test plan below still stands -- Day 1 starts now.
-ENABLE_PARTIAL_EXIT = True
+# 2026-07-29, MEASURED -- turned off. Replayed over the bot's own 35
+# structural entries with the trail already removed:
+#
+#     WITHOUT partial exit      51% win    Rs 21,374    Rs 611/trade
+#     WITH partial (2xATR/50%)  66% win    Rs  9,761    Rs 279/trade
+#
+# It raises the win RATE and halves the MONEY. 23 of the 35 trades
+# reached the 2x ATR level; of those:
+#
+#     16 kept going / ended above entry -> the partial COST  Rs 14,508
+#      7 reversed  / ended below entry -> the partial SAVED Rs  2,894
+#
+# So it is not useless -- it rescued Rs 2,894 on the seven that turned.
+# It simply costs more than twice that on the sixteen that ran. Two
+# winners keep going for every one that reverses, and booking half at
+# that moment bets on the one in three.
+#
+# WHERE THIS FLIPS: in a choppy market that spikes and fades, those
+# counts invert and the partial starts paying. Three sessions in one
+# mood is not enough to call it permanently -- hence a flag, not a
+# deletion. Re-run tools/trail_sweep.py after another week.
+#
+# The operator saw this live before the numbers did, on KAYNES (30 of
+# 59 booked) and EPACKPED: "booked small portion of them".
+ENABLE_PARTIAL_EXIT = False
 
 # TODO -- daily test plan (operator's own request, "test one case
 # per day, decide best suited case before live trading"). Suggested
@@ -1332,7 +2515,11 @@ SECTOR_PANIC_MIN_SYMBOLS = 3
 # on a strong trending day -- the dashboard will show that
 # honestly (capital can go negative) rather than silently
 # blocking trades to hide it.
-PAPER_STARTING_CAPITAL = 1_000_000.0
+# ---- THE PAPER PURSE MUST MATCH THE REAL ONE. 9 Aug 2026. ----
+# Rs 10 lakh of imaginary money sizes positions he could never
+# actually take and hands back a P&L he could never actually earn.
+# A paper week is only worth reading if the constraints are real.
+PAPER_STARTING_CAPITAL = 431_116.0
 
 # ----------------------------------------------------------
 # MIS (margin intraday) MARGIN MODEL -- rebuilt 2026-07-24 (evening)
@@ -1386,13 +2573,171 @@ MIS_LEVERAGE_MULTIPLIER = round(1.0 / MIS_DEFAULT_MARGIN_PCT, 4)
 # index simply won't populate (the dashboard shows "needs feed"),
 # nothing else breaks. Fail-open + config-gated end to end.
 ENABLE_INDEX_FEED = True
-INDEX_INSTRUMENTS = {
-    # dashboard name : Dhan IDX security_id (VERIFY on the live feed)
-    "nifty": "13",         # NIFTY 50
-    "banknifty": "25",     # NIFTY BANK
-    "midcap": "26",        # NIFTY MIDCAP (verify -- may be a variant id)
-    "vix": "21",           # INDIA VIX
+# Roughly where each index actually trades. Used ONLY to catch a wrong
+# security id: on 2026-07-28 id 13 was labelled "nifty" and delivered
+# 7,330.5 while Nifty 50 was near 24,000, and id 25 ("banknifty")
+# delivered 3,038 against a real BankNifty near 52,000. Both were
+# sector indices. A tile showing a confident number for the WRONG
+# instrument is far more dangerous than a blank one, so anything outside
+# its band is shown as suspect rather than as a level.
+INDEX_EXPECTED_RANGE = {
+    "nifty":     (15000, 40000),
+    "banknifty": (35000, 90000),
+    "midcap":    (30000, 90000),
+    "vix":       (5, 60),
 }
+
+# EMPTIED 2026-07-28. Every id in here was wrong, and two of them were
+# actively harmful:
+#
+#     "nifty":     "13"  -> ABB INDIA LIMITED       (a real equity, SUBSCRIBE=YES)
+#     "banknifty": "25"  -> ADANI ENTERPRISES LTD   (a real equity, SUBSCRIBE=YES)
+#     "midcap":    "26"  -> nothing, never ticked
+#     "vix":       "21"  -> nothing, never ticked
+#
+# The live packets gave it away: they carried volume and a last-traded
+# QUANTITY, which no index has, on exchange_segment 1 (NSE_EQ). So the
+# Nifty tile was showing ABB's share price (7,234) and BankNifty was
+# showing Adani Enterprises (3,007).
+#
+# The damage was not just cosmetic. main.py's tick router checks index
+# ids BEFORE the symbol lookup and returns, so ABB and ADANIENT ticks
+# never reached the stock pipeline at all -- no candles, no opening
+# range, no gainers/losers row. Two live stocks were silently missing
+# from the universe for as long as this feed existed.
+#
+# Left EMPTY on purpose. A blank tile is honest; a confident number for
+# the wrong instrument is not, and guessing these ids has now failed
+# twice. To fill it: run a session, watch for the
+# "[INDEX] Unmapped IDX id NN: LTP=..." lines, and identify each index
+# by its LEVEL -- Nifty near 24,000, BankNifty near 52,000, VIX 8-20.
+# Then put the id here and confirm the tile matches your broker screen.
+# ---- REFILLED, 3 August 2026. THE IDS WERE NEVER WRONG. ----
+#
+#     "i want to see NIFTY 50 ; BANK NIFTY ; VIX"
+#     "NIFTY 50, BANKNIFTY and VIX show 'no feed' - thats your work to
+#      check with dhan & resolve"
+#
+# He is right, and the answer was already written down in this
+# repository. From core/index_monitor.is_index_segment():
+#
+#     "The Nifty tile meanwhile displayed 7,234, which is ABB's share
+#      price, while Nifty 50 was near 24,000. That was diagnosed as
+#      'wrong security ids' and INDEX_INSTRUMENTS was emptied. The ids
+#      were right. The routing was wrong."
+#
+# Index ids and equity ids are separate numbering spaces and they
+# collide:
+#
+#     IDX_I 13 = NIFTY 50        NSE_EQ 13 = ABB INDIA
+#     IDX_I 25 = NIFTY BANK      NSE_EQ 25 = ADANI ENTERPRISES
+#
+# On 28 July the router keyed on the id ALONE, so every ABB and
+# ADANIENT tick was swallowed by the index monitor. The tile showed
+# ABB's price, the diagnosis blamed the ids, and this dict was emptied.
+# The routing was repaired on 30 July -- subscribe on MarketFeed.IDX,
+# route on (segment, id) -- and nobody ever put the ids back. The tiles
+# have read "needs index feed" every session since.
+#
+# Dhan's own annexure confirms the segment: IDX_I, Index Value, enum 0.
+#
+# THE SAFETY RAIL IS ALREADY BUILT. core/index_monitor.suspect() takes
+# expected levels and reports any tile whose number is nowhere near
+# where that index actually trades -- exactly the check that would have
+# caught 7,234 on the Nifty tile in one glance. INDEX_EXPECTED_RANGE
+# above feeds it, and the dashboard draws the warning. If a tile comes
+# up absurd after this change, that is the mechanism saying so; do not
+# empty this dict again without reading the segment on the packet.
+#     "first you check what dhan gives us & then we decide what we can
+#      use & drop . all possible"          -- operator, 3 August 2026
+#
+# Right again, and I had just done the thing this comment block warns
+# against: 13 and 25 are EVIDENCED -- they appear in his own 28 July
+# logs as IDX packets -- and I wrote 21 for VIX and 27 for midcap from
+# nothing at all. Both removed.
+#
+# Run  py tools/find_index_ids.py  to list every index Dhan actually
+# publishes, with its id, straight from their scrip master. Then choose
+# from that list rather than from anyone's memory.
+# Every id below was READ from Dhan's scrip master by
+# tools/find_index_ids.py on 3 August 2026 -- not remembered, not
+# inferred. That run is also what caught the last invented id: 27 is
+# FINNIFTY, not midcap, and would have put Finnifty's level on a tile
+# labelled MIDCAP.
+INDEX_INSTRUMENTS = {
+    "13": "nifty",        # Nifty 50    -- expect ~24,000
+    "25": "banknifty",    # Nifty Bank  -- expect ~52,000
+    "21": "vix",          # India VIX   -- expect 8-20
+
+    # ---- GIFT NIFTY. 4 August 2026. ----
+    #
+    #     "USE DHAN THEY WILL PROVIDE THE INFO"
+    #
+    # I looked at Yahoo, found nothing dependable, and said it could
+    # not be done -- while the broker the bot is already connected to
+    # carried it. tools/find_gift_nifty.py found exactly one match in
+    # Dhan's 202,206-row master:
+    #
+    #     SEM_TRADING_SYMBOL        GIFTNIFTY
+    #     SEM_CUSTOM_SYMBOL         Gift Nifty
+    #     SEM_SMST_SECURITY_ID      5024
+    #     SEM_SEGMENT               I          <- INDEX, same as Nifty
+    #     SEM_INSTRUMENT_NAME       INDEX
+    #
+    # SEGMENT "I" is what matters and is why this belongs HERE rather
+    # than beside an equity. The first run printed only "NSE", which is
+    # the EXCHANGE -- and id spaces collide across segments: IDX_I 13
+    # is Nifty 50 while NSE_EQ 13 is ABB India. Reading the segment off
+    # the file instead of inferring it is the whole reason that tool
+    # exists.
+    #
+    # It is the most predictive number for an Indian open -- it trades
+    # while NSE is shut -- so it is expected to look "stale" against a
+    # cash-market clock. That is correct behaviour, not a dead feed.
+    "5024": "giftnifty",  # Gift Nifty  -- expect close to Nifty 50
+}
+
+# ---- THE FOURTH TILE IS A DROPDOWN. 3 August 2026. ----
+#
+#     "Keep NIFTY 50, BANK NIFTY, VIX . these 3 on main board & 4 th =
+#      SECTOR INDICES (sector based Indices as a dropdown option =this
+#      will be bird view from top section which index=sector is moving)"
+#
+# Three fixed tiles answer "how is the market". The fourth answers a
+# different and more useful question -- WHICH PART of it is moving --
+# and that cannot be a fixed tile, because the answer changes through
+# the day.
+#
+# So the fourth slot shows the sector index that has moved furthest
+# from yesterday's close, with every other sector one click away. On a
+# day when pharma is up 3% and everything else is flat, it says pharma
+# without being asked.
+#
+# It also serves the cause-and-effect idea directly: a story about
+# Chinese power imports is a guess until NIFTY ENERGY confirms the
+# sector actually moved.
+SECTOR_INDICES = {
+    "29":  "IT",
+    "32":  "Pharma",
+    "31":  "Metal",
+    "14":  "Auto",
+    "42":  "Energy",
+    "33":  "PSU Bank",
+    "15":  "Private Bank",
+    "28":  "FMCG",
+    "34":  "Realty",
+    "30":  "Media",
+    "43":  "Infra",
+    "470": "Oil & Gas",
+    "447": "Healthcare",
+    "466": "Consumer Durables",
+}
+
+# Subscribed alongside the three above. Prefixed so the monitor and the
+# dashboard can tell a sector apart from a headline index without a
+# second lookup.
+INDEX_INSTRUMENTS.update(
+    {sec_id: f"sector:{name}" for sec_id, name in SECTOR_INDICES.items()})
 
 # FII/DII institutional flows are EOD-only (NSE publishes after
 # close), so they can't be shown live intraday from the tick feed.
@@ -1409,6 +2754,66 @@ EXCHANGE_TXN_PCT = 0.0000297      # NSE ~0.00297% both legs
 SEBI_CHARGES_PCT = 0.000001       # Rs 10 / crore both legs
 STAMP_DUTY_BUY_PCT = 0.00003      # 0.003% on the BUY leg
 GST_PCT = 0.18                    # 18% on brokerage + exchange + SEBI
+
+# ----------------------------------------------------------
+# OVERNIGHT / MTF COSTS, 2026-07-28
+# ----------------------------------------------------------
+# The rates above are INTRADAY. They apply to a position opened and
+# closed in the same session -- which, per the operator's instruction,
+# includes a same-day MTF round trip:
+#
+#   "do not consider mtf charges right away on closed positions too"
+#
+# He was right: MTF interest is applied FROM T+1, so a trade that lived
+# 6 seconds to 37 minutes owes none of it.
+#
+# These apply only once a position actually CROSSES a session.
+# Verified at source (Zerodha STT page + MTF FAQ, 28 Jul 2026):
+#
+#   Equity intraday   STT 0.025%   SELL side only
+#   Equity delivery   STT 0.1%     BOTH buy and sell sides
+#   MTF interest      from T+1 until sold
+#   MTF pledge        auto-pledged on buy, unpledged on sell,
+#                     ~Rs 15 + GST each way, per ISIN, per day
+#
+# NOTE the delivery STT is BOTH SIDES. My first correction modelled it
+# as sell-side only and UNDERSTATED it.
+#
+# STILL UNVERIFIED: whether a same-day MTF exit is charged intraday or
+# delivery STT. Public sources contradict each other and nobody here has
+# read a real MTF contract note. The 30 Jul live order test settles it.
+STT_DELIVERY_PCT = 0.001          # 0.1% on BOTH legs
+STAMP_DUTY_DELIVERY_PCT = 0.00015 # 0.015% on the BUY leg
+MTF_INTEREST_DAILY_PCT = 0.000342 # Dhan ~12.49% p.a. = 0.0342%/day
+MTF_LEVERAGE = 4.0                # only the FUNDED 75% accrues interest
+MTF_PLEDGE_FEE_RS = 15.0          # per stock, each way, + GST
+
+# ----------------------------------------------------------
+# PAPER SLIPPAGE, 2026-07-28
+# ----------------------------------------------------------
+# trading/paper_execution.py filled at the EXACT intent price,
+# instantly, always successfully. No spread, no partial fill, no
+# rejection. Six months of paper results were all optimistic, and paper
+# results are the yardstick every rule on this bot is measured against.
+#
+# A buy lifts the offer and a sell hits the bid, so BOTH legs cost you.
+# The size of it is not guesswork -- it is roughly half the bid-ask
+# spread plus impact, and it is worse when:
+#   - the stock is thin        (wider spread)
+#   - the move is fast         (the quote moves before you arrive)
+#   - the order is large       (you eat more than the top of book)
+#
+# Rs 2L in a liquid large-cap is a few paise. The same Rs 2L in a Rs
+# 300-crore small-cap at 09:20 is not.
+#
+# Set to 0.0 to get the old fantasy back, if a backtest needs to be
+# compared like-for-like against an older run.
+ENABLE_PAPER_SLIPPAGE = True
+SLIPPAGE_BASE_PCT = 0.0005        # 0.05% each leg, liquid and calm
+SLIPPAGE_THIN_PCT = 0.0020        # 0.20% each leg below the turnover mark
+SLIPPAGE_THIN_TURNOVER_CR = 25.0  # day turnover under this = "thin"
+SLIPPAGE_OPENING_MULTIPLE = 2.0   # x2 before SLIPPAGE_CALM_AFTER
+SLIPPAGE_CALM_AFTER = "09:45"     # the open is the expensive part
 
 # ----------------------------------------------------------
 # Dashboard -- sector heatmap
@@ -1454,6 +2859,25 @@ DASHBOARD_PORT = 8000
 # do.
 DASHBOARD_REFRESH_INTERVAL_SECONDS = 1
 
+# ---- THE PRICE CHANNEL. 4 August 2026. ----
+#
+#     "even today i got confused no of times & felt that lag on price
+#      observations"
+#
+# The comment above explains why the SNAPSHOT can't ride every tick,
+# and it is right. But prices were made to wait for the snapshot, and
+# then wait again for a 2-second page poll -- up to three seconds
+# behind the Dhan app, on the one field he watches hardest.
+#
+# dashboard/server.py's /ws/prices reads market_data's price dict and
+# nothing else: no snapshot rebuild, no breadth, no sector maths. It
+# is cheap enough to run at this cadence without touching the engine.
+#
+# 250ms, not faster. Below about 200ms the browser cannot repaint
+# between frames anyway, so the only thing left to gain is CPU spent
+# in the process that has to place his orders.
+PRICE_PUSH_SECONDS = 0.25
+
 # Market Breadth (advances/declines/unchanged, and the green/red
 # Sectors list derived from it) -- previously unthrottled, silently
 # rebuilt on every single DASHBOARD_REFRESH_INTERVAL_SECONDS cycle
@@ -1473,6 +2897,34 @@ DIAGNOSTIC_LOG_PATH = os.path.join(LOG_DIR, "diagnostics.log")
 
 # Console stays clean by default -- only real decisions and
 # results print live. Full detail always goes to the file.
+# ----------------------------------------------------------
+# LOGGING, rewritten 2026-07-28
+# ----------------------------------------------------------
+# The old logger was one un-rotated file at DEBUG. By the audit that
+# evening: 369 MB, 3.59 million lines, 131,238 of them CORRUPTED by
+# several PROCESSES appending to the same path at once --
+#
+#     2026-02026-07-23 11:29:29,307 [DEBUG] [CANDLE] LICI closed ...
+#     7-23 11:29:29,582 [DEBUG] [ORB] TCS range complete ...
+#
+# That corruption is why three of the audit's own findings turned out
+# to be wrong: the file could not be read reliably. Disk space was
+# never the issue -- EVIDENCE was.
+LOG_MAX_BYTES = 25 * 1024 * 1024      # 25 MB per file
+LOG_BACKUP_COUNT = 5                  # keep ~a week
+
+# One file per PROCESS (pid in the name). Python's logging is
+# thread-safe, not process-safe, so this is the only way two processes
+# can never tear into each other's lines again.
+LOG_ONE_FILE_PER_PROCESS = True
+
+# DEBUG to disk. ~84% of the old volume was DEBUG, and 2,446 lines a
+# MINUTE were "SYM stale" alarms from a threshold set below the feed's
+# own rate (now fixed). Kept ON by default -- a log that cannot answer
+# "what happened at 09:47" is a false economy -- but the switch is here
+# for a day when it matters. Turning it off is announced at startup.
+LOG_DEBUG_TO_FILE = True
+
 VERBOSE_CONSOLE = False
 
 # 2026-07-25 (operator-found, live): the WebSocket feed sends periodic
@@ -1502,6 +2954,40 @@ ENABLE_ORB_EXCHANGE_RECONCILE = True
 # DISABLED 2026-07-27. POST_MONDAY_TODO.md section B: "never
 # measured." A top-8-of-90 sector cut removes roughly 90% of the
 # universe on a rule with no evidence behind it at all.
+# MEASURED AND LEFT OFF, 2026-07-29.
+#
+# The operator's stated rule was "we trade in trending sectors -
+# strong/leaders of that sector stocks only". His own 35 bot trades
+# from 27-29 July, scored under the current exit rule, with the sector
+# leaderboard reconstructed at the exact minute of each entry:
+#
+#     gate setting                 taken    win      total  per trade
+#     top 3 sectors only               7    43%        221         32
+#     top 5 sectors only              10    40%        225         22
+#     top 8 sectors only              14    50%      5,874        420
+#     top 12 sectors only             17    53%      4,692        276
+#     NO GATE                         35    51%     21,374        611
+#
+# No gate wins on both counts -- more trades AND more per trade -- and
+# the tighter the filter the worse it gets. The trades it would have
+# refused include KAYNES +9,344, M&MFIN +4,611 and DREDGECORP +3,221.
+# KAYNES alone beats every top-5-sector trade combined.
+#
+# The likely reason: a sector average is dominated by its ordinary
+# members. A stock breaking out on its OWN reason -- results, an order
+# win -- is averaged away by the forty names sitting still beside it.
+# The gate then refuses exactly the stock that has something specific
+# happening to it.
+#
+# CAVEATS, so this is not treated as settled: 35 trades over 3 sessions
+# in one market mood; the leaderboard was reconstructed from average
+# move-from-open rather than by calling _sector_leaderboard itself; and
+# some sectors have very few names in the 973-stock master, making
+# their averages noisy.
+#
+# Sector rotation over DAYS may well be real. This measures one
+# intraday moment, and there the stock says more than its sector does.
+# The operator read these numbers and agreed to leave it off.
 ENABLE_SECTOR_STRENGTH_GATE = False
 SECTOR_STRENGTH_TOP_N = 8        # how many leading sectors qualify each side
 SECTOR_STRENGTH_MIN_SYMBOLS = 3  # a sector needs this many priced names to rank
@@ -1584,3 +3070,68 @@ MEMORY_ACTION_WINDOW_DAYS = 1     # +/- days around the ex-date to avoid
 # it is one -- it earns a vote after enough real sessions, not before.
 ENABLE_TRADE_MEMORY = True
 
+
+
+# ==========================================================
+# THE BOOK IS SIZED BY CASH, NOT BY THE NUMBER 3  (2026-08-08)
+# ==========================================================
+#
+#     "we prepared the bot to search for better trading opportunites
+#      not to keep the door shut after 3 positions irrespective of pnl"
+#                                -- operator, 8 August 2026
+#
+# He is right about the principle. MAX_OPEN_POSITIONS = 3 was written
+# for ONE cautious session on 7 August and never came off, and on every
+# replayed day all three seats filled by 09:30 and the bot went blind
+# for six hours. STOVEKRAFT made its high at 12:12 with the book full
+# since 09:30.
+#
+# core/capital.py implements his actual rule -- keep Rs 1 lakh free,
+# Rs 30,000 of own cash per position, deploy the rest. At Rs 4.31 lakh
+# that is 11 seats.
+#
+# WHY IT IS OFF
+# -------------
+# Measured before arming it. Replaying 3-5 August through
+# core/select.py with the 1:1 lock in place:
+#
+#     3 slots      9 trades   11% win rate   Rs -10,715
+#     11 slots    33 trades   24% win rate   Rs -26,018
+#
+# Opening the book did not find better opportunities. It found eight
+# times as many of the SAME ones. At a 2:1 payoff the break-even hit
+# rate is 33%; the selector is at 24%. Every extra seat multiplies a
+# losing edge.
+#
+# Worse, the top-ranked three were the worst of the eleven, which says
+# the ranking is not yet sorting by anything predictive.
+#
+# So: built, wired, tested, and OFF. Turn it on when the selector shows
+# an edge -- not because the principle is right, which it is.
+# ---- ON, WITH A WORKING CEILING. 10 August 2026. ----
+#
+#     "Capital rule: hold while it works, never block all funds"
+#
+# Off since 8 August because the cash rule alone said 11 seats at
+# Rs 4.31 lakh, and 11 measured worse than 3 -- more trades through
+# a selector with no edge. But 3 was his original complaint: one
+# overnight hold leaves two seats and Rs 3.4 lakh idle whatever the
+# morning offers.
+#
+# core/capital.WORKING_MAX_POSITIONS = 5 is the third number. Cash
+# still limits below it -- Rs 2 lakh gives 3, Rs 1.5 lakh gives 1 --
+# so the rule is CASH, as he asked, with a ceiling that cannot
+# reach eleven until the hit rate earns it.
+# BACKED OUT THE SAME NIGHT. 10 August 2026.
+# Arming it broke two engine tests, and the reason is real, not a
+# stale fixture: with the cash rule live, a portfolio holding less
+# than the Rs 1 lakh floor plus one position gets ZERO slots and
+# the bot refuses everything -- before the margin check is even
+# reached. That is arguably CORRECT under his own rule, but it
+# changes the order in which two gates fire, and I am not
+# reconciling the margin path at 22:40 on the strength of a guess.
+#
+# core/capital.WORKING_MAX_POSITIONS = 5 is built, tested and
+# ready. What is missing is one careful pass over how the cash
+# rule and the margin gate order themselves.
+ENABLE_CASH_SIZED_BOOK = True

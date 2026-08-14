@@ -60,24 +60,37 @@ def test_only_eq_series_survives():
 # Price band -- both ends, for different reasons
 # ---------------------------------------------------------------
 
-def test_cheap_stocks_are_dropped_for_tick_noise():
-    res = classify([_row("PENNY", close=MIN_PRICE - 1)], set())
+def test_price_alone_no_longer_excludes_a_stock():
+    """Both bounds removed 2026-07-29 on the operator's instruction:
+    "Remove cap on below 200 & above 10,000 rs as we have moved from
+    MIS to MTF". Rs 200 was a tick-granularity argument and Rs 10,000
+    a sizing-quantisation one; both were about same-day round trips.
+
+    A Rs 12 stock and MRF at Rs 1,30,850 must both survive the price
+    test now -- they may still be dropped by liquidity or series,
+    which is a different question with its own tests below."""
+    res = classify([_row("PENNY", close=12.0),
+                    _row("MRF", close=130850.0)], set())
+    kept = {r["symbol"] for r in res["keep"]}
+    assert kept == {"PENNY", "MRF"}
+    reasons = _reasons(res)
+    assert "tick noise" not in reasons.get("PENNY", "")
+    assert "sizing breaks" not in reasons.get("MRF", "")
+
+
+def test_the_bounds_are_still_there_to_be_put_back():
+    """Set to 0 and infinity rather than deleted, so restoring a floor
+    is a one-number change and not a re-implementation."""
+    assert MIN_PRICE == 0.0
+    assert MAX_PRICE == float("inf")
+
+
+def test_liquidity_still_excludes_a_cheap_illiquid_scrip():
+    """Removing the price floor must NOT quietly open the door to
+    scrips that barely trade -- MIN_TURNOVER_RS still applies to every
+    one of them."""
+    res = classify([_row("PENNY", close=12.0, turnover=1_000_000)], set())
     assert not res["keep"]
-    assert "tick noise" in _reasons(res)["PENNY"]
-
-
-def test_very_expensive_stocks_are_dropped_because_sizing_breaks():
-    """A Rs 2L position buys 1 share of a Rs 1,30,850 stock -- whole-share
-    rounding destroys the Rs 800 risk model."""
-    res = classify([_row("MRF", close=130850.0)], set())
-    assert not res["keep"]
-    assert "sizing breaks" in _reasons(res)["MRF"]
-
-
-def test_the_band_edges_are_inclusive():
-    res = classify([_row("LOW", close=MIN_PRICE),
-                    _row("HIGH", close=MAX_PRICE)], set())
-    assert {r["symbol"] for r in res["keep"]} == {"LOW", "HIGH"}
 
 
 def test_midrange_stocks_are_kept():
@@ -146,7 +159,7 @@ def test_etfs_are_excluded_via_the_nse_list():
     rows = [_row("SILVERBEES"), _row("RELIANCE")]
     res = classify(rows, set(), excluded={"SILVERBEES"})
     assert [r["symbol"] for r in res["keep"]] == ["RELIANCE"]
-    assert "not company equity" in _reasons(res)["SILVERBEES"]
+    assert "not on our board" in _reasons(res)["SILVERBEES"]
 
 
 def test_etf_name_fallback_catches_the_obvious_ones():

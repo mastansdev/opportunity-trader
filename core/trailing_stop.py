@@ -55,7 +55,35 @@ Author : H&M Opportunity Trader
 ==========================================================
 """
 
-from config import TRAILING_STOP_WINDOW_CANDLES, MIN_STOP_DISTANCE_PCT
+from config import (
+    TRAILING_STOP_WINDOW_CANDLES, MIN_STOP_DISTANCE_PCT,
+    ENABLE_PEAK_TRAIL, PEAK_TRAIL_PCT,
+)
+
+# ==========================================================
+# BOOK 1:1 INSTEAD OF GIVING IT ALL BACK  (2026-08-08)
+# ==========================================================
+#
+#     "in 2:1 ration if the stock is falling after reaching nearby rs
+#      & started retrace back book at 1:1 profit (something is better
+#      than nothing)"
+#
+# The 2.5% peak trail sits BELOW the halfway mark of its own 3.6%
+# target, so an ordinary pullback ends the trade for almost nothing.
+# DEEPAKNTR on 7 August ran 1.81 times its risk and booked 0.68%.
+#
+# Measured on the recorded tape, 12 trades, 09:30 entries:
+#
+#     2.5% peak trail    +0.42%
+#     1:1 lock rule      +4.33%
+#
+# The lock is BOUNDED, which the trail was not: the trade can only end
+# at the target (+2R), the stop (-1R), the lock (+1R) or the close. At
+# most 1R is ever handed back from the peak.
+#
+# LONG only. He does not short, and the measurement is long-only, so
+# SHORT keeps the old peak trail untouched.
+ENABLE_ONE_TO_ONE_LOCK = True
 
 LONG = "LONG"
 SHORT = "SHORT"
@@ -70,7 +98,7 @@ class TrailingStopEngine:
 
     # --------------------------------------------------
 
-    def start(self, symbol, seed_stop, direction=LONG):
+    def start(self, symbol, seed_stop, direction=LONG, entry_price=None):
         """
         Called once, right at entry -- seeds the stop at the
         breakout/breakdown candle's own extreme (low for LONG,
@@ -80,7 +108,118 @@ class TrailingStopEngine:
             "stop": seed_stop,
             "recent": [seed_stop],
             "direction": direction,
+            # PEAK TRAIL, 2026-07-28. The best price seen since entry.
+            # The stop is PEAK_TRAIL_PCT below it and moves ONLY on a
+            # new high -- never on a pause, which is precisely what the
+            # old 5-candle window did and why AFFLE gave back Rs 2,497
+            # of a Rs 3,087 profit in eight minutes.
+            "peak": None,
+            # The 1:1 lock needs the two numbers the trail never kept:
+            # where the trade went on, and where its risk was measured
+            # from. Without both, "one times the risk" has no meaning.
+            "entry": entry_price,
+            "base_stop": seed_stop,
+            "locked": False,
         }
+        # With the peak trail on, the stop starts EXACTLY
+        # PEAK_TRAIL_PCT below the entry -- not wherever the breakout
+        # candle's low happened to fall. That low was sometimes a
+        # rupee away (noise clipped it in seconds) and sometimes 6%
+        # away (an unbounded loss). Anchoring on entry makes the
+        # initial risk the same known number on every trade, which is
+        # what the operator asked for.
+        if ENABLE_PEAK_TRAIL and entry_price:
+            state = self._state[symbol]
+            state["peak"] = entry_price
+            # ---- THE PLANNED STOP IS THE STOP. 8 August 2026. ----
+            # With the lock on, the seed the caller passed IS the risk
+            # the position was sized against -- core/exit_plan.py
+            # measured it and core/auto_entry.py bought quantity to
+            # match. Overwriting it with a flat 2.5% here made "one
+            # times the risk" mean two different numbers in the same
+            # trade: sized on 1.8%, stopped on 2.5%.
+            if ENABLE_ONE_TO_ONE_LOCK and direction == LONG and seed_stop:
+                state["base_stop"] = seed_stop
+            elif direction == LONG:
+                state["stop"] = entry_price * (1 - PEAK_TRAIL_PCT)
+                state["base_stop"] = state["stop"]
+            else:
+                state["stop"] = entry_price * (1 + PEAK_TRAIL_PCT)
+                state["base_stop"] = state["stop"]
+
+    def update_on_price(self, symbol, price):
+        """Percent trail from the PEAK. Called on every tick.
+
+        LONG : stop = highest price seen since entry x (1 - PEAK_TRAIL_PCT)
+        SHORT: stop = lowest  price seen since entry x (1 + PEAK_TRAIL_PCT)
+
+        Moves only when a NEW extreme is made. A flat stretch does
+        nothing -- the old rolling-window rule crept the stop up during
+        pauses, so an ordinary breather ended the trade.
+
+        Breakeven needs no special case: at +2.6% the trail crosses the
+        entry price by itself, and keeps climbing from there.
+
+        Returns the current stop, or None if this symbol has no active
+        trailing stop.
+        """
+        state = self._state.get(symbol)
+        if state is None or not ENABLE_PEAK_TRAIL or not price:
+            return None if state is None else state["stop"]
+
+        peak = state.get("peak")
+        if state["direction"] == LONG:
+            if peak is None or price > peak:
+                state["peak"] = price
+                if ENABLE_ONE_TO_ONE_LOCK:
+                    # ---- 1:1 LOCK, NOT A CREEPING TRAIL. ----
+                    # Nothing moves until the stock has run 1.5x its
+                    # own risk. A stop that creeps from the first tick
+                    # is the 2.5% trail under a new name, and it is
+                    # what turned +3.26% into +0.68%.
+                    moved = self._lock_at_one_to_one(state, price)
+                    if moved is not None:
+                        state["stop"] = moved
+                else:
+                    candidate = price * (1 - PEAK_TRAIL_PCT)
+                    if candidate > state["stop"]:
+                        state["stop"] = candidate
+        else:
+            if peak is None or price < peak:
+                state["peak"] = price
+                candidate = price * (1 + PEAK_TRAIL_PCT)
+                if candidate < state["stop"]:
+                    state["stop"] = candidate
+        return state["stop"]
+
+    def _lock_at_one_to_one(self, state, peak):
+        """The stop once the stock has run near its target, or None.
+
+        Delegates the arithmetic to core/exit_plan.py so the rule lives
+        in exactly one place. A failure here must never widen a stop,
+        so it returns None and the existing stop stands.
+        """
+        entry = state.get("entry")
+        base = state.get("base_stop")
+        if not entry or not base:
+            return None
+        try:
+            from core import exit_plan
+            moved, why = exit_plan.live_stop(entry, base, None, peak)
+        except Exception:                                      # noqa: BLE001
+            return None
+        if moved is None or not why:
+            return None
+        if moved <= (state.get("stop") or 0):
+            return None
+        if not state.get("locked"):
+            state["locked"] = True
+            try:
+                from core.logger import decision
+                decision(f"[LOCK] {why}")
+            except Exception:                                  # noqa: BLE001
+                pass
+        return moved
 
     def update_on_candle_close(self, symbol, candle_low, candle_high,
                                reference_price=None):
@@ -133,6 +272,14 @@ class TrailingStopEngine:
         state = self._state.get(symbol)
         if state is None:
             return None
+
+        # 2026-07-28: with the peak trail on, the candle-close ratchet is
+        # switched off entirely. Running both would let the tighter of
+        # the two win, which is the 5-candle window -- the exact rule
+        # being replaced. It stays in the file (and under test) so
+        # ENABLE_PEAK_TRAIL=False restores the old behaviour intact.
+        if ENABLE_PEAK_TRAIL:
+            return state["stop"]
 
         if state["direction"] == SHORT:
             state["recent"].append(candle_high)

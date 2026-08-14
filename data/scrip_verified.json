@@ -1,0 +1,10 @@
+{
+ "verified_at": "2026-08-14 08:40:16",
+ "checked": 1818,
+ "source": "https://images.dhan.co/api-data/api-scrip-master.csv",
+ "mismatches": [],
+ "not_found": [
+  "KEL"
+ ],
+ "clean": true
+}

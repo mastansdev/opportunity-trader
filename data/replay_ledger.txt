@@ -1,0 +1,745 @@
+
+==============================================================================
+  2026-07-27     5 entr(y/ies)
+==============================================================================
+
+  IN   09:30   BUY LALPATHLAB   qty 19   at Rs 1,880.00
+       score 6.8 | up 4.3% on the day | 1.8x normal volume | Rs 97.6 Cr traded (normal day Rs 53.7 Cr)
+       WHY IN  : up 4.3%, sector unknown, 1.8x its normal volume — reported results 3 sessions ago -- Outcome of Board Meeting Dr. Lal Path Labs Ltd. has submitted to the E
+       BEHIND  : reported results 3 sessions ago -- Outcome of Board Meeting Dr. Lal Path Labs Ltd. has submitted to the E
+       stop Rs 1,802.20   target Rs 2,035.60
+       after entry it printed a high of Rs 1,886.50 and a low of Rs 1,816.00
+  OUT  15:28   at Rs 1,822.50
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:40   BUY PVRINOX   qty 31   at Rs 1,121.20
+       score 6.0 | up 4.1% on the day | 1.5x normal volume | Rs 44.2 Cr traded (normal day Rs 29.1 Cr)
+       WHY IN  : up 4.1%, sector unknown, 1.5x its normal volume — reported results 4 sessions ago -- Outcome of Board Meeting PVR INOX Limited has submitted to the Exchang
+       BEHIND  : reported results 4 sessions ago -- Outcome of Board Meeting PVR INOX Limited has submitted to the Exchang
+       stop Rs 1,073.40   target Rs 1,216.80
+       after entry it printed a high of Rs 1,136.05 and a low of Rs 1,105.80
+  OUT  15:28   at Rs 1,120.15
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:45   BUY KFINTECH   qty 33   at Rs 906.65
+       score 7.1 | up 4.2% on the day | 1.9x normal volume | Rs 73.7 Cr traded (normal day Rs 37.8 Cr)
+       WHY IN  : up 4.2%, sector unknown, 1.9x its normal volume — reported results 3 sessions ago -- Financial Results
+       BEHIND  : reported results 3 sessions ago -- Financial Results
+       stop Rs 862.50   target Rs 994.95
+       after entry it printed a high of Rs 955.00 and a low of Rs 896.30
+  OUT  15:28   at Rs 950.00
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:45   BUY CARTRADE   qty 9   at Rs 2,847.10
+       score 6.0 | up 5.6% on the day | 1.6x normal volume | Rs 101.9 Cr traded (normal day Rs 63.1 Cr)
+       WHY IN  : up 5.6%, sector unknown, 1.6x its normal volume — results due in 2 day(s) -- Outcome of Board Meeting Cartrade Tech Limited has submitted
+       BEHIND  : results due in 2 day(s) -- Outcome of Board Meeting Cartrade Tech Limited has submitted
+       stop Rs 2,696.40   target Rs 3,148.50
+       after entry it printed a high of Rs 3,015.00 and a low of Rs 2,830.90
+  OUT  15:28   at Rs 2,986.50
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:05   BUY CONCOR   qty 65   at Rs 497.50
+       score 6.4 | up 4.4% on the day | 1.7x normal volume | Rs 120.4 Cr traded (normal day Rs 71.3 Cr)
+       WHY IN  : up 4.4%, sector unknown, 1.7x its normal volume — reported results 3 sessions ago -- Outcome of Board Meeting Container Corporation Of India Limited has su
+       BEHIND  : reported results 3 sessions ago -- Outcome of Board Meeting Container Corporation Of India Limited has su
+       stop Rs 474.45   target Rs 543.60
+       after entry it printed a high of Rs 515.30 and a low of Rs 496.80
+  OUT  15:28   at Rs 509.65
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+==============================================================================
+  2026-07-28     5 entr(y/ies)
+==============================================================================
+
+  IN   09:30   BUY LODHA   qty 41   at Rs 1,265.65
+       score 6.1 | up 2.9% on the day | 1.6x normal volume | Rs 201.0 Cr traded (normal day Rs 128.2 Cr)
+       WHY IN  : up 2.9%, sector unknown, 1.6x its normal volume — reported results 4 sessions ago -- Outcome of Board Meeting Lodha Developers Limited has submitted to the
+       BEHIND  : reported results 4 sessions ago -- Outcome of Board Meeting Lodha Developers Limited has submitted to the
+       stop Rs 1,229.40   target Rs 1,338.15
+       after entry it printed a high of Rs 1,315.00 and a low of Rs 1,258.55
+  OUT  15:27   at Rs 1,313.30
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:40   BUY ZENSARTECH   qty 99   at Rs 535.15
+       score 5.8 | up 2.7% on the day | 1.5x normal volume | Rs 58.2 Cr traded (normal day Rs 38.2 Cr)
+       WHY IN  : up 2.7%, sector unknown, 1.5x its normal volume — results due in 1 day(s) -- Outcome of Board Meeting Zensar Technologies Limited has sub
+       BEHIND  : results due in 1 day(s) -- Outcome of Board Meeting Zensar Technologies Limited has sub
+       stop Rs 520.00   target Rs 565.45
+       after entry it printed a high of Rs 539.85 and a low of Rs 523.05
+  OUT  15:27   at Rs 524.60
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:45   BUY NEWGEN   qty 59   at Rs 536.50
+       score 8.3 | up 4.7% on the day | 2.8x normal volume | Rs 152.7 Cr traded (normal day Rs 55.2 Cr)
+       WHY IN  : up 4.7%, sector unknown, 2.8x its normal volume — unexplained -- 2.8x its normal volume, no published reason yet
+       BEHIND  : unexplained -- 2.8x its normal volume, no published reason yet
+       stop Rs 511.45   target Rs 586.60
+       after entry it printed a high of Rs 537.10 and a low of Rs 520.80
+  OUT  15:27   at Rs 525.00
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:45   BUY COFORGE   qty 19   at Rs 1,661.60
+       score 6.1 | up 4.6% on the day | 1.6x normal volume | Rs 613.4 Cr traded (normal day Rs 390.9 Cr)
+       WHY IN  : up 4.6%, sector unknown, 1.6x its normal volume — reported results yesterday -- Board Meeting Intimation
+       BEHIND  : reported results yesterday -- Board Meeting Intimation
+       stop Rs 1,585.20   target Rs 1,814.40
+       after entry it printed a high of Rs 1,692.20 and a low of Rs 1,660.60
+  OUT  15:27   at Rs 1,680.10
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:45   BUY INTELLECT   qty 63   at Rs 747.30
+       score 6.0 | up 3.1% on the day | 1.6x normal volume | Rs 35.1 Cr traded (normal day Rs 21.6 Cr)
+       WHY IN  : up 3.1%, sector unknown, 1.6x its normal volume — results due in 3 day(s) -- Outcome of Board Meeting Intellect Design Arena Limited has
+       BEHIND  : results due in 3 day(s) -- Outcome of Board Meeting Intellect Design Arena Limited has
+       stop Rs 723.50   target Rs 794.90
+       after entry it printed a high of Rs 753.30 and a low of Rs 722.15
+  OUT  13:18   at Rs 723.50
+       WHY OUT : HARD STOP -- price traded down through the seed stop
+
+==============================================================================
+  2026-07-29     5 entr(y/ies)
+==============================================================================
+
+  IN   09:40   BUY KPITTECH   qty 72   at Rs 629.45
+       score 6.4 | up 2.7% on the day | 1.6x normal volume | Rs 215.5 Cr traded (normal day Rs 134.0 Cr)
+       WHY IN  : up 2.7%, sector unknown, 1.6x its normal volume — 📝 #KPITTECH — Investor Presentation Period: 2026-06-30 #KPITTECH BW Earnings Pulse STRATEGY — IN PLAIN LANGUAG
+       BEHIND  : 📝 #KPITTECH — Investor Presentation Period: 2026-06-30 #KPITTECH BW Earnings Pulse STRATEGY — IN PLAIN LANGUAGE KPITTECH Keir Software development for
+       stop Rs 608.70   target Rs 670.95
+       after entry it printed a high of Rs 662.65 and a low of Rs 607.85
+  OUT  13:19   at Rs 608.70
+       WHY OUT : HARD STOP -- price traded down through the seed stop
+
+  IN   09:40   BUY KMEW   qty 9   at Rs 2,693.50
+       score 4.6 | up 5.8% on the day | 1.6x normal volume | Rs 21.8 Cr traded (normal day Rs 13.7 Cr)
+       WHY IN  : up 5.8%, sector unknown, 1.6x its normal volume — order win -- ₹11.41 crore order from Paradip Port Authority for patrol boat. #KMEW
+       BEHIND  : order win -- ₹11.41 crore order from Paradip Port Authority for patrol boat. #KMEW
+       stop Rs 2,539.50   target Rs 3,001.50
+       after entry it printed a high of Rs 2,736.10 and a low of Rs 2,635.20
+  OUT  15:27   at Rs 2,680.00
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:10   BUY TEJASNET   qty 54   at Rs 523.20
+       score 7.5 | up 5.3% on the day | 2.1x normal volume | Rs 149.0 Cr traded (normal day Rs 69.9 Cr)
+       WHY IN  : up 5.3%, sector unknown, 2.1x its normal volume — reported results 2 sessions ago -- Outcome of Board Meeting Tejas Networks Limited has submitted to the E
+       BEHIND  : reported results 2 sessions ago -- Outcome of Board Meeting Tejas Networks Limited has submitted to the E
+       stop Rs 495.80   target Rs 578.00
+       after entry it printed a high of Rs 527.75 and a low of Rs 515.25
+  OUT  15:27   at Rs 518.35
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:25   BUY HINDUNILVR   qty 30   at Rs 2,099.90
+       score 6.0 | up 2.1% on the day | 1.5x normal volume | Rs 341.4 Cr traded (normal day Rs 226.7 Cr)
+       WHY IN  : up 2.1%, sector unknown, 1.5x its normal volume — reported results yesterday -- Financial Results
+       BEHIND  : reported results yesterday -- Financial Results
+       stop Rs 2,051.30   target Rs 2,197.10
+       after entry it printed a high of Rs 2,121.70 and a low of Rs 2,092.40
+  OUT  15:27   at Rs 2,118.80
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:30   BUY JWL   qty 99   at Rs 262.15
+       score 14.6 | up 6.1% on the day | 6.5x normal volume | Rs 181.8 Cr traded (normal day Rs 28.0 Cr)
+       WHY IN  : up 6.1%, sector unknown, 6.5x its normal volume — order win -- Jupiter Wagons bags Rs. 211 Cr orders from JSW, OASPL. #JWL
+       BEHIND  : order win -- Jupiter Wagons bags Rs. 211 Cr orders from JSW, OASPL. #JWL
+       stop Rs 247.00   target Rs 292.45
+       after entry it printed a high of Rs 264.40 and a low of Rs 256.05
+  OUT  15:27   at Rs 257.25
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+==============================================================================
+  2026-07-30     5 entr(y/ies)
+==============================================================================
+
+  IN   09:30   BUY MOIL   qty 93   at Rs 295.15
+       score 16.0 | up 5.5% on the day | 5.3x normal volume | Rs 92.6 Cr traded (normal day Rs 17.6 Cr)
+       WHY IN  : up 5.5%, sector unknown, 5.3x its normal volume — Profit surged 69.2% YoY to ₹88 Cr; EBITDA margin expanded 1,400 bps, signaling strong operational leverage and
+       BEHIND  : Profit surged 69.2% YoY to ₹88 Cr; EBITDA margin expanded 1,400 bps, signaling strong operational leverage and pricing power.
+       stop Rs 279.10   target Rs 327.25
+       after entry it printed a high of Rs 304.45 and a low of Rs 283.30
+  OUT  15:27   at Rs 284.75
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:30   BUY REDINGTON   qty 93   at Rs 332.30
+       score 11.2 | up 4.7% on the day | 3.1x normal volume | Rs 546.9 Cr traded (normal day Rs 176.2 Cr)
+       WHY IN  : up 4.7%, sector unknown, 3.1x its normal volume — Q1FY27 profit surged 77% YoY to 486 Cr while revenue grew 35%, signaling strong operational leverage and margi
+       BEHIND  : Q1FY27 profit surged 77% YoY to 486 Cr while revenue grew 35%, signaling strong operational leverage and margin expansion.
+       stop Rs 316.25   target Rs 364.40
+       after entry it printed a high of Rs 332.90 and a low of Rs 308.40
+  OUT  10:24   at Rs 316.25
+       WHY OUT : HARD STOP -- price traded down through the seed stop
+
+  IN   09:40   BUY SMLMAH   qty 8   at Rs 5,215.90
+       score 7.2 | up 3.3% on the day | 1.7x normal volume | Rs 223.9 Cr traded (normal day Rs 132.1 Cr)
+       WHY IN  : up 3.3%, sector unknown, 1.7x its normal volume — Acquisition of M&M's Truck & Bus Division expands SML's product portfolio and market presence in commercial ve
+       BEHIND  : Acquisition of M&M's Truck & Bus Division expands SML's product portfolio and market presence in commercial vehicles segment.
+       stop Rs 5,049.10   target Rs 5,549.50
+       after entry it printed a high of Rs 5,479.20 and a low of Rs 5,164.20
+  OUT  15:27   at Rs 5,479.20
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:50   BUY BALKRISIND   qty 24   at Rs 2,281.20
+       score 14.7 | up 2.0% on the day | 5.1x normal volume | Rs 242.0 Cr traded (normal day Rs 47.0 Cr)
+       WHY IN  : up 2.0%, sector unknown, 5.1x its normal volume — reported results yesterday -- Outcome of Board Meeting Balkrishna Industries Limited has submitted t
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting Balkrishna Industries Limited has submitted t
+       stop Rs 2,220.00   target Rs 2,403.60
+       after entry it printed a high of Rs 2,333.80 and a low of Rs 2,212.30
+  OUT  10:50   at Rs 2,220.00
+       WHY OUT : HARD STOP -- price traded down through the seed stop
+
+  IN   10:30   BUY TIMEX   qty 46   at Rs 547.95
+       score 7.9 | up 2.4% on the day | 2.6x normal volume | Rs 33.3 Cr traded (normal day Rs 12.8 Cr)
+       WHY IN  : up 2.4%, sector unknown, 2.6x its normal volume — unexplained -- 2.6x its normal volume, no published reason yet
+       BEHIND  : unexplained -- 2.6x its normal volume, no published reason yet
+       stop Rs 516.00   target Rs 611.85
+       after entry it printed a high of Rs 552.80 and a low of Rs 526.70
+  OUT  15:27   at Rs 531.75
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+==============================================================================
+  2026-07-31     5 entr(y/ies)
+==============================================================================
+
+  IN   09:30   BUY 63MOONS   qty 40   at Rs 888.40
+       score 8.5 | up 3.8% on the day | 2.9x normal volume | Rs 69.7 Cr traded (normal day Rs 24.5 Cr)
+       WHY IN  : up 3.8%, sector unknown, 2.9x its normal volume — unexplained -- 2.9x its normal volume, no published reason yet
+       BEHIND  : unexplained -- 2.9x its normal volume, no published reason yet
+       stop Rs 851.70   target Rs 961.80
+       after entry it printed a high of Rs 949.60 and a low of Rs 886.80
+  OUT  15:27   at Rs 944.90
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:30   BUY ASTRAMICRO   qty 20   at Rs 1,923.50
+       score 8.4 | up 3.4% on the day | 1.9x normal volume | Rs 194.1 Cr traded (normal day Rs 102.9 Cr)
+       WHY IN  : up 3.4%, sector unknown, 1.9x its normal volume — Large ₹2,205 crore HAL order for core Uttam Radar programme directly boosts revenue visibility and profitabili
+       BEHIND  : Large ₹2,205 crore HAL order for core Uttam Radar programme directly boosts revenue visibility and profitability.
+       stop Rs 1,851.00   target Rs 2,068.50
+       after entry it printed a high of Rs 1,954.90 and a low of Rs 1,841.10
+  OUT  13:58   at Rs 1,851.00
+       WHY OUT : HARD STOP -- price traded down through the seed stop
+
+  IN   09:30   BUY HYUNDAI   qty 19   at Rs 2,171.90
+       score 7.8 | up 2.9% on the day | 2.2x normal volume | Rs 228.8 Cr traded (normal day Rs 103.3 Cr)
+       WHY IN  : up 2.9%, sector unknown, 2.2x its normal volume — reported results yesterday -- Outcome of Board Meeting Hyundai Motor India Limited has submitted to
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting Hyundai Motor India Limited has submitted to
+       stop Rs 2,096.70   target Rs 2,322.30
+       after entry it printed a high of Rs 2,208.00 and a low of Rs 2,150.00
+  OUT  15:27   at Rs 2,182.60
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:35   BUY QUESS   qty 86   at Rs 331.80
+       score 6.0 | up 5.0% on the day | 1.5x normal volume | Rs 25.0 Cr traded (normal day Rs 16.6 Cr)
+       WHY IN  : up 5.0%, sector unknown, 1.5x its normal volume — reported results 2 sessions ago -- Outcome of Board Meeting Quess Corp Limited has submitted to the Excha
+       BEHIND  : reported results 2 sessions ago -- Outcome of Board Meeting Quess Corp Limited has submitted to the Excha
+       stop Rs 314.55   target Rs 366.30
+       after entry it printed a high of Rs 338.85 and a low of Rs 319.85
+  OUT  15:27   at Rs 332.55
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:45   BUY BALKRISIND   qty 15   at Rs 2,428.80
+       score 8.9 | up 3.6% on the day | 2.7x normal volume | Rs 126.7 Cr traded (normal day Rs 47.0 Cr)
+       WHY IN  : up 3.6%, sector unknown, 2.7x its normal volume — reported results 2 sessions ago -- Outcome of Board Meeting Balkrishna Industries Limited has submitted t
+       BEHIND  : reported results 2 sessions ago -- Outcome of Board Meeting Balkrishna Industries Limited has submitted t
+       stop Rs 2,330.00   target Rs 2,626.40
+       after entry it printed a high of Rs 2,511.20 and a low of Rs 2,428.00
+  OUT  15:27   at Rs 2,459.00
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+==============================================================================
+  2026-08-03     5 entr(y/ies)
+==============================================================================
+
+  IN   09:30   BUY SPORTKING   qty 110   at Rs 234.30
+       score 9.9 | up 5.0% on the day | 3.0x normal volume | Rs 43.0 Cr traded (normal day Rs 14.4 Cr)
+       WHY IN  : up 5.0%, sector unknown, 3.0x its normal volume — Sportking India shares audio recording of Q1 2026 earnings call. #SPORTKING - 1 minute ago = Sportking India S
+       BEHIND  : Sportking India shares audio recording of Q1 2026 earnings call. #SPORTKING - 1 minute ago = Sportking India Sportking India Limited provided a link t
+       stop Rs 220.77   target Rs 261.36
+       after entry it printed a high of Rs 241.51 and a low of Rs 224.49
+  OUT  15:27   at Rs 232.86
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:45   BUY REDINGTON   qty 77   at Rs 340.05
+       score 7.0 | up 6.1% on the day | 1.6x normal volume | Rs 283.9 Cr traded (normal day Rs 176.2 Cr)
+       WHY IN  : up 6.1%, sector unknown, 1.6x its normal volume — Apple price hikes on memory-constrained products boost distributor margins on 37% of Redington's revenue.
+       BEHIND  : Apple price hikes on memory-constrained products boost distributor margins on 37% of Redington's revenue.
+       stop Rs 320.65   target Rs 378.85
+       after entry it printed a high of Rs 357.60 and a low of Rs 327.70
+  OUT  15:27   at Rs 348.50
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:50   BUY RAYMONDLSL   qty 34   at Rs 734.20
+       score 6.0 | up 5.9% on the day | 1.5x normal volume | Rs 18.8 Cr traded (normal day Rs 12.5 Cr)
+       WHY IN  : up 5.9%, sector unknown, 1.5x its normal volume — reported results 3 sessions ago -- Outcome of Board Meeting Raymond Lifestyle Limited has submitted to th
+       BEHIND  : reported results 3 sessions ago -- Outcome of Board Meeting Raymond Lifestyle Limited has submitted to th
+       stop Rs 691.30   target Rs 820.00
+       after entry it printed a high of Rs 750.45 and a low of Rs 725.30
+  OUT  15:27   at Rs 726.70
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:10   BUY DEEPINDS   qty 53   at Rs 638.50
+       score 7.8 | up 4.1% on the day | 2.5x normal volume | Rs 89.8 Cr traded (normal day Rs 35.2 Cr)
+       WHY IN  : up 4.1%, sector unknown, 2.5x its normal volume — unexplained -- 2.5x its normal volume, no published reason yet
+       BEHIND  : unexplained -- 2.5x its normal volume, no published reason yet
+       stop Rs 610.55   target Rs 694.40
+       after entry it printed a high of Rs 655.00 and a low of Rs 625.10
+  OUT  15:27   at Rs 647.00
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:20   BUY TBOTEK   qty 16   at Rs 1,634.10
+       score 8.4 | up 6.1% on the day | 2.8x normal volume | Rs 110.6 Cr traded (normal day Rs 39.5 Cr)
+       WHY IN  : up 6.1%, sector unknown, 2.8x its normal volume — unexplained -- 2.8x its normal volume, no published reason yet
+       BEHIND  : unexplained -- 2.8x its normal volume, no published reason yet
+       stop Rs 1,540.40   target Rs 1,821.50
+       after entry it printed a high of Rs 1,643.60 and a low of Rs 1,604.90
+  OUT  15:27   at Rs 1,612.70
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+==============================================================================
+  2026-08-04     5 entr(y/ies)
+==============================================================================
+
+  IN   09:30   BUY SAMBHV   qty 298   at Rs 127.10
+       score 6.8 | up 3.8% on the day | 1.5x normal volume | Rs 27.2 Cr traded (normal day Rs 17.8 Cr)
+       WHY IN  : up 3.8%, sector unknown, 1.5x its normal volume — Q1 profit surged 56% YoY to ₹56Cr with revenue up 31% to ₹732Cr, signaling strong operational momentum.
+       BEHIND  : Q1 profit surged 56% YoY to ₹56Cr with revenue up 31% to ₹732Cr, signaling strong operational momentum.
+       stop Rs 122.07   target Rs 137.16
+       after entry it printed a high of Rs 129.40 and a low of Rs 124.10
+  OUT  15:27   at Rs 124.68
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:30   BUY JAINREC   qty 104   at Rs 328.35
+       score 6.3 | up 3.3% on the day | 1.6x normal volume | Rs 77.1 Cr traded (normal day Rs 49.4 Cr)
+       WHY IN  : up 3.3%, sector unknown, 1.6x its normal volume — JAIN RESOURCE Ql CONS EARNINGS REPORT CARD
+       BEHIND  : JAIN RESOURCE Ql CONS EARNINGS REPORT CARD
+       stop Rs 313.95   target Rs 357.15
+       after entry it printed a high of Rs 332.00 and a low of Rs 322.10
+  OUT  15:27   at Rs 322.80
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:40   BUY GODFRYPHLP   qty 17   at Rs 2,354.30
+       score 8.1 | up 3.7% on the day | 2.7x normal volume | Rs 192.7 Cr traded (normal day Rs 72.2 Cr)
+       WHY IN  : up 3.7%, sector unknown, 2.7x its normal volume — unexplained -- 2.7x its normal volume, no published reason yet
+       BEHIND  : unexplained -- 2.7x its normal volume, no published reason yet
+       stop Rs 2,269.30   target Rs 2,524.30
+       after entry it printed a high of Rs 2,367.60 and a low of Rs 2,303.10
+  OUT  15:14   at Rs 2,339.80
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:40   BUY DEEPAKFERT   qty 19   at Rs 1,654.00
+       score 7.9 | up 4.4% on the day | 2.6x normal volume | Rs 98.9 Cr traded (normal day Rs 37.8 Cr)
+       WHY IN  : up 4.4%, sector unknown, 2.6x its normal volume — unexplained -- 2.6x its normal volume, no published reason yet
+       BEHIND  : unexplained -- 2.6x its normal volume, no published reason yet
+       stop Rs 1,578.50   target Rs 1,805.00
+       after entry it printed a high of Rs 1,680.90 and a low of Rs 1,587.00
+  OUT  15:27   at Rs 1,591.00
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   09:50   BUY UNIMECH   qty 24   at Rs 1,362.00
+       score 6.2 | up 3.2% on the day | 1.5x normal volume | Rs 74.0 Cr traded (normal day Rs 48.8 Cr)
+       WHY IN  : up 3.2%, sector unknown, 1.5x its normal volume — UNIMECH AEROSPACE AND MANUFACTURING: CO TO ISSUE SHARES VIA QIP NOT EXCEEDING 7.5B RUPEES
+       BEHIND  : UNIMECH AEROSPACE AND MANUFACTURING: CO TO ISSUE SHARES VIA QIP NOT EXCEEDING 7.5B RUPEES
+       stop Rs 1,301.50   target Rs 1,483.00
+       after entry it printed a high of Rs 1,377.00 and a low of Rs 1,321.00
+  OUT  15:27   at Rs 1,336.50
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+==============================================================================
+  2026-08-05     35 entr(y/ies)
+==============================================================================
+
+  IN   10:25   BUY SAREGAMA   qty 68   at Rs 561.55
+       score 6.0 | up 2.8% on the day | 1.5x normal volume | Rs 80.7 Cr traded (normal day Rs 53.5 Cr)
+       WHY IN  : up 2.8%, sector unknown, 1.5x its normal volume — reported results yesterday -- Outcome of Board Meeting Saregama India Limited has informed the Excha
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting Saregama India Limited has informed the Excha
+       stop Rs 539.75   target Rs 605.15
+       after entry it printed a high of Rs 564.85 and a low of Rs 554.45
+  OUT  15:27   at Rs 559.80
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   11:05   BUY GODREJPROP   qty 26   at Rs 2,116.90
+       score 6.0 | up 2.8% on the day | 1.5x normal volume | Rs 228.9 Cr traded (normal day Rs 151.7 Cr)
+       WHY IN  : up 2.8%, sector unknown, 1.5x its normal volume — reported results yesterday -- Outcome of Board Meeting Godrej Properties Limited has submitted to th
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting Godrej Properties Limited has submitted to th
+       stop Rs 2,060.00   target Rs 2,230.70
+       after entry it printed a high of Rs 2,126.30 and a low of Rs 2,101.10
+  OUT  15:14   at Rs 2,108.80
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   11:10   BUY PNBHOUSING   qty 36   at Rs 1,128.40
+       score 6.0 | up 3.5% on the day | 1.5x normal volume | Rs 348.6 Cr traded (normal day Rs 230.1 Cr)
+       WHY IN  : up 3.5%, sector unknown, 1.5x its normal volume — reported results yesterday -- Outcome of Board Meeting PNB Housing Finance Limited has submitted to
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting PNB Housing Finance Limited has submitted to
+       stop Rs 1,087.30   target Rs 1,210.60
+       after entry it printed a high of Rs 1,142.30 and a low of Rs 1,120.00
+  OUT  15:14   at Rs 1,121.60
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   11:15   BUY GRAPHITE   qty 42   at Rs 742.10
+       score 6.4 | up 3.5% on the day | 1.7x normal volume | Rs 243.1 Cr traded (normal day Rs 143.5 Cr)
+       WHY IN  : up 3.5%, sector unknown, 1.7x its normal volume — reported results yesterday -- Outcome of Board Meeting Graphite India Limited has submitted to the E
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting Graphite India Limited has submitted to the E
+       stop Rs 707.05   target Rs 812.20
+       after entry it printed a high of Rs 741.60 and a low of Rs 705.30
+  OUT  15:15   at Rs 707.05
+       WHY OUT : HARD STOP -- price traded down through the seed stop
+
+  IN   14:35   BUY CNL   qty 22   at Rs 1,117.00
+       score 6.8 | up 4.5% on the day | 1.8x normal volume | Rs 22.2 Cr traded (normal day Rs 12.0 Cr)
+       WHY IN  : up 4.5%, sector unknown, 1.8x its normal volume — reported results yesterday -- Outcome of Board Meeting Outcome of Board Meeting for unaudited Standa
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting Outcome of Board Meeting for unaudited Standa
+       stop Rs 1,050.70   target Rs 1,249.60
+       after entry it printed a high of Rs 1,139.70 and a low of Rs 1,115.00
+  OUT  15:27   at Rs 1,136.65
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.07 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.06 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.10 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.09 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.08 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.06 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.07 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.10 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.18 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.17 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY MSUMI   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 41.12 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.29 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.29 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.27 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.30 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.30 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.28 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.30 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.29 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.29 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.34 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.31 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.29 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.30 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.29 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.28 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.30 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.28 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.34 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  IN   --   BUY SEPC   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 6.34 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+==============================================================================
+  2026-08-06     5 entr(y/ies)
+==============================================================================
+
+  IN   09:40   BUY JKLAKSHMI   qty 59   at Rs 604.65
+       score 6.2 | up 4.0% on the day | 1.5x normal volume | Rs 83.2 Cr traded (normal day Rs 54.2 Cr)
+       WHY IN  : up 4.0%, sector unknown, 1.5x its normal volume — 3K LAKSHMI CEMENT QI CONS EARNINGS REPORT CARD QIFY27 QIFY26 Metric 2150 Cr 2108 Cr Profit 31,905 Cr 21,741 Re
+       BEHIND  : 3K LAKSHMI CEMENT QI CONS EARNINGS REPORT CARD QIFY27 QIFY26 Metric 2150 Cr 2108 Cr Profit 31,905 Cr 21,741 Revenue Vv 16.7% | 331 Cr 2259 Cr EBITDA 1
+       stop Rs 579.50   target Rs 654.95
+       after entry it printed a high of Rs 606.15 and a low of Rs 567.20
+  OUT  12:22   at Rs 579.50
+       WHY OUT : HARD STOP -- price traded down through the seed stop
+
+  IN   10:10   BUY SOTL   qty 32   at Rs 805.00
+       score 7.2 | up 2.9% on the day | 2.0x normal volume | Rs 298.3 Cr traded (normal day Rs 150.3 Cr)
+       WHY IN  : up 2.9%, sector unknown, 2.0x its normal volume — reported results yesterday -- Outcome of Board Meeting Savita Oil Technologies Limited has submitted
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting Savita Oil Technologies Limited has submitted
+       stop Rs 758.80   target Rs 897.40
+       after entry it printed a high of Rs 812.00 and a low of Rs 768.70
+  OUT  15:27   at Rs 793.00
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   11:15   BUY NEULANDLAB   qty 1   at Rs 22,001.00
+       score 6.6 | up 3.4% on the day | 1.7x normal volume | Rs 1,099.6 Cr traded (normal day Rs 654.2 Cr)
+       WHY IN  : up 3.4%, sector unknown, 1.7x its normal volume — NEULAND LAB Q1 CONS EARNINGS REPORT CARD ea | ee Per deel
+       BEHIND  : NEULAND LAB Q1 CONS EARNINGS REPORT CARD ea | ee Per deel
+       stop Rs 21,000.00   target Rs 24,003.00
+       after entry it printed a high of Rs 22,222.00 and a low of Rs 21,313.00
+  OUT  15:27   at Rs 21,599.00
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   11:20   BUY CUMMINSIND   qty 8   at Rs 5,377.00
+       score 6.2 | up 3.4% on the day | 1.5x normal volume | Rs 566.7 Cr traded (normal day Rs 378.8 Cr)
+       WHY IN  : up 3.4%, sector unknown, 1.5x its normal volume — CUMMINS INDIA WARNS: HISTORIC MARGIN LEVELS MAY NOT RETURN CUMMINS INDIA FLAGS MARGIN RISK; HISTORIC PEAKS MAY
+       BEHIND  : CUMMINS INDIA WARNS: HISTORIC MARGIN LEVELS MAY NOT RETURN CUMMINS INDIA FLAGS MARGIN RISK; HISTORIC PEAKS MAY BE OUT OF REACH
+       stop Rs 5,192.00   target Rs 5,747.00
+       after entry it printed a high of Rs 5,419.50 and a low of Rs 5,339.00
+  OUT  15:14   at Rs 5,403.50
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   13:00   BUY AEGISVOPAK   qty 109   at Rs 292.35
+       score 6.4 | up 4.8% on the day | 1.6x normal volume | Rs 70.7 Cr traded (normal day Rs 44.4 Cr)
+       WHY IN  : up 4.8%, sector unknown, 1.6x its normal volume — AEGIS VOPAK QI CONS EARNINGS REPORT CARD Metric Profit Revenue EBITDA 4 16.2% | A 210 bps | EBITDA Margin
+       BEHIND  : AEGIS VOPAK QI CONS EARNINGS REPORT CARD Metric Profit Revenue EBITDA 4 16.2% | A 210 bps | EBITDA Margin
+       stop Rs 278.65   target Rs 319.75
+       after entry it printed a high of Rs 294.10 and a low of Rs 287.25
+  OUT  15:27   at Rs 288.00
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+==============================================================================
+  2026-08-07     5 entr(y/ies)
+==============================================================================
+
+  IN   09:55   BUY TATAINVEST   qty 43   at Rs 703.35
+       score 6.3 | up 4.5% on the day | 1.6x normal volume | Rs 104.5 Cr traded (normal day Rs 63.4 Cr)
+       WHY IN  : up 4.5%, sector unknown, 1.6x its normal volume — reported results 3 sessions ago -- Outcome of Board Meeting Tata Investment Corporation Limited has submi
+       BEHIND  : reported results 3 sessions ago -- Outcome of Board Meeting Tata Investment Corporation Limited has submi
+       stop Rs 669.20   target Rs 771.65
+       after entry it printed a high of Rs 704.00 and a low of Rs 691.25
+  OUT  12:31   at Rs 693.50
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:35   BUY ENRIN   qty 8   at Rs 3,654.00
+       score 7.5 | up 4.0% on the day | 1.6x normal volume | Rs 1,126.9 Cr traded (normal day Rs 725.7 Cr)
+       WHY IN  : up 4.0%, sector unknown, 1.6x its normal volume — #ENRIN - Strong Beat Q1 FY27 Metric QoQ Sales 4% oP 18% PAT 18% REVENUE 0-2,485.6 Gr 2,394.1 1,784.6 Jun25 Mar
+       BEHIND  : #ENRIN - Strong Beat Q1 FY27 Metric QoQ Sales 4% oP 18% PAT 18% REVENUE 0-2,485.6 Gr 2,394.1 1,784.6 Jun25 Mar26 Siemens Ener.Ind Electrical Equipment
+       stop Rs 3,470.80   target Rs 4,020.40
+       after entry it printed a high of Rs 3,719.00 and a low of Rs 3,627.60
+  OUT  12:31   at Rs 3,699.60
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:35   BUY COSMOFIRST   qty 30   at Rs 920.65
+       score 6.0 | up 4.2% on the day | 1.5x normal volume | Rs 39.4 Cr traded (normal day Rs 26.1 Cr)
+       WHY IN  : up 4.2%, sector unknown, 1.5x its normal volume — reported results yesterday -- Outcome of Board Meeting COSMO FIRST LIMITED has submitted to the Exch
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting COSMO FIRST LIMITED has submitted to the Exch
+       stop Rs 872.10   target Rs 1,017.75
+       after entry it printed a high of Rs 927.85 and a low of Rs 905.10
+  OUT  12:31   at Rs 907.25
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   11:50   BUY PGEL   qty 48   at Rs 633.50
+       score 6.5 | up 2.9% on the day | 1.7x normal volume | Rs 448.0 Cr traded (normal day Rs 259.7 Cr)
+       WHY IN  : up 2.9%, sector unknown, 1.7x its normal volume — reported results yesterday -- Outcome of Board Meeting PG Electroplast Limited has submitted to the
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting PG Electroplast Limited has submitted to the
+       stop Rs 602.45   target Rs 695.60
+       after entry it printed a high of Rs 633.50 and a low of Rs 625.25
+  OUT  12:31   at Rs 630.50
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   12:10   BUY LLOYDSENGG   qty 263   at Rs 96.69
+       score 6.3 | up 6.3% on the day | 1.7x normal volume | Rs 424.3 Cr traded (normal day Rs 255.4 Cr)
+       WHY IN  : up 6.3%, sector unknown, 1.7x its normal volume — reported results yesterday -- Outcome of Board Meeting LLOYDS ENGINEERING WORKS LIMITED has submitte
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting LLOYDS ENGINEERING WORKS LIMITED has submitte
+       stop Rs 91.00   target Rs 108.07
+       after entry it printed a high of Rs 96.85 and a low of Rs 96.03
+  OUT  12:32   at Rs 96.41
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+==============================================================================
+  2026-08-10     5 entr(y/ies)
+==============================================================================
+
+  IN   10:00   BUY RAMCOCEM   qty 31   at Rs 972.60
+       score 6.2 | up 5.1% on the day | 1.5x normal volume | Rs 67.6 Cr traded (normal day Rs 45.0 Cr)
+       WHY IN  : up 5.1%, sector unknown, 1.5x its normal volume — #EarningsWithETNOW RAMCO CEMENTS Q1 Eons EARNINGS REPORT CARD Revenue 2,273 cr 2,074 cr A 9.6% EBITDA %305 cr
+       BEHIND  : #EarningsWithETNOW RAMCO CEMENTS Q1 Eons EARNINGS REPORT CARD Revenue 2,273 cr 2,074 cr A 9.6% EBITDA %305 cr %396 cr W 23.0% EBITDA Margin 13.4% 19.1
+       stop Rs 925.15   target Rs 1,067.50
+       after entry it printed a high of Rs 983.45 and a low of Rs 950.65
+  OUT  13:43   at Rs 955.10
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:55   BUY ENTERO   qty 19   at Rs 1,386.90
+       score 7.6 | up 3.9% on the day | 2.1x normal volume | Rs 131.7 Cr traded (normal day Rs 63.2 Cr)
+       WHY IN  : up 3.9%, sector unknown, 2.1x its normal volume — ENTERO HEALTHCARE Q1 CONS EARNINGS REPORT CARD Metric QUFY27 QUFY26 Revenue %1,940 cr | 140ser | A 38.3% EBITD
+       BEHIND  : ENTERO HEALTHCARE Q1 CONS EARNINGS REPORT CARD Metric QUFY27 QUFY26 Revenue %1,940 cr | 140ser | A 38.3% EBITDA 96 cr 48 cr A 97.3% EBITDA Margin 5.0%
+       stop Rs 1,310.00   target Rs 1,540.70
+       after entry it printed a high of Rs 1,386.80 and a low of Rs 1,324.00
+  OUT  13:43   at Rs 1,326.00
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   11:40   BUY AKUMS   qty 37   at Rs 748.50
+       score 6.0 | up 4.7% on the day | 1.5x normal volume | Rs 92.6 Cr traded (normal day Rs 60.5 Cr)
+       WHY IN  : up 4.7%, sector unknown, 1.5x its normal volume — reported results 2 sessions ago -- Outcome of Board Meeting Akums Drugs and Pharmaceuticals Limited has s
+       BEHIND  : reported results 2 sessions ago -- Outcome of Board Meeting Akums Drugs and Pharmaceuticals Limited has s
+       stop Rs 708.90   target Rs 827.70
+       after entry it printed a high of Rs 756.35 and a low of Rs 730.10
+  OUT  13:43   at Rs 730.65
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   11:45   BUY BEML   qty 14   at Rs 1,884.00
+       score 6.4 | up 5.1% on the day | 1.6x normal volume | Rs 293.6 Cr traded (normal day Rs 184.4 Cr)
+       WHY IN  : up 5.1%, sector unknown, 1.6x its normal volume — e Rail & Metro Orders To Be Finalised In Q3 e Have Quite A Few Defence & Export Orders Coming Up e Have 6 Big
+       BEHIND  : e Rail & Metro Orders To Be Finalised In Q3 e Have Quite A Few Defence & Export Orders Coming Up e Have 6 Big Rail Tenders tase eeeeeweeeaccceresess::
+       stop Rs 1,778.50   target Rs 2,095.00
+       after entry it printed a high of Rs 1,912.00 and a low of Rs 1,860.60
+  OUT  13:43   at Rs 1,868.20
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   12:00   BUY KAYNES   qty 7   at Rs 3,754.00
+       score 6.2 | up 4.9% on the day | 1.5x normal volume | Rs 1,094.2 Cr traded (normal day Rs 725.3 Cr)
+       WHY IN  : up 4.9%, sector unknown, 1.5x its normal volume — KAYNES TECHNOLOGY Q1 eens EARNINGS REPORT CARD Financial Metric | Q1FY27 Q1FY26 YoY Change Profit %56Cr %74 Cr
+       BEHIND  : KAYNES TECHNOLOGY Q1 eens EARNINGS REPORT CARD Financial Metric | Q1FY27 Q1FY26 YoY Change Profit %56Cr %74 Cr Vi 24.3% EBITDA Margin 15.5% 16.6% wv 1
+       stop Rs 3,545.50   target Rs 4,171.00
+       after entry it printed a high of Rs 3,761.20 and a low of Rs 3,700.00
+  OUT  13:43   at Rs 3,720.50
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+==============================================================================
+  2026-08-11     6 entr(y/ies)
+==============================================================================
+
+  IN   09:55   BUY GLAND   qty 12   at Rs 2,932.70
+       score 6.0 | up 2.9% on the day | 1.5x normal volume | Rs 919.9 Cr traded (normal day Rs 603.9 Cr)
+       WHY IN  : up 2.9%, sector unknown, 1.5x its normal volume — reported results yesterday -- Outcome of Board Meeting Gland Pharma Limited has submitted to the Exc
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting Gland Pharma Limited has submitted to the Exc
+       stop Rs 2,815.00   target Rs 3,168.10
+       after entry it printed a high of Rs 2,941.50 and a low of Rs 2,836.00
+  OUT  15:27   at Rs 2,922.90
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:00   BUY INDSWFTLAB   qty 91   at Rs 276.34
+       score 9.0 | up 5.4% on the day | 2.7x normal volume | Rs 163.0 Cr traded (normal day Rs 59.6 Cr)
+       WHY IN  : up 5.4%, sector unknown, 2.7x its normal volume — reported results yesterday -- Outcome of Board Meeting Ind-Swift Laboratories Limited has submitted
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting Ind-Swift Laboratories Limited has submitted
+       stop Rs 259.97   target Rs 309.08
+       after entry it printed a high of Rs 284.68 and a low of Rs 273.65
+  OUT  15:25   at Rs 284.68
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   10:10   BUY KPRMILL   qty 27   at Rs 1,148.70
+       score 6.0 | up 4.9% on the day | 1.5x normal volume | Rs 93.6 Cr traded (normal day Rs 60.7 Cr)
+       WHY IN  : up 4.9%, sector unknown, 1.5x its normal volume — reported results yesterday -- Outcome of Board Meeting we wish to inform you that the Board of Direc
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting we wish to inform you that the Board of Direc
+       stop Rs 1,093.50   target Rs 1,259.10
+       after entry it printed a high of Rs 1,150.30 and a low of Rs 1,092.10
+  OUT  15:12   at Rs 1,093.50
+       WHY OUT : HARD STOP -- price traded down through the seed stop
+
+  IN   11:35   BUY ARE&M   qty 26   at Rs 959.15
+       score 6.5 | up 6.2% on the day | 1.7x normal volume | Rs 408.5 Cr traded (normal day Rs 240.7 Cr)
+       WHY IN  : up 6.2%, sector unknown, 1.7x its normal volume — reported results yesterday -- Outcome of Board Meeting Amara Raja Energy & Mobility Limited has subm
+       BEHIND  : reported results yesterday -- Outcome of Board Meeting Amara Raja Energy & Mobility Limited has subm
+       stop Rs 903.00   target Rs 1,071.45
+       after entry it printed a high of Rs 974.00 and a low of Rs 957.65
+  OUT  15:27   at Rs 965.40
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   12:10   BUY POLYMED   qty 21   at Rs 1,865.30
+       score 6.0 | up 4.0% on the day | 1.5x normal volume | Rs 117.2 Cr traded (normal day Rs 78.0 Cr)
+       WHY IN  : up 4.0%, sector unknown, 1.5x its normal volume — reported results 4 sessions ago -- Outcome of Board Meeting Poly Medicure Limited has informed the outcom
+       BEHIND  : reported results 4 sessions ago -- Outcome of Board Meeting Poly Medicure Limited has informed the outcom
+       stop Rs 1,794.00   target Rs 2,007.90
+       after entry it printed a high of Rs 1,884.90 and a low of Rs 1,852.00
+  OUT  15:27   at Rs 1,863.30
+       WHY OUT : NEVER EXITED -- valued at the last recorded candle of the session
+
+  IN   --   BUY PCJEWELLER   qty --   at Rs --
+       WHY IN  : REFUSED AT THE ORDER GATE: Rs 10.34 is below the Rs 50 floor
+  OUT  --   at Rs --
+       WHY OUT : --
+
+  Written: /sessions/youthful-gallant-pasteur/mnt/Opportunity Trader/data/replay_ledger.csv  (91 row(s))

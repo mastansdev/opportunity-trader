@@ -174,6 +174,28 @@ class MasterLoader:
     # --------------------------------------------------
 
     def get_by_symbol(self, symbol):
+        # AN UNLOADED LOADER USED TO LIE.
+        #
+        # 31 July 2026, minutes before the first real order:
+        #
+        #   py tools/live_order_test.py --symbol REDINGTON
+        #   REDINGTON not found in the master database.
+        #
+        # REDINGTON is row 560 of that file, security id 14255. The
+        # tool had constructed a MasterLoader and never called load(),
+        # so _by_symbol was an empty dict and every lookup in the
+        # database returned None -- reported, reasonably enough, as
+        # "not found".
+        #
+        # "not in the database" and "the database was never opened"
+        # are opposite problems and they had identical symptoms. On a
+        # LIVE morning that reads as a data error and sends you into
+        # the CSV looking for a missing row that is right there.
+        #
+        # load() is idempotent and takes about a second. Doing it here
+        # means no caller can ever ask this question too early again.
+        if not self._by_symbol:
+            self.load()
         return self._by_symbol.get(symbol)
 
     def get_by_security_id(self, security_id):
@@ -199,5 +221,9 @@ class MasterLoader:
         return dict(self._blocked)
 
     def security_id(self, symbol):
-        record = self._by_symbol.get(symbol)
+        # Same trap as get_by_symbol() above, and a worse one to fall
+        # into: None here means "we cannot identify this instrument",
+        # which every caller correctly treats as "do not trade it".
+        # An unloaded loader would answer that about all 1,084 stocks.
+        record = self.get_by_symbol(symbol)
         return record["SECURITY ID"] if record else None

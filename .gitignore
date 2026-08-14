@@ -32,3 +32,62 @@ data/universe_review.csv
 data/*.csv.gz
 data/*.zip
 data/filings/
+
+# Telegram session -- a CREDENTIAL. Anyone holding this file can read
+# the operator's Telegram account. Never commit it.
+data/telegram_session.session
+data/telegram_session*
+data/telegram.db
+
+# ---- Scratch files that got committed by a broad `git add`. ----
+# 12 August 2026. All four were staged into the repo by accident:
+# .c1/.c2 are two halves of a `ls tests/` dump, .__write_test is a
+# zero-byte probe some code writes to check the disk is writable, and
+# .suite.log was an empty pytest redirect. None is a source file.
+.c1
+.c2
+.__write_test
+.suite.log
+
+# A malformed database path -- something built "sqlite:/data/..." as a
+# literal directory instead of parsing the URL. The real store is
+# data/stock_events.db.
+sqlite:/
+
+# ---- node_modules: 1,806 files, 26 MB, staged by accident. ----
+# 12 August 2026. There is no package.json, so nothing recorded what
+# these were or why. The only thing in there is a HALF-INSTALLED jsdom
+# that tests/test_dom_sims_actually_run.py already documents as broken:
+# "On 3 August it was found to HANG on require('jsdom') and get killed".
+# Every tests/dom/*.sim.js was rewritten to use node builtins only, and
+# all six pass with nothing installed.
+#
+# Untracked, not deleted -- the files stay on disk. Committing them was
+# what left a `git add` running for two hours holding .git/index.lock.
+node_modules/
+
+# The Dhan access token the bot mints for itself (core/dhan_auth.py).
+# A LIVE CREDENTIAL -- anyone holding it can trade the account until it
+# expires, same class as the Telegram session below. Cached on disk from
+# 13 August 2026 so a restart reuses the 24-hour token instead of asking
+# Dhan for another and being rate-limited.
+data/dhan_token.json
+
+# Which main.py is alive, by pid (core/single_instance.py, 13 Aug 2026).
+# Machine-local and meaningless anywhere else. Replaces the port probe
+# that could not see a second bot on Windows.
+data/main_bot.lock
+
+# ---- WRITE-AHEAD SIDECARS AND BACKUPS. 14 August 2026. ----
+# Found during the store inventory: data/*.db is ignored but sqlite's
+# own -wal/-shm companions are not, and neither were the timestamped
+# master_stocks backups the fixer tools leave behind. All regenerable,
+# none of it source, and a -wal committed beside an ignored .db is a
+# half-written database in the history.
+data/*.db-wal
+data/*.db-shm
+data/*.csv.*.bak
+data/*.csv.bak_*
+data/telegram_reader.lock
+data/preopen_history/
+logs/*.log.[0-9]*

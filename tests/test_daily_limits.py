@@ -1,0 +1,108 @@
+"""
+The daily guardrails, re-chosen 29 July 2026.
+
+Both numbers were set when a position was Rs 1 lakh of STOCK. The MTF
+margin call had been failing silently on a NameError for weeks, so every
+position was unleveraged. When that was fixed, one position began
+controlling ~Rs 3.8 lakh -- and both limits silently came to mean
+something quite different from what was chosen.
+
+    one failed trade, 2.5% stop
+      no leverage (what was really running)   Rs 2,500  -> 8.0 trades
+      MTF working (from 30 July)              Rs 9,500  -> 2.1 trades
+
+And the profit target was biting before the loss limit ever did. All
+three recorded sessions, scored under the new exit rules with leverage:
+
+    date          trades   x3.8 leverage
+    2026-07-27        21           8,476
+    2026-07-28        19          49,687   <- would have STOPPED at 30,000
+    2026-07-29        40          24,552
+
+On 28 July the bot would have crossed Rs 30,000 partway through and
+switched itself off, leaving Rs 19,687 on the table.
+
+The operator chose Rs 40,000 and Rs 75,000 from these numbers.
+
+---- AND Rs 40,000 WAS THREE TIMES WHAT IT CLAIMED. 11 August 2026. ----
+
+The Rs 9,500-per-failed-trade figure above assumes a position controls
+Rs 3.8 lakh. It cannot. A position is capped at
+MTF_MARGIN_PER_POSITION_RS = Rs 30,000 of margin, so at 3.8x it
+controls Rs 1.14 lakh and a 2.5% stop costs about Rs 2,850 -- not
+Rs 9,500. Rs 40,000 was therefore never "about four failed trades",
+it was fourteen, and this file said so for two weeks while both its
+loss tests sat red.
+
+    daily loss  Rs 12,000, chosen by the operator 11 August 2026
+                12,000 / 2,850 = 4.2 failed trades
+
+Four is the number he wants to be wrong before the bot stops him.
+"""
+
+import pytest
+
+from config import (
+    DAILY_MAX_LOSS_RS, DAILY_PROFIT_TARGET_RS,
+    HARD_STOP_FROM_ENTRY_PCT, MTF_MARGIN_PER_POSITION_RS,
+)
+from core.rules import MAX_OPEN_POSITIONS
+
+# What one position controls once MTF margin works. COFORGE measured
+# 26.27%, about 3.8x -- see core/mtf_margin.py.
+TYPICAL_LEVERAGE = 3.8
+
+
+def _loss_per_failed_trade():
+    return MTF_MARGIN_PER_POSITION_RS * TYPICAL_LEVERAGE * HARD_STOP_FROM_ENTRY_PCT
+
+
+def test_the_loss_limit_allows_about_four_failed_trades():
+    """The ORIGINAL intent. Rs 20,000 meant eight failed trades when
+    positions were unleveraged; after the fix it meant two. Restoring
+    the intent matters more than preserving the number."""
+    trades = DAILY_MAX_LOSS_RS / _loss_per_failed_trade()
+    assert 3.5 <= trades <= 5.0
+
+
+def test_the_loss_limit_is_a_sane_share_of_capital():
+    """A daily stop should be a few percent of what is actually at risk.
+
+    ---- THE DENOMINATOR WAS NEVER TRUE. 11 August 2026. ----
+
+    This measured against a flat Rs 10,00,000 "deployed". The bot has
+    never deployed Rs 10 lakh and cannot: MAX_OPEN_POSITIONS is 3 and
+    each one is capped at MTF_MARGIN_PER_POSITION_RS, so the most
+    margin that can ever be out is Rs 90,000, controlling about
+    Rs 3.42 lakh of stock at 3.8x.
+
+    Measured against a number two-and-a-half times larger than the
+    real one, this test demanded a daily stop of at least Rs 20,000 --
+    while test_the_loss_limit_allows_about_four_failed_trades demanded
+    at most Rs 14,250. No value could satisfy both, and the pair sat
+    red rather than either being wrong out loud.
+
+    The BAND is unchanged -- a few percent, 2% to 5%, exactly as
+    chosen. Only the denominator is now the real one.
+    """
+    at_risk = (MAX_OPEN_POSITIONS * MTF_MARGIN_PER_POSITION_RS
+               * TYPICAL_LEVERAGE)
+    assert 0.02 <= DAILY_MAX_LOSS_RS / at_risk <= 0.05
+
+
+def test_the_profit_target_clears_a_normal_good_day():
+    """28 July was Rs 49,687 under the new rules. The target must not
+    stop the bot in the middle of a day like that."""
+    assert DAILY_PROFIT_TARGET_RS > 49_687
+
+
+def test_the_profit_target_still_exists():
+    """Not removed. A genuinely wild session should still be able to
+    end early rather than run unbounded."""
+    assert DAILY_PROFIT_TARGET_RS > 0
+
+
+def test_the_target_is_further_away_than_the_loss_limit():
+    """A bot that stops itself on good days sooner than on bad ones has
+    the asymmetry backwards."""
+    assert DAILY_PROFIT_TARGET_RS > DAILY_MAX_LOSS_RS

@@ -409,14 +409,64 @@ def test_gainers_losers_keeps_a_stock_merely_near_but_not_at_its_circuit():
     assert "TCS" in symbols
 
 
-def test_gainers_losers_empty_when_no_circuit_monitor_wired_in():
+def test_gainers_losers_empty_when_no_circuit_monitor_and_no_stored_close(
+        tmp_path):
+    """---- THE CONTRACT CHANGED. 12 August 2026. ----
+
+        "why dashboard is still showing empty ? it has todays complete
+         data right?"
+
+    It used to be "no circuit monitor -> empty table", full stop. After
+    the close he restarted main.py, the REST poll stopped carrying a
+    usable last price, and the board drew an empty table on top of a
+    daily_candles.db holding today's complete session for 2,459
+    symbols. So an empty live result now falls back to the stored
+    close, labelled `at_close`.
+
+    This test keeps the ORIGINAL guarantee for the case that is still
+    genuinely empty: nothing live AND nothing stored. It points the
+    fallback at a temp path -- the first run after the fallback shipped
+    had this test reading the real database and getting 2,459 rows,
+    which is how a unit test silently becomes a data test.
+    """
     loader = _loader({"TCS": "IT"})
     state = DashboardState(_FakeEngine(), _FakeMarketData(), loader)
+    state.daily_candles_path = str(tmp_path / "no-such-store.db")
     state.refresh()
 
     gl = state.get_snapshot()["gainers_losers"]
     assert gl["gainers"] == []
     assert gl["losers"] == []
+    assert gl.get("at_close") is False
+
+
+def test_no_live_prices_falls_back_to_the_stored_close(tmp_path):
+    """The other half of the same contract, and the thing he asked
+    for: a complete session on disk must reach the screen."""
+    import sqlite3
+
+    db = tmp_path / "daily.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute("create table daily_bars (id integer primary key, "
+                 "date text, symbol text, open real, high real, low real, "
+                 "close real, prev_close real, volume real)")
+    conn.execute("insert into daily_bars (date, symbol, open, high, low, "
+                 "close, prev_close, volume) values "
+                 "('2026-08-12','TCS',100,127,99,126,100,5000)")
+    conn.commit()
+    conn.close()
+
+    loader = _loader({"TCS": "IT"})
+    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader)
+    state.daily_candles_path = str(db)
+    state.refresh()
+
+    gl = state.get_snapshot()["gainers_losers"]
+    assert [r["symbol"] for r in gl["gainers"]] == ["TCS"]
+    assert gl["at_close"] is True, (
+        "the close is on screen without being labelled a close -- a "
+        "stale price wearing a live one's clothes")
+    assert gl["as_of"] == "2026-08-12"
 
 
 def test_gainers_losers_throttled_not_rebuilt_every_refresh():
@@ -557,6 +607,13 @@ def test_risk_filters_empty_when_nothing_blocked_and_no_sector_monitor():
     assert filters == {
         "panic_sectors": [], "blocked_symbols": [], "frozen_symbols": [],
         "circuit_flagged_symbols": [],
+        # ---- 2 August 2026 ----
+        # The blocked list ran to forty-five rows on the live panel,
+        # every one reading "reports today, numbers not out yet". It
+        # is now grouped by reason for the LIVE tab; blocked_symbols
+        # still carries the full list for the POST-MARKET tab and
+        # tools/refused_review.py.
+        "blocked_by_reason": [], "blocked_count": 0,
     }
 
 
@@ -965,3 +1022,59 @@ def test_system_health_feed_alive_is_none_when_not_wired():
 # Opportunity Queue — approaching ORB boundary") -- its two tests
 # (proximity ranking, excludes symbols with an open position) went
 # with it, along with dashboard/state.py's _build_opportunity_queue().
+
+
+# ---------------------------------------------------------------
+# ACTION LOG, server-side (2026-07-28).
+#
+# It lived in the browser first. The operator refreshed the page and the
+# record vanished -- and he runs two or three screens, so a log only the
+# clicking screen can see is not a record at all. He could click on one
+# monitor, watch another, and never learn the click died.
+# ---------------------------------------------------------------
+
+def test_the_action_log_survives_and_reaches_the_snapshot():
+    from trading.trade_controller import TradeController
+    controller = TradeController()
+    controller.note_action(True, "BUY requested: RECLTD")
+    controller.note_action(False, "BUY SUPREMEIND -- never reached the bot")
+
+    class FakeEngine:
+        trade_controller = controller
+
+    class S:
+        engine = FakeEngine()
+
+    from dashboard.state import DashboardState
+    out = DashboardState._build_actions(S)
+    assert out["available"] is True
+    assert len(out["rows"]) == 2
+    assert out["failures"] == 1
+    # newest first
+    assert "never reached" in out["rows"][0]["text"]
+
+
+def test_a_missing_controller_gives_an_empty_panel_not_a_crash():
+    class S:
+        engine = object()
+    from dashboard.state import DashboardState
+    out = DashboardState._build_actions(S)
+    assert out == {"rows": [], "available": False}
+
+
+def test_the_action_log_is_capped():
+    """40 rows, so a long session cannot grow it without limit."""
+    from trading.trade_controller import TradeController
+    controller = TradeController()
+    for i in range(200):
+        controller.note_action(True, f"click {i}")
+    assert len(controller.actions()) == TradeController.MAX_ACTIONS
+
+
+def test_note_action_never_raises_on_junk():
+    """Bookkeeping must not be able to break a trade request."""
+    from trading.trade_controller import TradeController
+    controller = TradeController()
+    controller.note_action(None, None)
+    controller.note_action(True, object())
+    assert len(controller.actions()) == 2

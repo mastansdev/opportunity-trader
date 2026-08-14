@@ -1,0 +1,1426 @@
+<!--
+==========================================================
+board.html  --  ONE table. Nothing else.
+==========================================================
+
+    "tomorrow i want the dashboard as it is like now you showed with
+     fonts, explaining chips of why verdict to act by bot . still the
+     CMP, Volume, Open, High, Low. is not showed ? tomorrow we will fix
+     the dashboard with only one table. no more top 50/20/10 gainers
+     tables."
+                                -- operator, 8 August 2026
+
+WHY THIS EXISTS
+---------------
+index.html carries 39 panels and three separate gainers/losers tables.
+He has to read six chips across four boxes to answer one question:
+should the bot be in this stock, and why.
+
+    "i want how bot actually works in realtime"
+    "one verdict not six chips"
+
+So: one row per stock, sorted the way the bot actually thinks --
+graded results first, then whatever is moving. The verdict is a word,
+the reason is a sentence, and the prices are on the same line.
+
+WHAT WAS ACTUALLY MISSING
+-------------------------
+CMP, Open, High, Low and Volume were never on the screen because they
+were never in the PAYLOAD. core/ranker.py built a row with the score,
+the sector, the volume MULTIPLE and the reason -- and not one price.
+Fixed there on 9 August; this page just prints them.
+
+SERVED ALONGSIDE, NOT INSTEAD
+-----------------------------
+"/" still serves index.html. A mistake here cannot cost him a session.
+==========================================================
+-->
+<meta charset="utf-8">
+<title>Opportunity Trader &mdash; board</title>
+<style>
+  :root{
+    --ink:#1a1a18; --muted:#6b6b66; --hair:#e6e4dd; --card:#fff; --page:#faf9f5;
+    --ok-bg:#e1f5ee; --ok-fg:#085041;
+    --warn-bg:#faeeda; --warn-fg:#633806;
+    --stop-bg:#fcebeb; --stop-fg:#791f1f;
+    --good-bg:#eaf3de; --good-fg:#27500a;
+    --exc-bg:#eeedfe;  --exc-fg:#3c3489;
+    --flat-bg:#f1efe8; --flat-fg:#444441;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --ink:#ececea; --muted:#a3a29c; --hair:#33322e; --card:#232320; --page:#191917;
+           --ok-bg:#04342c; --ok-fg:#9fe1cb; --warn-bg:#412402; --warn-fg:#fac775;
+           --stop-bg:#501313; --stop-fg:#f7c1c1; --good-bg:#173404; --good-fg:#c0dd97;
+           --exc-bg:#26215c; --exc-fg:#cecbf6; --flat-bg:#2c2c2a; --flat-fg:#d3d1c7; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:18px;background:var(--page);color:var(--ink);
+       font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;}
+  .bar{display:flex;align-items:center;justify-content:space-between;gap:12px;
+       background:var(--card);border:1px solid var(--hair);border-radius:12px;
+       padding:10px 14px;margin-bottom:10px;}
+  .chip{font-size:13px;padding:3px 10px;border-radius:8px;white-space:nowrap;}
+  /* The arm / disarm switch. Reads at a glance, in the dark, from a
+     metre away -- which is the only distance that matters when the
+     market is moving and he wants it OFF. */
+  .seg{display:inline-flex;border:1px solid var(--hair);border-radius:9px;
+       overflow:hidden;flex:0 0 auto;}
+  .segb{font:inherit;font-size:12px;font-weight:700;letter-spacing:.06em;
+        padding:7px 20px;border:0;cursor:pointer;background:transparent;
+        color:var(--muted);}
+  .segb + .segb{border-left:1px solid var(--hair);}
+  /* "show ON = BOT TRADING (FILL GREEN LIGHT IN ON) & OFF = BOT
+      OBSERVING (FILL YELLOW LIGHT IN OFF)"  -- operator, 11 Aug 2026.
+     Green means it is spending money. Yellow means it is watching.
+     Not red: red reads as a fault, and observing is not a fault. */
+  .segb.live-on {background:#e1f5ee;color:#085041;}
+  .segb.live-off{background:#faeeda;color:#633806;}
+  @media (prefers-color-scheme:dark){
+    .segb.live-on {background:#04342c;color:#9fe1cb;}
+    .segb.live-off{background:#412402;color:#fac775;}
+  }
+  .tgl{position:relative;width:96px;height:32px;border-radius:999px;
+       border:1px solid var(--hair);background:var(--flat-bg);cursor:pointer;
+       padding:0;font:inherit;transition:background .18s ease;flex:0 0 auto;}
+  .tgl-off,.tgl-on{position:absolute;top:0;line-height:32px;font-size:11px;
+       font-weight:700;letter-spacing:.06em;transition:color .18s ease;}
+  .tgl-off{right:11px;color:var(--muted);}
+  .tgl-on {left:12px;color:transparent;}
+  .tgl-knob{position:absolute;top:3px;left:3px;width:26px;height:26px;
+       border-radius:50%;background:var(--card);
+       box-shadow:0 1px 3px rgba(0,0,0,.28);transition:transform .18s ease;}
+  /* Bound to the ID, not just the class. On 11 August the .tgl.on
+     rules matched (element.matches(".tgl.on") === true), the rules
+     were present in document.styleSheets, and the computed background
+     STILL came from .tgl. Rather than keep guessing at what was
+     defeating a class-level override, the one control that must never
+     render wrong is pinned with id specificity, which nothing on this
+     page can outrank. Explicit colours, no var() indirection, so a
+     missing custom property cannot silently blank it either. */
+  #switch.on{background:#e1f5ee;border-color:#085041;}
+  #switch.on .tgl-knob{transform:translateX(64px);}
+  #switch.on .tgl-on{color:#085041;}
+  #switch.on .tgl-off{color:transparent;}
+  @media (prefers-color-scheme:dark){
+    #switch.on{background:#04342c;border-color:#9fe1cb;}
+    #switch.on .tgl-on{color:#9fe1cb;}
+  }
+  .tgl:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
+  .note{padding:8px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;
+        background:var(--warn-bg);color:var(--warn-fg);}
+  table{width:100%;border-collapse:collapse;background:var(--card);
+        border:1px solid var(--hair);border-radius:12px;overflow:hidden;}
+  th{font-size:12px;font-weight:400;color:var(--muted);text-align:left;
+     padding:9px 10px;background:transparent;border-bottom:1px solid var(--hair);}
+  td{padding:11px 10px;border-top:1px solid var(--hair);font-size:14px;vertical-align:top;}
+  .sym{font-weight:500;white-space:nowrap;}
+  .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .why{color:var(--muted);font-size:13px;}
+  .up{color:#1d9e75}.dn{color:#e24b4a}
+  .sect{font-size:12px;color:var(--muted);padding:14px 10px 6px;}
+  .empty{padding:26px 12px;text-align:center;color:var(--muted);font-size:14px;}
+  .tabs{display:flex;gap:6px;margin-bottom:10px;}
+  .tab{font:inherit;font-size:13px;padding:6px 16px;border-radius:8px;cursor:pointer;
+       background:transparent;border:1px solid var(--hair);color:var(--muted);}
+  .tab.on{background:var(--card);color:var(--ink);border-color:var(--ink);}
+  .cap{font-size:13px;color:var(--muted);margin:16px 0 6px 2px;}
+  .cap:first-child{margin-top:0;}
+  .capb{font-size:10px;padding:1px 6px;margin-left:6px;vertical-align:middle;
+        background:var(--flat-bg);color:var(--flat-fg);}
+  .act{margin-top:6px;display:flex;align-items:center;gap:0;}
+  /* The sized plan, under the BUY button -- qty, stop, target, risk.
+     Small on purpose: it answers "how many and where is the stop"
+     without competing with the symbol for attention. */
+  .planline{margin-top:3px;font-size:11px;color:var(--ok-fg);
+            font-variant-numeric:tabular-nums;}
+  .planline.muted{color:var(--muted);}
+  .rc{font-size:11px;padding:2px 8px;margin:0 4px 4px 0;display:inline-block;}
+  .why{line-height:1.9;}
+  .qty{width:64px;font:inherit;font-size:13px;padding:4px 6px;border-radius:6px;
+       border:1px solid var(--hair);background:var(--page);color:var(--ink);
+       text-align:right;}
+  .buy{font:inherit;font-size:12px;font-weight:600;padding:5px 12px;margin-left:6px;
+       border-radius:6px;cursor:pointer;border:1px solid transparent;
+       background:var(--ok-bg);color:var(--ok-fg);}
+  .buy:active{transform:translateY(1px);}
+  #toast{position:fixed;right:18px;bottom:18px;z-index:50;padding:10px 16px;
+         border-radius:10px;font-size:13px;display:none;max-width:60vw;}
+  table + .cap{margin-top:18px;}
+  /* ---- THE WATCHLIST CAME BACK. 14 August 2026. ----
+     Collapsing four dashboards into one dropped this panel entirely:
+     the store, the POST route and the snapshot key all survived, and
+     nothing on either surviving page drew them. Restored here rather
+     than on /full because it has BUY buttons on it -- it is a place
+     he acts from, not a diagnostic. */
+  .wlsearch{display:flex;align-items:center;margin:4px 0 10px;max-width:520px;
+            border:1px solid var(--hair);border-radius:10px;
+            background:var(--card);}
+  .wlsearch:focus-within{border-color:var(--ok-fg);}
+  .wlsearch input{flex:1;border:0;outline:0;background:transparent;
+                  color:var(--ink);font:inherit;font-size:14px;padding:9px 12px;}
+  .wlsearch input::placeholder{color:var(--muted);}
+  .wladd{font:inherit;font-size:12px;font-weight:600;padding:7px 14px;
+         margin:4px;border-radius:7px;cursor:pointer;border:1px solid transparent;
+         background:var(--ok-bg);color:var(--ok-fg);}
+  .wlhits{max-width:520px;margin:-6px 0 12px;}
+  .wlhit{padding:7px 12px;border:1px solid var(--hair);border-top:0;
+         cursor:pointer;font-size:13px;display:flex;gap:10px;
+         background:var(--card);}
+  .wlhit:first-child{border-top:1px solid var(--hair);border-radius:8px 8px 0 0;}
+  .wlhit:last-child{border-radius:0 0 8px 8px;}
+  .wlhit:hover{background:var(--ok-bg);}
+  .wlhit .dim{color:var(--muted);overflow:hidden;text-overflow:ellipsis;
+              white-space:nowrap;}
+  .wlgrp{margin-top:16px;font-size:13px;font-weight:600;}
+  .wlgrp .sub{font-weight:400;color:var(--muted);font-size:12px;
+              margin-left:8px;}
+</style>
+
+<div class="bar">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <!--
+        "if i click ON = bot trading & if i click OFF = Bot Observing.
+         thats simply it is. why u r making a complication calculations
+         at all?"                        -- operator, 11 August 2026
+
+    He is right. A toggle has to WORK OUT which command to send from a
+    state variable, and when that variable is stale or wrong you get a
+    switch that only ever sends "on" -- which is exactly what he had.
+
+    Two buttons. ON sends on. OFF sends off. Neither one reads any
+    state to decide what to do, so neither can ever send the wrong
+    command. The live state only decides which one looks lit.
+    -->
+    <span class="seg">
+      <button id="btn-on"  class="segb" data-arm="on">ON</button>
+      <button id="btn-off" class="segb" data-arm="off">OFF</button>
+    </span>
+    <span id="switchlabel" style="font-size:13px;font-weight:600;">&mdash;</span>
+    <span id="switchwhy" style="font-size:12px;color:var(--warn-fg);
+          background:var(--warn-bg);padding:2px 9px;border-radius:7px;
+          display:none;"></span>
+    <span style="font-size:13px;color:var(--muted);" id="scope">loading</span>
+    <!-- ---- IS THERE A STOP AT DHAN? 12 August 2026. ----
+         BROKER_STOP_ENABLED went True today, so every entry also rests
+         a Forever Order at Dhan at the hard stop. That order is the
+         only thing protecting a position between 15:30 and 09:15, or
+         any time this process is not running.
+
+         dashboard/state.py has published `broker_stop` since 2 August
+         and this board never drew it. He was told to "watch the
+         broker_stop panel" and there was no such thing on his screen.
+
+         A chip in the header rather than a panel, on purpose: this
+         board is ONE TABLE and nothing else. The only number worth a
+         permanent place is `unprotected`, because it is the one that
+         means a position dies with this process. -->
+    <span id="stops" style="font-size:12px;padding:2px 9px;
+          border-radius:7px;display:none;"></span>
+    <!-- ---- THE OTHER SCREEN. 13 August 2026. ----
+         "if we want we can open the full right? or like tabs dashboard?"
+         Yes. Two screens now, not four: this board for TRADING and
+         /full for DIAGNOSTICS. A link beats remembering a URL, and the
+         token rides along -- dropping it turns the destination
+         read-only, which is how "the buttons do nothing" starts. -->
+    <a id="tofull" href="#" style="font-size:12px;color:var(--muted);
+       text-decoration:none;border:1px solid var(--line,#e3e3e0);
+       padding:2px 9px;border-radius:7px;">Full ↗</a>
+  </div>
+  <span style="font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;" id="clock">&mdash;</span>
+</div>
+
+<div id="toast"></div>
+
+<div class="tabs">
+  <button class="tab" data-tab="pre">Pre</button>
+  <button class="tab on" data-tab="live">Live</button>
+  <button class="tab" data-tab="post">Post</button>
+  <button class="tab" data-tab="watch">Watch</button>
+</div>
+
+<div id="live-pane">
+  <!--
+      "u check this page ... they are maintaing like wise page"
+                                  -- operator, 11 August 2026
+
+  Six things taken from earningspulse.ai/markets/movers, which is the
+  screen he has been describing to me all day:
+
+    1. a MOVE THRESHOLD. >=4% or it is not a mover. The top-50 list was
+       half full of stocks up 0.8%.
+    2. counts in the header -- 26 up, 7 down, out of 1597.
+    3. the ACTIVITY sort: volume traded since the last refresh, x1.5 if
+       the price is still ticking up, x0.3 if it is fading. Same volume,
+       direction decides the rank. That is a better "is this move still
+       alive" test than anything in core/ranker.py.
+    4. WINDOW turnover, not the cumulative day. What is happening now,
+       not what already happened.
+    5. a cap badge, L / M / S.
+    6. the reason as SOURCE.PHRASE -- "Earnings.Excellent Results" --
+       not a sentence assembled on the page.
+  -->
+  <div class="bar" style="margin-bottom:10px;">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      <span style="font-size:13px;" id="counts">&mdash;</span>
+      <span style="font-size:12px;color:var(--muted);">sort</span>
+      <button class="tab sortb on" data-sort="activity">Activity</button>
+      <button class="tab sortb" data-sort="change">Change%</button>
+      <button class="tab sortb" data-sort="turnover">Turnover</button>
+    </div>
+    <span style="font-size:12px;color:var(--muted);">movers = &ge;<span id="thr">4</span>%</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>Stock &amp; order</th><th>Grade</th>
+      <th class="num">Prev close</th><th class="num">Open</th><th class="num">High</th>
+      <th class="num">Low</th><th class="num">CMP</th><th class="num">Chg</th>
+      <th class="num">Turnover</th><th>Why it is moving</th><th>Verdict</th>
+    </tr></thead>
+    <tbody id="body"><tr><td colspan="11" class="empty">waiting for the first snapshot&hellip;</td></tr></tbody>
+  </table>
+</div>
+
+<!--
+    "pre tab = separate ... okay keep separate then & build top 20
+     each side"                        -- operator, 9 August 2026
+
+Gap up and gap down are opposite trades, so they get their own tables.
+This costs the bot nothing: it never reads the screen, it reads the
+ranked list straight out of memory. The browser is only arranging rows
+it has already been sent.
+-->
+<div id="pre-pane" style="display:none">
+  <div class="cap">Gapped UP from yesterday&rsquo;s close &mdash; top 20</div>
+  <table>
+    <thead><tr>
+      <th>Stock</th><th>Grade</th><th class="num">Prev close</th>
+      <th class="num">Open</th><th class="num">Gap</th><th class="num">Volume</th>
+      <th>Why it gapped</th>
+    </tr></thead>
+    <tbody id="gapup"><tr><td colspan="7" class="empty">no pre-open prices yet</td></tr></tbody>
+  </table>
+  <div class="cap">Gapped DOWN from yesterday&rsquo;s close &mdash; top 20</div>
+  <table>
+    <thead><tr>
+      <th>Stock</th><th>Grade</th><th class="num">Prev close</th>
+      <th class="num">Open</th><th class="num">Gap</th><th class="num">Volume</th>
+      <th>Why it gapped</th>
+    </tr></thead>
+    <tbody id="gapdn"><tr><td colspan="7" class="empty">no pre-open prices yet</td></tr></tbody>
+  </table>
+</div>
+
+<!--
+The key is closed_positions, not trades_today. I nearly built this tab
+against a name I had guessed, which would have shown him an empty POST
+tab all day and looked like a dead bot. Checked first this time.
+
+Every column below is a field the state ALREADY publishes -- entry and
+exit price, both times, the reason for each end, qty, gross pnl,
+charges, net. Nothing here is computed on the page.
+-->
+<div id="post-pane" style="display:none">
+  <div class="cap">What the bot did today</div>
+  <table>
+    <thead><tr>
+      <th>Stock</th><th class="num">Qty</th>
+      <th class="num">In</th><th class="num">Entry</th>
+      <th class="num">Out</th><th class="num">Exit</th>
+      <th class="num">Net</th><th>Why in, why out</th>
+    </tr></thead>
+    <tbody id="done"><tr><td colspan="8" class="empty">no trades closed today</td></tr></tbody>
+  </table>
+  <div class="cap">The day, in one line</div>
+  <div id="daysum" style="background:var(--card);border:1px solid var(--hair);
+       border-radius:12px;padding:12px 14px;font-size:14px;">nothing traded yet</div>
+</div>
+
+<!--
+    "WATCHLIST MOVE THIS CHIP TO TOP ABOVE FNO CHIP IN SIDE BAR"
+                                -- operator, 4 August 2026
+
+---- IT WAS DELETED WITH THE PAGE IT LIVED ON. 14 August 2026. ----
+
+Collapsing four dashboards into one removed dashboard/static/
+screen.html, and this panel went with it. Everything BEHIND it
+survived untouched -- core/watchlist_store.py, the POST route in
+dashboard/server.py, and s.watchlist in every snapshot -- so the bot
+went on maintaining a watchlist he could no longer see or edit. Four
+tests kept passing against the deleted file until the suite was run
+end to end.
+
+It is on /board and not /full because there are BUY buttons on it:
+this is a place he acts from, not a diagnostic.
+
+THE SEARCH BOX IS STATIC MARKUP, NOT REDRAWN. The old page rebuilt
+the input on every frame and needed focus/caret bookkeeping to stop
+eating what he typed. Here draw() only ever fills #wlgroups, so the
+field below is never replaced and there is nothing to restore.
+
+ONE ACTION, NOT TWO. The old panel had SELL beside BUY (data-act=
+"short"). This bot is long-only -- "only long positions" -- and
+nothing else on /board can short. Restoring the panel is not the
+moment to add an action the board has never had.
+-->
+<div id="watch-pane" style="display:none">
+  <div class="cap">Add a stock to watch</div>
+  <div class="wlsearch">
+    <input id="wlAdd" placeholder="Search a stock to watch"
+           autocomplete="off" spellcheck="false">
+    <button class="wladd" data-wl="add">Add</button>
+  </div>
+  <div id="wlHits" class="wlhits"></div>
+  <div id="wlgroups"><div class="empty">waiting for the first snapshot&hellip;</div></div>
+</div>
+
+<!--
+    "this line is not worth at top place. move this to bottom of the
+     page as it wont give money . we want to earn money so the main
+     centre page belongs to money generating table with stocks worth
+     having a priority than others"
+                                -- operator, 9 August 2026
+
+Feed health is housekeeping. It tells him which subscriptions are dead,
+which matters -- but it never made a rupee, and it was sitting above the
+only thing on the page that can. Bottom.
+-->
+<div class="note" id="feednote" style="display:none;margin:14px 0 0;"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const n2 = v => (v === null || v === undefined || v === "") ? "—"
+                : Number(v).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2});
+const vol = v => {
+  if (v === null || v === undefined || v === "") return "—";
+  v = Number(v);
+  if (v >= 1e7) return (v/1e7).toFixed(2) + " Cr";
+  if (v >= 1e5) return (v/1e5).toFixed(2) + " L";
+  return Math.round(v).toLocaleString("en-IN");
+};
+const chip = (text, bg, fg) =>
+  `<span class="chip" style="background:var(${bg});color:var(${fg})">${text}</span>`;
+
+const GRADE = {EXCELLENT:["--exc-bg","--exc-fg"], GREAT:["--exc-bg","--exc-fg"],
+               GOOD:["--good-bg","--good-fg"]};
+const VERDICT = {READY:["--ok-bg","--ok-fg"], WATCH:["--warn-bg","--warn-fg"],
+                 BLOCKED:["--stop-bg","--stop-fg"], HELD:["--exc-bg","--exc-fg"]};
+
+// THE GRADE, WHEREVER IT LIVES. 11 August 2026.
+// The row carries it when the ranker built the row. When the row came
+// from anywhere else the bot still knows -- ranked.graded is the map of
+// every graded stock this session. KOLTEPATIL drew as "--" at 12:03
+// while sitting in that map. Never again from this screen.
+let GRADED = {}, REASONS = {};
+let BOT_ON = false;
+
+// ---- ONE FUNCTION PAINTS THE STATE. 11 August 2026. ----
+//
+//     "if user clicks on ON then show BOT TRADING & if user clicks on
+//      OFF then show BOT OBSERVING."
+//
+// The lit button and the words were set in two different places, so
+// they could disagree -- which is how he ended up seeing BOT TRADING
+// next to a bot that was observing. One function, both things, always
+// together.
+//
+// It is called from TWO places on purpose: the moment he clicks, so
+// the screen answers instantly, and again when the snapshot confirms.
+// A control that waits three seconds to admit it heard you is a
+// control you press twice.
+function paintState(on){
+  BOT_ON = on === true;
+  const bOn = $("btn-on"), bOff = $("btn-off"), lab = $("switchlabel");
+  bOn.className  = "segb" + (BOT_ON ? " live-on"  : "");
+  bOff.className = "segb" + (BOT_ON ? "" : " live-off");
+  bOn.title  = "Switch ON -- the bot may open new positions by itself";
+  bOff.title = "Switch OFF -- no new entries, open positions keep their stops";
+  lab.textContent = BOT_ON ? "BOT TRADING" : "BOT OBSERVING";
+  lab.style.color = BOT_ON ? "#085041" : "#633806";
+}
+let sw_busy = false;
+// A dead bot and a working one look identical on a static page. This is
+// how the switch knows to say so. 11 August: his board sat frozen at
+// 16:43 with the label still reading "Bot TRADING" because main.py had
+// stopped, and nothing on the screen said a word about it.
+let STALE = false;
+let LAST_OK = Date.now();
+
+// ---- THE OPERATOR TOKEN. Injected by dashboard/server.py, same as
+// index.html has done since July. Empty string = view-only link, and
+// then no BUY control is drawn at all rather than drawn and refused.
+window.__OPERATOR_TOKEN__ = "";
+const IS_OPERATOR = window.__OPERATOR_TOKEN__ !== "";
+
+// What he has typed, kept OUT of the DOM so a refresh cannot wipe it.
+// This is the same fault that cost the qty box on the old page.
+const QTY = {};
+
+// ---- ACTIVITY. earningspulse.ai/markets/movers, 11 August 2026. ----
+// Volume traded SINCE THE LAST REFRESH, weighted by whether the price
+// is still going the way of the move:
+//     rising  x1.5  -- buyers are still there
+//     fading  x0.3  -- profit taking, the move is dying
+// Same volume delta, direction decides the rank. Held per symbol
+// across refreshes; the first refresh has no delta and scores 0, which
+// is correct -- one snapshot cannot tell you about flow.
+const LAST = {};
+function activityOf(r){
+  const sym = String(r.symbol || "");
+  const vol = Number(r.volume || 0), ltp = Number(r.ltp || 0);
+  const was = LAST[sym];
+  LAST[sym] = {vol: vol, ltp: ltp};
+  if (!was) return 0;
+  const dv = Math.max(vol - was.vol, 0);
+  const up = Number(r.change_pct || 0) >= 0;
+  const still = up ? (ltp >= was.ltp) : (ltp <= was.ltp);
+  r.turnover_window = dv * ltp;
+  r.turnover_day = vol * ltp;
+  return dv * ltp * (still ? 1.5 : 0.3);
+}
+
+// ">=4% or it is not a mover" -- their threshold, and the reason their
+// list is 26 names instead of 50 pieces of noise.
+const MOVER_PCT = 4.0;
+let SORT = "activity";
+function gradeOf(r){
+  if (!r || !r.symbol) return null;
+  const own = r.grade && String(r.grade).toUpperCase();
+  if (own && GRADE[own]) return own;
+  const known = GRADED[String(r.symbol).toUpperCase()];
+  return (known && GRADE[String(known).toUpperCase()])
+    ? String(known).toUpperCase() : null;
+}
+
+function verdictOf(r){
+  if (r.blocked_reason || (r.blocking && r.blocking.length)) return "BLOCKED";
+  if (r.held) return "HELD";
+  if (r.state === "fading") return "WATCH";
+  if (gradeOf(r)) return "READY";
+  return "WATCH";
+}
+
+// ---- THE REASON AS CHIPS, NOT A PARAGRAPH. 11 August 2026. ----
+//
+//     "why is it moving cloumn is crude . didn't i ask you about
+//      creating the reason as chips ?"
+//
+// He did, on 8 August, and again today. I kept joining everything into
+// one grey sentence with middots -- 140 characters he has to READ at
+// the exact moment he is deciding whether to click BUY.
+//
+// earningspulse.ai does it as a source tag and a short phrase.
+// So: a SOURCE chip, then one fact per chip. Scannable in a glance,
+// which is the whole point of a chip.
+const CHIPC = {
+  earn:  ["--exc-bg", "--exc-fg"],
+  news:  ["--ok-bg", "--ok-fg"],
+  tape:  ["--warn-bg", "--warn-fg"],
+  stop:  ["--stop-bg", "--stop-fg"],
+  flat:  ["--flat-bg", "--flat-fg"],
+};
+const cut = (t, n) => {
+  // Belt and braces for the dict-repr that reached his screen at 16:10.
+  // Fixed at source in dashboard/state.py; this stops the NEXT one.
+  if (t && typeof t === "object") t = t.text || t.headline || t.why || "";
+  t = String(t || "").replace(/\s+/g, " ").trim();
+  if (t.startsWith("{'") || t.startsWith('{"')){
+    const m = t.match(/['"]text['"]\s*:\s*['"]([^'"]+)/);
+    t = m ? m[1] : t;
+  }
+  return t.length > n ? t.slice(0, n - 1) + "\u2026" : t;
+};
+
+function reasonChips(r){
+  const out = [];
+  const add = (text, kind, full) => out.push(
+    `<span class="chip rc" style="background:var(${CHIPC[kind][0]});
+       color:var(${CHIPC[kind][1]})" title="${(full || text).replace(/"/g,"&quot;")}"
+     >${text}</span>`);
+
+  // A refusal outranks everything -- it is why he cannot act.
+  const stop = r.blocked_reason || (r.blocking && r.blocking[0]);
+  if (stop){ add(cut(stop, 46), "stop", stop); }
+
+  const mech = r.mechanism || REASONS[String(r.symbol || "").toUpperCase()];
+  const grade = gradeOf(r);
+  if (!stop || mech){
+    if (grade){
+      add("Earnings\u00b7" + grade.charAt(0) + grade.slice(1).toLowerCase()
+          + " results", "earn", mech || grade);
+    } else if (mech && /unexplain|no published reason/i.test(mech)){
+      add("Tape\u00b7no published reason", "tape", mech);
+    } else if (mech){
+      const body = String(mech).split(/\s--\s/).pop();
+      add("News\u00b7" + cut(body, 40), "news", mech);
+    }
+  }
+
+  if (r.volume_x) add(Number(r.volume_x).toFixed(1) + "x vol", "flat",
+                      Number(r.volume_x).toFixed(1) + "x its own average volume");
+
+  // ---- DELIVERY, BACK ON A SCREEN HE OPENS. 13 Aug 2026. ----
+  //
+  //     "DELIVER % - YES"          -- operator, 8 August 2026
+  //
+  // core/delivery.py has been computing this since, and 57,674 rows
+  // are current -- but it was drawn ONLY on app.html, a page he had
+  // moved away from, and when app.html was deleted on 13 August the
+  // reading stopped being visible anywhere at all. Measured, stored,
+  // fresh, and on no screen: the exact fault this bot keeps repeating.
+  //
+  // A chip, not a column: this board is one table by design and a
+  // reading that only exists for stocks with ~10 sessions of history
+  // would leave most rows with an empty cell. Silent when it has
+  // nothing to say -- delivery.reading() returns None until the run
+  // means something, which is the honest answer.
+  if (r.delivery && r.delivery.pct !== null && r.delivery.pct !== undefined) {
+    const d = r.delivery;
+    const heavy = d.avg && Number(d.pct) > Number(d.avg);
+    add(Number(d.pct).toFixed(0) + "% deliv", heavy ? "earn" : "flat",
+        d.text || (Number(d.pct).toFixed(0) + "% delivered"
+                   + (d.avg ? ", usual " + Number(d.avg).toFixed(0) + "%" : "")));
+  }
+
+  // ---- HOW FAR IT HAD ALREADY RUN. 14 August 2026. ----
+  //
+  // Same fault as delivery above, found the same way: core/runup.py
+  // computes it, dashboard/state.py attaches it to EVERY ranked row
+  // (row["runup"], state.py:2720) -- and it was drawn only on
+  // app.html. That page was deleted on 13 August and the reading
+  // stopped being visible anywhere. Its own test still asserted the
+  // deleted file rendered it, so nothing said so.
+  //
+  // It REPORTS, it never vetoes -- SPENT does not block an entry and
+  // tests/test_the_runup_reaches_the_screen.py holds that line. It
+  // answers "has this move already happened?" at the moment he is
+  // deciding to buy, which is exactly when it is worth knowing.
+  //
+  // Silent when runup.reading() returns None: no result in the window
+  // or too little history. "Cannot say" must not print as a judgement.
+  if (r.runup && r.runup.reading) {
+    add("ran " + (r.runup.pct === null || r.runup.pct === undefined
+                  ? r.runup.reading
+                  : (Number(r.runup.pct) >= 0 ? "+" : "")
+                    + Number(r.runup.pct).toFixed(1) + "%"),
+        r.runup.reading === "SPENT" ? "tape" : "flat",
+        r.runup.text || r.runup.reading);
+  }
+
+  if (r.headroom_pct !== null && r.headroom_pct !== undefined
+      && Number(r.headroom_pct) < 3)
+    add(Number(r.headroom_pct).toFixed(1) + "% to UC", "tape",
+        "only " + Number(r.headroom_pct).toFixed(1) + "% left to the upper circuit");
+  if (r.sector && r.excess_pct)
+    add((Number(r.excess_pct) >= 0 ? "+" : "") + Number(r.excess_pct).toFixed(1)
+        + "% vs " + cut(r.sector.toLowerCase(), 14), "flat",
+        "beating " + r.sector.toLowerCase() + " by "
+        + Number(r.excess_pct).toFixed(1) + "%");
+  if (r.state === "fading") add("fading", "stop", "faded from the high -- the move is over");
+
+  return out.length ? out.join(" ") : `<span class="chip rc"
+    style="background:var(--flat-bg);color:var(--flat-fg)">no reason yet</span>`;
+}
+
+// Turnover in rupees, the way an Indian desk reads it.
+const cr = v => {
+  if (v === null || v === undefined || !isFinite(v)) return "\u2014";
+  v = Number(v);
+  if (v >= 1e7) return "\u20b9" + (v/1e7).toFixed(0) + "cr";
+  if (v >= 1e5) return "\u20b9" + (v/1e5).toFixed(1) + "L";
+  return "\u20b9" + Math.round(v).toLocaleString("en-IN");
+};
+
+// L / M / S from the money actually traded. Market cap is not in this
+// payload and I will not invent it.
+function capOf(r){
+  const t = Number(r.turnover_day || 0);
+  if (t >= 5e9) return "L";
+  if (t >= 5e8) return "M";
+  return "S";
+}
+
+function row(r){
+  const g = gradeOf(r) || "";
+  const gc = GRADE[g] ? chip(g, GRADE[g][0], GRADE[g][1])
+                      : chip("—", "--flat-bg", "--flat-fg");
+  const v = verdictOf(r);
+  const vc = chip(v, VERDICT[v][0], VERDICT[v][1]);
+  const ch = Number(r.change_pct || 0);
+  const sym = String(r.symbol || "");
+  // ---- BUY AND QTY. 11 August 2026. ----
+  //     "where is BUY button & QTY ?"
+  // /board was read-only. He trades manually -- a money screen with no
+  // BUY on it is a screen he cannot use. Same endpoint the working page
+  // has used since July: POST /api/buy/{symbol}?qty=N with the operator
+  // token in the header. Nothing new was invented here.
+  const buy = IS_OPERATOR
+    ? `<input class="qty" data-qtyfor="${sym}" inputmode="numeric"
+              placeholder="qty" value="${QTY[sym] || ""}">
+       <button class="buy" data-buy="${sym}">BUY</button>`
+    : `<span style="font-size:12px;color:var(--muted)">view only</span>`;
+
+  // ---- THE NUMBER HE IS ABOUT TO RISK. 13 August 2026. ----
+  //
+  // core/position_plan.py sizes every cleared row -- qty from the STOP
+  // so every loss is the same size, "lose small" as an arithmetic rule
+  // rather than a hope. core/auto_entry.py trades off it and the
+  // preflight prints it ("ranked TESTSTK, qty 8, stop 99.0, risk
+  // Rs 40"). It was drawn only on screen.html, a page he had left, and
+  // when four dashboards became two on 13 August it stopped being
+  // visible anywhere at all.
+  //
+  // So: beside the BUY button, because that is the moment it answers
+  // a question -- how many, where is the stop, what does this cost me
+  // if I am wrong.
+  //
+  // Refused rows carry plan: null (state.py only sizes cleared ones),
+  // and a plan that says ok:false carries WHY. Both are shown: "no
+  // plan" beside a BUY button would be worse than the reason.
+  const p = r.plan;
+  let planline = "";
+  if (p && p.ok && p.qty) {
+    planline = `<div class="planline" title="${
+        String(p.why || "sized so a stop-out costs the fixed risk")
+          .replace(/"/g, "&quot;")}">${p.qty} sh &middot; stop ${
+        n2(p.stop)}${p.target ? " &middot; target " + n2(p.target) : ""}${
+        p.risk_rs ? " &middot; risk " + Math.round(p.risk_rs) : ""}</div>`;
+  } else if (p && p.why) {
+    planline = `<div class="planline muted">${cut(String(p.why), 44)}</div>`;
+  }
+  // "[qty] ; BUY button next to stock symbol name" -- 11 August 2026.
+  // It was at the far right, eleven columns from the name he is reading.
+  return `<tr data-row="${sym}">
+    <td class="sym">${sym}
+      <span class="chip capb">${capOf(r)}</span>
+      <div class="act">${buy}</div>${planline}</td>
+    <td>${gc}</td>
+    <td class="num">${n2(r.prev_close)}</td><td class="num">${n2(r.open)}</td>
+    <td class="num">${n2(r.high)}</td><td class="num">${n2(r.low)}</td>
+    <td class="num" style="font-weight:500">${n2(r.ltp)}</td>
+    <td class="num ${ch >= 0 ? "up" : "dn"}">${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%</td>
+    <td class="num">${cr(r.turnover_window || r.turnover_day)}</td>
+    <td class="why">${reasonChips(r)}</td><td>${vc}</td></tr>`;
+}
+
+function draw(s){
+  // ---- THE SWITCH, IN HIS WORDS. 11 August 2026. ----
+  //     "ON = Bot trading / OFF = Bot Observing. no trades by bot"
+  // It was a label. The endpoint has existed since 5 August; this page
+  // simply never called it, so the only way to arm the bot from /board
+  // was to go back to the old screen.
+  // ---- THE KEY THE STATE ACTUALLY PUBLISHES. 11 August 2026. ----
+  //
+  //     "what about OFF ? who will give me the OFF option?"
+  //
+  // This read s.bot_enabled. dashboard/state.py publishes
+  // bot_trading: {on: ...} and has since 5 August -- there is no
+  // bot_enabled key anywhere in the payload. So the toggle rendered
+  // OFF whether the bot was armed or not, and every click sent "on"
+  // again. He armed it, the terminal said BOT TRADING IS ON, and the
+  // screen still showed OFF with no way back. There was never an OFF
+  // path.
+  //
+  // Third key-name mismatch today: day_open/open in the entry rules,
+  // refusals {reason:count} vs {symbol:reason}, and now this. Same
+  // failure every time -- I wrote against a shape I assumed instead of
+  // the shape the other side publishes.
+  const bt = s.bot_trading || {};
+  const on = bt.on === true;
+  BOT_ON = on;
+  const bOn = $("btn-on"), bOff = $("btn-off");
+  paintState(on);
+
+
+  // ---- WHY THE CLICK DID NOTHING, ON THE PAGE. 11 August 2026. ----
+  //
+  //     "it is not working at all"
+  //     "now only ON ."
+  //
+  // Every failure of this switch has been INVISIBLE. A view-only link
+  // flashes a toast for four seconds; a dead server does nothing at
+  // all; a stale page just sits there. Each time he had to describe
+  // the symptom to me and I had to guess. So the two things that stop
+  // this switch working are now printed beside it, permanently, in
+  // words -- not a toast, not a console line.
+  const why = $("switchwhy");
+  if (!IS_OPERATOR){
+    why.textContent = "read-only link \u2014 add ?token=... to the URL to use this switch";
+    why.style.display = "";
+    for (const b of [bOn, bOff]){ b.style.opacity = "0.5"; b.style.cursor = "not-allowed"; }
+  } else if (STALE){
+    why.textContent = "the bot is not answering \u2014 is main.py still running?";
+    why.style.display = "";
+    for (const b of [bOn, bOff]){ b.style.opacity = "0.5"; b.style.cursor = "not-allowed"; }
+  } else {
+    why.style.display = "none";
+    for (const b of [bOn, bOff]){ b.style.opacity = "1"; b.style.cursor = "pointer"; }
+  }
+  // NOTHING sets an inline style on the switch. Two leftover lines
+  // from the old text chip did exactly that on 11 August, and an
+  // inline style beats every rule in the stylesheet -- so the class
+  // flipped to "tgl on", the toggle looked dead, and the CSS was
+  // blameless. Colour lives in .tgl / .tgl.on and nowhere else.
+
+  const held = (s.open_positions || []).length;
+  $("scope").textContent = `watching ${s.universe_size ?? "—"} EQ · book ${held}`;
+
+  // ---- THE STOP THAT SURVIVES THIS PROCESS. 12 August 2026. ----
+  //
+  // Silent when there is nothing to say: no positions, stops on, all
+  // covered -> the chip is hidden. It appears only when it means
+  // something, so its presence IS the warning. A permanent green badge
+  // becomes furniture within a day and stops being read.
+  //
+  // `unprotected` is computed in dashboard/state.py by asking which
+  // held symbols have no resting order -- not assumed from the count.
+  const bs = s.broker_stop || {};
+  const stopEl = $("stops");
+  if (stopEl) {
+    const bare = (bs.unprotected || []).length;
+    if (!bs.available) {
+      stopEl.style.display = "none";
+    } else if (bare) {
+      stopEl.style.display = "";
+      stopEl.style.background = "var(--dn-bg, #fdecec)";
+      stopEl.style.color = "var(--dn-fg, #b00020)";
+      stopEl.textContent = `${bare} POSITION${bare > 1 ? "S" : ""} `
+        + `WITH NO STOP AT DHAN: ${(bs.unprotected || []).join(", ")}`;
+    } else if (!bs.enabled && held) {
+      stopEl.style.display = "";
+      stopEl.style.background = "var(--warn-bg)";
+      stopEl.style.color = "var(--warn-fg)";
+      stopEl.textContent = "broker stop OFF — stops live in this "
+        + "process only";
+    } else if (bs.enabled && bs.resting) {
+      stopEl.style.display = "";
+      stopEl.style.background = "transparent";
+      stopEl.style.color = "var(--muted)";
+      stopEl.textContent = `${bs.resting} stop${bs.resting > 1 ? "s" : ""} `
+        + `resting at Dhan`;
+    } else {
+      stopEl.style.display = "none";
+    }
+  }
+  // ---- FROZEN PRICES MUST LOOK FROZEN. 11 August 2026. ----
+  // After the close the trading loop stops and the snapshot the server
+  // caches never changes again. The clock kept printing a time, so a
+  // dead board looked exactly like a live one. It now says so.
+  // The SWITCH is unaffected -- the server recomputes that live on
+  // every request.
+  const built = s.as_of || s.updated_at || "";
+  const servedAt = s.served_at || "";
+  let frozen = false;
+  if (built && servedAt){
+    const secs = t => { const p = String(t).split(":").map(Number);
+      return (p[0]||0)*3600 + (p[1]||0)*60 + (p[2]||0); };
+    frozen = (secs(servedAt) - secs(built)) > 20;
+  }
+  // ---- SAY WHICH SESSION THIS IS. 12 August 2026. ----
+  //
+  //     "why dashboard is still showing empty ? it has todays complete
+  //      data right? why it cant display them all stocks with their
+  //      reasons"
+  //
+  // It does now. With no ticks (market shut, or a restart after the
+  // close) dashboard/state.py falls back to the stored daily close and
+  // stamps the panel `at_close`. That fills a table which used to be
+  // blank on top of a complete database -- but a closing price shown
+  // as a live one is worse than no table at all, so it is labelled
+  // here, with its date, in the one place he already looks for the
+  // freshness of the screen.
+  const gl0 = s.gainers_losers || {};
+  $("clock").textContent = gl0.at_close
+    ? `${built} \u2014 showing the ${gl0.as_of || "last"} CLOSE (not live)`
+    : (frozen
+        ? `${built} \u2014 FROZEN (market closed, prices are not updating)`
+        : built);
+  $("clock").style.color = (frozen || gl0.at_close)
+    ? "var(--warn-fg)" : "var(--muted)";
+
+  // ---- A KEY THAT WAS NEVER PUBLISHED. 11 August 2026. ----
+  // This read s.feed_silent. dashboard/state.py has never published it,
+  // so the "N subscriptions delivered nothing today" line has never
+  // appeared once -- the same fault as the switch reading bot_enabled,
+  // just cosmetic instead of costly. Removed rather than left pretending.
+  // If he wants that line back, the state has to publish the list first.
+  $("feednote").style.display = "none";
+
+  // ---- THE WHOLE FIELD, NOT JUST THE SURVIVORS. 11 Aug 2026. ----
+  // "dashboard is not showing live ... blank at live tab."
+  // `rows` is what cleared ten gates -- nought or one on a normal
+  // morning. `refused_rows` is everything the gates turned away, with
+  // the reason. Both belong on this table; only `rows` is ever fed to
+  // anything that trades. See build_ranked() in dashboard/state.py.
+  // ==========================================================
+  // TODAY'S TOP GAINERS, AND WHY. That is the whole table.
+  // 11 August 2026, 15:00.
+  // ==========================================================
+  //
+  //     "are we both building rockets to move mars or any other
+  //      planets? thats a simple dashboard with whats the top gaining
+  //      stocks with their underlying reason which is even present
+  //      within bot through the telegram pro channels. why that hard
+  //      are you hitting ? for this simple mechansim"
+  //
+  // He is right and this is the correction.
+  //
+  // This table spent the day being fed by ranked.rows -- the survivors
+  // of ten gates in core/ranker.py plus an entry-rules pass. That is
+  // the bot's BUYING decision. It has no business standing between him
+  // and his own screen: when the funnel emptied, so did the table, and
+  // he lost the whole day's tape because one key was named wrong three
+  // modules away.
+  //
+  // So the source is now the tape -- today's gainers, which is what he
+  // asked to see -- and everything the bot knows is JOINED onto it:
+  //
+  //     grade    <- ranked.graded         (the PRO channel chips)
+  //     reason   <- the row's own `why` / mechanism, or the bot's
+  //                 refusal if it refused this stock
+  //     verdict  <- held / cleared / refused / watching
+  //
+  // A stock the bot has never heard of still appears, with its price
+  // and volume and an honest blank reason. Nothing here reaches
+  // auto_entry -- that still reads ranked.rows and only ranked.rows.
+  GRADED = (s.ranked && s.ranked.graded) || {};
+  REASONS = (s.ranked && s.ranked.reasons) || {};
+  const cleared = (s.ranked && s.ranked.rows) || [];
+  const refused = (s.ranked && s.ranked.refused_rows) || [];
+  const byName = {};
+  for (const r of cleared) byName[r.symbol] = {row: r, verdict: "READY"};
+  for (const r of refused) if (!byName[r.symbol])
+    byName[r.symbol] = {row: r, verdict: "BLOCKED"};
+
+  const gl = s.gainers_losers || {};
+  const inBook = {};
+  for (const p of (s.open_positions || [])) if (p && p.symbol) inBook[p.symbol] = 1;
+
+  // Long only. Gainers, plus anything he is actually holding.
+  const seen = {};
+  const ranked = [];
+  for (const r of [].concat(gl.gainers || [], cleared, refused)){
+    if (!r || !r.symbol || seen[r.symbol]) continue;
+    if (!inBook[r.symbol] && Number(r.change_pct || 0) < 0) continue;
+    seen[r.symbol] = 1;
+    const known = byName[r.symbol];
+    ranked.push(Object.assign({}, known ? known.row : {}, r, {
+      held: !!inBook[r.symbol],
+      blocking: known && known.verdict === "BLOCKED"
+        ? (known.row.blocking || []) : undefined,
+      mechanism: r.mechanism || r.why
+        || (known && (known.row.mechanism || known.row.why)) || null,
+      volume_x: r.volume_x || r.volume_ratio
+        || (known && (known.row.volume_x || known.row.volume_ratio)) || null,
+    }));
+  }
+
+  // Score every row for flow BEFORE filtering -- activityOf also
+  // records this refresh's volume, and a symbol skipped today would
+  // otherwise show a false jump the moment it qualifies.
+  for (const r of ranked) r.activity = activityOf(r);
+
+  // A mover is >=4%. A held position is always a mover to him.
+  const movers = ranked.filter(r =>
+    r.held || Math.abs(Number(r.change_pct || 0)) >= MOVER_PCT);
+  const hidden = ranked.length - movers.length;
+
+  const by = {
+    activity: (a, b) => (b.activity || 0) - (a.activity || 0),
+    change:   (a, b) => Number(b.change_pct || 0) - Number(a.change_pct || 0),
+    turnover: (a, b) => (b.turnover_day || 0) - (a.turnover_day || 0),
+  }[SORT] || ((a, b) => (b.activity || 0) - (a.activity || 0));
+
+  // His money first whatever the sort -- a held position sliding is the
+  // one row he must never have to scroll for.
+  const all = movers.sort((a, b) => {
+    const ha = a.held ? 0 : 1, hb = b.held ? 0 : 1;
+    if (ha !== hb) return ha - hb;
+    return by(a, b);
+  });
+
+  const up = (gl.gainers || []).filter(r =>
+    Number(r.change_pct || 0) >= MOVER_PCT).length;
+  const down = (gl.losers || []).filter(r =>
+    Number(r.change_pct || 0) <= -MOVER_PCT).length;
+  $("counts").innerHTML =
+    `<span class="up">${up}&uarr;</span> &nbsp;<span class="dn">${down}&darr;</span>` +
+    `<span style="color:var(--muted)"> / ${s.universe_size ?? "?"}</span>`;
+  const shown = all.slice(0, SHOW);
+  const drawn = shown, note = "";
+
+  // ---- DO NOT REBUILD THE TABLE UNDER HIS FINGERS. 11 Aug 2026. ----
+  //
+  //     "[qty] is not working"
+  //
+  // It worked. It was being DESTROYED. This tbody is rebuilt from
+  // scratch every 3 seconds, so the input he was typing into was
+  // removed from the document mid-keystroke -- focus gone, caret gone,
+  // and any digit typed between two refreshes lost.
+  //
+  // Exactly the fault that cost the qty box on the old page, and I
+  // rebuilt it here without noticing. So: while a qty box has focus,
+  // the rows are left alone. Prices pause for the few seconds he is
+  // typing a quantity, which is the correct trade -- he is about to
+  // spend money, and a number that changes under the cursor is worse
+  // than one that is three seconds old.
+  const typing = document.activeElement
+    && document.activeElement.classList
+    && document.activeElement.classList.contains("qty");
+  if (typing){ drawPre(s); drawPost(s); drawWatch(s); return; }
+
+  $("body").innerHTML = drawn.length
+    // He asked for this line gone, 11 August. The count of what did
+    // NOT qualify is already in the header (40 up / 25 down / 1315) --
+    // printing it again above the first row was a sentence sitting in
+    // the seat the best stock of the day should have.
+    ? drawn.map(row).join("")
+      + (all.length > SHOW
+         ? `<tr><td colspan="11" class="empty">+ ${all.length - SHOW} more the bot is
+            still watching &mdash; only the top ${SHOW} are drawn</td></tr>` : "")
+    : `<tr><td colspan="11" class="empty">${(s.ranked && s.ranked.note)
+        || "no prices have arrived yet"} &mdash; watching
+        ${s.universe_size ?? "?"}, ${((s.ranked && s.ranked.rows) || []).length}
+        cleared, ${((s.ranked && s.ranked.refused_rows) || []).length} refused.
+        If &quot;refused&quot; is 0 and the market is open, this build predates
+        the fix &mdash; restart the bot.</td></tr>`;
+
+  drawPre(s);
+  drawPost(s);
+  drawWatch(s);
+}
+
+// "20 stocks is good number to see. less is more."
+const SHOW = 20;
+
+// ---- PRE: the overnight gap, both directions, apart ----
+// Gap is measured from YESTERDAY'S CLOSE, not from today's open --
+// that is the number that tells him what happened while the market
+// was shut, and it is the same one core/headroom.py spends against
+// the circuit.
+function gapOf(r){
+  const pc = Number(r.prev_close || 0), op = Number(r.open || r.ltp || 0);
+  if (!pc || !op) return null;
+  return (op - pc) / pc * 100;
+}
+
+function gapRow(r, g){
+  const gr = gradeOf(r) || "";
+  const gc = GRADE[gr] ? chip(gr, GRADE[gr][0], GRADE[gr][1])
+                       : chip("—", "--flat-bg", "--flat-fg");
+  return `<tr>
+    <td class="sym">${r.symbol}</td><td>${gc}</td>
+    <td class="num">${n2(r.prev_close)}</td><td class="num">${n2(r.open || r.ltp)}</td>
+    <td class="num ${g >= 0 ? "up" : "dn"}">${g >= 0 ? "+" : ""}${g.toFixed(2)}%</td>
+    <td class="num">${vol(r.volume)}</td>
+    <td class="why">${reasonChips(r)}</td></tr>`;
+}
+
+function drawPre(s){
+  const gl = s.gainers_losers || {};
+  const pool = [].concat(gl.gainers || [], gl.losers || [],
+                         (s.ranked && s.ranked.rows) || []);
+  const seen = {}, withGap = [];
+  for (const r of pool){
+    if (!r || seen[r.symbol]) continue;
+    const g = gapOf(r);
+    if (g === null) continue;
+    seen[r.symbol] = 1;
+    withGap.push([r, g]);
+  }
+  const up = withGap.filter(x => x[1] > 0).sort((a,b) => b[1]-a[1]).slice(0, SHOW);
+  const dn = withGap.filter(x => x[1] < 0).sort((a,b) => a[1]-b[1]).slice(0, SHOW);
+  $("gapup").innerHTML = up.length ? up.map(x => gapRow(x[0], x[1])).join("")
+    : `<tr><td colspan="7" class="empty">nothing gapped up</td></tr>`;
+  $("gapdn").innerHTML = dn.length ? dn.map(x => gapRow(x[0], x[1])).join("")
+    : `<tr><td colspan="7" class="empty">nothing gapped down</td></tr>`;
+}
+
+const hhmm = t => {
+  if (!t) return "—";
+  const s = String(t);
+  const m = s.match(/(\d{2}):(\d{2})/);
+  return m ? m[0] : s.slice(0, 5);
+};
+const rs = v => (v === null || v === undefined) ? "—"
+  : (Number(v) >= 0 ? "+" : "") + Math.round(Number(v)).toLocaleString("en-IN");
+
+function drawPost(s){
+  // closed_positions -- the key the state actually publishes. NET, not
+  // gross: brokerage and STT are already subtracted, so the number on
+  // the screen is the number that reached the account.
+  const done = s.closed_positions || [];
+  $("done").innerHTML = done.length ? done.map(t => {
+    const net = (t.net_pnl !== null && t.net_pnl !== undefined) ? t.net_pnl : t.pnl;
+    const why = [t.entry_reason, t.exit_reason].filter(Boolean).join(" → ") || "—";
+    // ---- WHOSE TRADE WAS THIS. 13 August 2026. ----
+    //
+    // core/closed_book.py has stamped every row BOT or DHAN since it
+    // was written, and only screen.html ever drew it -- a page he had
+    // left. When four dashboards became two on 13 August, the marker
+    // stopped being visible anywhere.
+    //
+    // It is not a detail. data/trade_memory.db, 134 trades:
+    //
+    //     STRUCTURAL_LONG_BREAKOUT   n=62   +Rs  2,982
+    //     ADOPTED_FROM_BROKER        n=19   -Rs 69,766
+    //     MANUAL_BUY_DASHBOARD       n=52   -Rs 15,786
+    //
+    // Read as one number that is a bot losing Rs 81,530. Read with
+    // the marker it is a bot roughly flat, and a book carrying
+    // positions it never chose. Those call for opposite decisions.
+    const mine = String(t.origin || "BOT").toUpperCase() !== "DHAN";
+    const whose = mine
+      ? ""
+      : `<span class="chip" style="background:var(--warn-bg);
+           color:var(--warn-fg);font-size:10px;margin-left:6px;"
+           title="adopted from the broker -- the bot did not choose this
+ entry, only managed the exit">adopted</span>`;
+    return `<tr><td class="sym">${t.symbol}${whose}</td>
+      <td class="num">${t.qty ?? "—"}</td>
+      <td class="num">${hhmm(t.entry_time)}</td><td class="num">${n2(t.entry_price)}</td>
+      <td class="num">${hhmm(t.exit_time)}</td><td class="num">${n2(t.exit_price)}</td>
+      <td class="num ${Number(net) >= 0 ? "up" : "dn"}" style="font-weight:500">${rs(net)}</td>
+      <td class="why">${why}</td></tr>`;
+  }).join("") : `<tr><td colspan="8" class="empty">no trades closed today</td></tr>`;
+
+  if (!done.length){ $("daysum").textContent = "nothing traded yet"; return; }
+  let net = 0, won = 0, charges = 0;
+  // Kept apart on purpose -- see the `adopted` chip above. A book
+  // carrying broker positions the bot never chose, summed with the
+  // bot's own entries, blames the wrong thing.
+  let botNet = 0, botN = 0, adoptedNet = 0, adoptedN = 0;
+  for (const t of done){
+    const v = Number((t.net_pnl !== null && t.net_pnl !== undefined) ? t.net_pnl : t.pnl) || 0;
+    net += v; charges += Number(t.charges || 0); if (v > 0) won++;
+    if (String(t.origin || "BOT").toUpperCase() === "DHAN"){
+      adoptedNet += v; adoptedN++;
+    } else { botNet += v; botN++; }
+  }
+  // What it cost to trade is stated separately. Charges quietly eating
+  // a winning day is exactly the kind of thing a summary should not
+  // hide inside one net number.
+  const split = adoptedN
+    ? ` &middot; <span title="entries the bot chose">bot ${botN}: `
+      + `Rs ${rs(botNet)}</span>`
+      + ` &middot; <span style="color:var(--warn-fg)"
+           title="positions adopted from the broker -- the bot managed the exit, it did not choose the entry"
+           >adopted ${adoptedN}: Rs ${rs(adoptedNet)}</span>`
+    : "";
+  $("daysum").innerHTML =
+    `<span style="font-weight:500;color:${net >= 0 ? "#1d9e75" : "#e24b4a"}">Rs ${rs(net)}</span>`
+    + ` &middot; ${done.length} trade${done.length > 1 ? "s" : ""}`
+    + ` &middot; ${won} won, ${done.length - won} lost`
+    + split
+    + ` &middot; Rs ${Math.round(charges).toLocaleString("en-IN")} paid in charges`;
+}
+
+// ---------------------------------------------------------------
+// WATCH -- his own list, and the three the results calendar builds
+// ---------------------------------------------------------------
+//
+// Four groups, and only one of them is his to edit. The other three
+// are recomputed from the results calendar every session, so a remove
+// button on them would offer an edit that the next refresh silently
+// undoes.
+//
+// TIME NOT KNOWN is SHOWN, not hidden. TITAN reports anywhere across
+// a 4.5-hour window; filing it under AFTER CLOSE would invent a
+// certainty the history does not support, and the first time he was
+// caught by it he would stop trusting the other two groups as well.
+const att = v => String(v == null ? "" : v)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+function wlRows(rows, removable){
+  if (!rows || !rows.length)
+    return `<div class="empty">nothing here</div>`;
+  return `<table><thead><tr><th>Stock</th><th>When</th><th>Why</th>
+          <th class="num">Move</th><th></th></tr></thead><tbody>`
+    + rows.map(r => {
+        const sym = String(r.symbol || "");
+        const act = IS_OPERATOR
+          ? `<input class="qty" data-qtyfor="${att(sym)}" inputmode="numeric"
+                    placeholder="qty" value="${att(QTY[sym] || "")}">
+             <button class="buy" data-buy="${att(sym)}">BUY</button>`
+          : `<span style="font-size:12px;color:var(--muted)">view only</span>`;
+        const rm = (removable && IS_OPERATOR)
+          ? ` <button class="chip" data-wl="remove" data-sym="${att(sym)}"
+                 style="background:var(--stop-bg);color:var(--stop-fg);
+                        border:0;cursor:pointer">remove</button>` : "";
+        const mv = (typeof r.change_pct === "number")
+          ? `<span style="color:${r.change_pct >= 0 ? "#1d9e75" : "#e24b4a"}">${
+              r.change_pct >= 0 ? "+" : ""}${r.change_pct.toFixed(2)}%</span>`
+          : "&mdash;";
+        return `<tr><td>${att(sym)}</td><td>${att(r.when || "—")}</td>
+                <td class="why">${att(r.why || "")}</td>
+                <td class="num">${mv}</td>
+                <td style="white-space:nowrap">${act}${rm}</td></tr>`;
+      }).join("")
+    + `</tbody></table>`;
+}
+
+function drawWatch(s){
+  const w = (s && s.watchlist) || {};
+  const group = (title, sub, rows, removable) =>
+    `<div class="wlgrp">${title}<span class="sub">${sub}</span></div>`
+    + wlRows(rows, removable);
+  $("wlgroups").innerHTML =
+      group("REPORTING DURING MARKET", "today — tradeable now", w.during, false)
+    + group("REPORTING AFTER CLOSE", "carries to tomorrow's open", w.after, false)
+    + group("TIME NOT KNOWN", "history too scattered to say", w.unknown, false)
+    + group("YOU ADDED", "stays until you remove it", w.mine, true);
+}
+
+// ---- THE SEARCH. ----
+//     "i need to enter complete name ? just to add a stock name to
+//      watchlist why this complication"     -- operator, 4 August 2026
+//
+// The 954 tradeable names, fetched once. /api/symbols is read-only and
+// returns identity only -- no prices, nothing that could trade.
+let NAMES = null;
+fetch("/api/symbols").then(r => r.json())
+  .then(d => { NAMES = (d && d.symbols) || []; })
+  .catch(() => { NAMES = []; });
+
+function drawHits(){
+  const box = $("wlHits");
+  const q = ($("wlAdd").value || "").trim().toUpperCase();
+  if (q.length < 2 || !NAMES){ box.innerHTML = ""; return; }
+  const starts = [], holds = [];
+  for (let i = 0; i < NAMES.length && starts.length + holds.length < 40; i++){
+    const row = NAMES[i];
+    const sym = String((row && (row.symbol || row.s)) || row || "").toUpperCase();
+    if (!sym) continue;
+    const name = String((row && (row.name || row.company)) || "");
+    if (sym.indexOf(q) === 0) starts.push([sym, name]);
+    else if (sym.indexOf(q) > 0 || name.toUpperCase().indexOf(q) >= 0)
+      holds.push([sym, name]);
+  }
+  // Names that BEGIN with what he typed first -- typing "TCS" must not
+  // bury TCS under something that merely contains it.
+  box.innerHTML = starts.concat(holds).slice(0, 6).map(h =>
+    `<div class="wlhit" data-wl="add" data-sym="${att(h[0])}">
+       <b>${att(h[0])}</b><span class="dim">${att(h[1].slice(0, 38))}</span>
+     </div>`).join("");
+}
+
+// ONE SENDER for the Add button, a clicked suggestion, and Enter.
+// Three call sites duplicating a fetch is three places for the next
+// bug to hide in.
+async function sendWatchlist(action, symbol){
+  symbol = String(symbol || "").toUpperCase().trim();
+  if (!symbol) return;
+  if (!IS_OPERATOR){
+    toast("Read-only link -- open /board?token=... to edit this.", false);
+    return;
+  }
+  try{
+    const res = await fetch(
+      `/api/watchlist/${action}/${encodeURIComponent(symbol)}`,
+      {method: "POST", headers: {"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+    const data = await res.json();
+    // SAY WHY IT REFUSED. A typo doing nothing silently is how he would
+    // conclude the button was broken.
+    if (!data || !data.success){ toast((data && data.error) || "refused", false); return; }
+    toast(action === "add" ? `Watching ${symbol}` : `Removed ${symbol}`, true);
+    $("wlAdd").value = ""; $("wlHits").innerHTML = "";
+    tick();
+  }catch(err){ toast("Could not reach the bot: " + err.message, false); }
+}
+
+document.addEventListener("input", e => {
+  if (e.target && e.target.id === "wlAdd"){
+    e.target.value = e.target.value.toUpperCase();
+    drawHits();
+  }
+});
+
+// ENTER ADDS THE TOP MATCH. He should not have to finish spelling a
+// symbol the bot already knows, nor reach for the mouse. The best
+// match wins over the raw text: "STY" is not a symbol, STYRENIX is,
+// and he meant the one on the screen in front of him.
+document.addEventListener("keydown", e => {
+  if (!e.target || e.target.id !== "wlAdd" || e.key !== "Enter") return;
+  e.preventDefault();
+  const first = document.querySelector(".wlhit[data-sym]");
+  sendWatchlist("add", first ? first.getAttribute("data-sym")
+                             : ($("wlAdd").value || "").trim());
+});
+
+// ---- A SORT BUTTON IS NOT A TAB. 11 August 2026. ----
+//
+//     "activity change% Turonver are tabs ? i clicked on them =
+//      empty page ."
+//
+// I gave the sort buttons class="tab" to borrow the styling. This
+// handler was bound to EVERY .tab, so clicking Activity ran the tab
+// switcher with b.dataset.tab === undefined, no pane matched, and all
+// three were set to display:none. A blank white page from a button
+// that was only meant to reorder rows.
+//
+// Now it binds to [data-tab] only, and refuses to run at all if the
+// name is not one of the three panes -- so a future button that
+// borrows the class cannot blank his screen again.
+document.querySelectorAll(".tabs [data-tab]").forEach(b =>
+  b.addEventListener("click", () => {
+    const name = b.dataset.tab;
+    if (!["pre", "live", "post", "watch"].includes(name)) return;
+    document.querySelectorAll(".tabs [data-tab]").forEach(
+      x => x.classList.remove("on"));
+    b.classList.add("on");
+    for (const pane of ["pre", "live", "post", "watch"])
+      $(pane + "-pane").style.display = (pane === name) ? "" : "none";
+  }));
+
+async function tick(){
+  try{
+    const res = await fetch("/api/snapshot", {cache:"no-store"});
+    if (res.ok){
+      LAST_OK = Date.now();
+      STALE = false;
+      draw(await res.json());
+      return;
+    }
+  }catch(e){ /* a dead fetch must never blank the board */ }
+  // Nothing came back. After two missed polls, say so on the page --
+  // the prices stay, because the last known price is still the last
+  // known price, but the SWITCH must stop pretending it can act.
+  if (Date.now() - LAST_OK > 7000 && !STALE){
+    STALE = true;
+    const why = $("switchwhy");
+    why.textContent = "the bot is not answering \u2014 is main.py still running?";
+    why.style.display = "";
+    for (const id of ["btn-on", "btn-off"]){
+      $(id).style.opacity = "0.5"; $(id).style.cursor = "not-allowed"; }
+    $("clock").textContent = $("clock").textContent + " (stale)";
+  }
+}
+// ---- QTY, BUY AND THE SORT BUTTONS. 11 August 2026. ----
+// Delegated off document so a redraw cannot detach them, and the typed
+// qty lives in QTY{} rather than in the DOM -- the exact fault that
+// wiped the box on the old page every second.
+document.addEventListener("input", (e) => {
+  const sym = e.target && e.target.getAttribute("data-qtyfor");
+  if (sym) QTY[sym] = e.target.value;
+});
+
+function toast(text, ok){
+  const el = $("toast");
+  el.textContent = text;
+  el.style.display = "block";
+  el.style.background = ok ? "var(--ok-bg)" : "var(--stop-bg)";
+  el.style.color = ok ? "var(--ok-fg)" : "var(--stop-fg)";
+  setTimeout(() => { el.style.display = "none"; }, 4000);
+}
+
+document.addEventListener("click", async (e) => {
+  const sortBtn = e.target && e.target.getAttribute("data-sort");
+  if (sortBtn){
+    SORT = sortBtn;
+    document.querySelectorAll(".sortb").forEach(b =>
+      b.classList.toggle("on", b.getAttribute("data-sort") === SORT));
+    tick();
+    return;
+  }
+  // ---- ARM / DISARM. ----
+  // Turning it OFF never touches an open position: stops, trails and
+  // targets keep running on everything already in the book. This
+  // governs NEW entries only -- see /api/bot_trading in server.py.
+  // ---- ON SENDS ON. OFF SENDS OFF. NOTHING IS INFERRED. ----
+  //
+  //     "if i click ON = bot trading & if i click OFF = Bot Observing.
+  //      thats simply it is."
+  //
+  // The toggle worked out `want` from BOT_ON, a variable draw() keeps
+  // up to date. When that was stale or wrong, every click sent "on"
+  // and there was no way to switch off. The command is now written on
+  // the button in the markup -- data-arm="on" / data-arm="off" -- so
+  // there is no state to be wrong about.
+  const arm = e.target && e.target.getAttribute && e.target.getAttribute("data-arm");
+  if (arm === "on" || arm === "off"){
+    if (!IS_OPERATOR){
+      toast("Read-only link -- open /board?token=... to use these.", false);
+      return;
+    }
+    if (sw_busy) return;
+    sw_busy = true;
+    const ask = arm === "on"
+      ? "Switch the bot ON?\n\nIt will be allowed to OPEN NEW POSITIONS by itself."
+      : "Switch the bot OFF?\n\nNo new entries. Open positions keep their stops and targets.";
+    if (!confirm(ask)){ sw_busy = false; return; }
+    // Answer him NOW. The snapshot confirms or corrects it a moment
+    // later; if the server refuses, the poll puts it straight back.
+    paintState(arm === "on");
+    try{
+      let res = await fetch(`/api/bot_trading/${arm}`, {method: "POST",
+        headers: {"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+      let data = await res.json();
+      if (!data.success && data.not_ready){
+        if (confirm((data.error || "not ready") + "\n\nSwitch ON anyway?")){
+          res = await fetch(`/api/bot_trading/on?force=1`, {method: "POST",
+            headers: {"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+          data = await res.json();
+        } else { sw_busy = false; return; }
+      }
+      toast(data.success
+        ? (arm === "on" ? "Bot is ON -- trading" : "Bot is OFF -- observing only")
+        : (data.error || "Request failed"), !!data.success);
+      tick();
+    }catch(err){ toast("Could not reach the bot: " + err.message, false); }
+    finally { sw_busy = false; }
+    return;
+  }
+
+  // ---- THE WATCHLIST: ADD, A CLICKED SUGGESTION, REMOVE. ----
+  // closest() rather than e.target: a suggestion row is a <div> with a
+  // <b> and a <span> inside it, and clicking the bold symbol must add
+  // the stock rather than do nothing.
+  const wl = e.target && e.target.closest && e.target.closest("[data-wl]");
+  if (wl){
+    const action = wl.getAttribute("data-wl");
+    const picked = wl.getAttribute("data-sym");
+    if (action === "remove"){
+      if (!confirm(`Stop watching ${picked}?`)) return;
+      sendWatchlist("remove", picked);
+    } else {
+      // The Add button carries no symbol -- it means "whatever is in
+      // the box", and the top suggestion beats the raw text.
+      const first = document.querySelector(".wlhit[data-sym]");
+      sendWatchlist("add", picked
+        || (first ? first.getAttribute("data-sym") : ($("wlAdd").value || "").trim()));
+    }
+    return;
+  }
+
+  const sym = e.target && e.target.getAttribute("data-buy");
+  if (!sym) return;
+  const qty = (QTY[sym] || "").trim();
+  // He confirms the stock and the size before anything is sent. A BUY
+  // one click away from a mis-tap is not a feature.
+  if (!confirm(`BUY ${sym}${qty ? " x" + qty : " (bot default size)"}?`)) return;
+  try{
+    const url = `/api/buy/${encodeURIComponent(sym)}` +
+                (qty ? `?qty=${encodeURIComponent(qty)}` : "");
+    const res = await fetch(url, {method: "POST",
+      headers: {"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+    if (res.status === 403){ toast("View-only link -- nothing was sent.", false); return; }
+    const data = await res.json();
+    if (data.success){ toast(`BUY requested: ${sym}`, true); QTY[sym] = ""; }
+    else { toast(data.error || "Request failed", false); }
+  }catch(err){ toast("Could not reach the bot: " + err.message, false); }
+});
+
+// Carry the token to the other screen. Read from THIS page's URL
+// rather than from window.__OPERATOR_TOKEN__, so a view-only link
+// stays view-only on the far side instead of silently gaining
+// control it was not given.
+(function(){
+  const a = $("tofull");
+  if (!a) return;
+  const t = new URLSearchParams(location.search).get("token");
+  a.href = "/full" + (t ? "?token=" + encodeURIComponent(t) : "");
+  a.title = "Diagnostics — every panel the bot has";
+})();
+
+tick(); setInterval(tick, 3000);
+</script>

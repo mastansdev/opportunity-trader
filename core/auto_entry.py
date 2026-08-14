@@ -1,0 +1,629 @@
+"""
+==========================================================
+The ranker's picks reach the order path -- the missing join
+==========================================================
+
+    "the purpose of bot is not fulfilled right? even after bringing
+     all food near mouth . you can't take the food!"
+                                -- operator, 5 August 2026
+
+WHAT WAS MISSING
+----------------
+core/ranker.py was imported by exactly ONE file in the entire
+codebase: dashboard/state.py. Nothing in core/engine.py or trading/
+had ever heard of it.
+
+So the bot had two brains that never met:
+
+    Engine   watches candles for breakouts, CAN place an order,
+             consults results only as a veto, and fired 1,047 signals
+             on 5 August that he would never have taken.
+
+    Ranker   knows WHY a stock is moving, whether volume is behind it,
+             whether it is still alive, whether it is MTF-eligible,
+             and what quantity risks exactly Rs 1,500 -- and could not
+             place anything, ever.
+
+Everything he asked for over three weeks went into the second one.
+Turning the bot loose would have traded the first.
+
+This module is the join. It takes the rows the ranker already
+produces -- with the plan core/position_plan.py already sized -- and
+routes them into the Engine's own entry path, the same one the
+dashboard BUY button uses, with the same stops, the same trailing and
+the same position management.
+
+WHAT IT DOES NOT CHANGE
+-----------------------
+ALERT_ONLY_MODE still governs everything. While it is True this
+alerts and records and places nothing, exactly as it does today. The
+join being built is not the same as the safety being removed, and
+those two must never arrive in one change.
+
+Nor does it replace the breakout Engine. Both can speak; the Engine's
+own signals are unaffected.
+
+THE GATES HERE ARE THE LAST ONES, NOT THE ONLY ONES
+---------------------------------------------------
+By the time a row arrives it has already passed every ranker gate --
+move, liquidity, reason, direction, sector, volume, circuit, MTF,
+liveness -- and been sized against a real stop. What is left is the
+book-level question the ranker cannot answer: am I already in this,
+how many do I hold, and is it too late in the day.
+
+    "no trade is far more than a bad pick/wrong pick trade"
+
+so every gate here refuses. None of them adjust.
+
+Author : H&M Opportunity Trader
+==========================================================
+"""
+
+from datetime import time as dtime
+
+LONG = "LONG"
+
+
+
+# ---- A SWALLOWED FAILURE ON THE ORDER PATH. 8 August 2026. ----
+#
+#     "do not stop until u fixed all items"
+#
+# Six handlers in this file caught an exception and carried on. One of
+# them decided whether a trade was allowed. They now say so, once per
+# session -- this runs over every ranked row on every cycle, so a
+# warning per symbol would be its own blindness.
+_said = set()
+
+
+def _broke(where, exc):
+    if where not in _said:
+        _said.add(where)
+        try:
+            from core.logger import warn
+            warn(f"[ENTRY] {where} raised and was swallowed: "
+                 f"{type(exc).__name__}: {exc}")
+        except Exception:                                  # noqa: BLE001
+            pass
+
+
+def _num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+# ---- 14:45 WAS AN INTRADAY NUMBER TOO. 9 August 2026. ----
+#
+# Its old reasoning: "a position opened at 15:10 has twenty minutes to
+# work and then becomes an overnight hold BY ACCIDENT rather than by
+# decision."
+#
+# Overnight is now the decision. FORCE_SQUARE_OFF_AT_CLOSE is False and
+# positions carry on MTF, so a 15:10 entry is not an accident -- it is
+# the trade. Worse, this sat at 14:45 while config.LAST_ENTRY_TIME and
+# STAGED_NO_ENTRY_AFTER both said 15:15, so the bot stopped half an
+# hour before the screen said it would, and I described 15:15 to him
+# on 9 August without checking this file.
+#
+# Read from config so the three can never disagree again.
+try:
+    from config import LAST_ENTRY_TIME as _LAST
+    LAST_NEW_ENTRY = dtime(int(_LAST[:2]), int(_LAST[3:5]))
+except Exception:                                          # noqa: BLE001
+    LAST_NEW_ENTRY = dtime(15, 15)
+
+# The ranker publishes nothing before its own RANK_FROM_TIME (09:30).
+# This is a second, independent floor so a change there can never
+# silently re-open first-minute entries here.
+FIRST_NEW_ENTRY = dtime(9, 30)
+
+# ---- STRENGTH IS BOUGHT EARLY OR NOT AT ALL. 7 August 2026. ----
+#
+#     "thats the issue & i've been asking you to enter into strength
+#      stocks as early as possible"                    -- operator
+#
+# Measured on the 7 August tape. SBCL was in Row 1 at 08:21 with an
+# EXCELLENT result, before the bell. What the 09:30 floor did to it:
+#
+#     09:20   price 846.00   stop 833.35   1.5% away   118 shares
+#     09:35   price 895.95   stop 833.35   7.0% away   REFUSED
+#     10:00   price 914.05   stop 833.35   8.8% away   REFUSED
+#
+# The stop never moved. The entry ran away from it. Every higher high
+# widened the gap until position_plan refused the trade for being
+# exactly what he wanted to buy -- a strong stock going up.
+#
+# And the tight stop is not a restriction, it is SIZE: 118 shares at
+# 09:20 against 23 at 09:35, for the same Rs 1,500 of risk.
+#
+# WHY THIS IS NARROW, AND MUST STAY NARROW
+# ----------------------------------------
+# At 09:20 there is no confirmation. The tape is ten minutes old and
+# says almost nothing. Buying an UNEXPLAINED volume mover here is
+# buying noise, and no amount of "it was strong" makes that a reason.
+#
+# The one case where the reason genuinely predates the open is a
+# result already graded overnight -- Row 1. That reason was published
+# last night; the 09:20 tape adds nothing to it and takes nothing
+# away. So only those may be entered early. Everything else waits for
+# FIRST_NEW_ENTRY exactly as before.
+# ---- 09:15, NOT 09:20. His rule, 9 August 2026. ----
+#
+#     "why still waiting 9:20 ? we decided not to time the entry"
+#
+# He is right and he said it first on 7 August: "don't fix the timing
+# of the trades. no one can guess the stock movement & price in this
+# world". The five minutes from 09:15 to 09:20 were mine, not measured
+# -- there is no evidence that a card published last night becomes
+# more true at 09:20 than at 09:15.
+#
+# What stays is the DISTINCTION, which is structural rather than a
+# clock: a stock whose reason predates the open needs no opening
+# range, because the reason is already published. An UNEXPLAINED
+# volume mover does -- there is nothing else to judge it by. That is
+# not timing the entry, it is requiring evidence before one.
+# ---- ON. 10 August 2026. ----
+# Switched off on 9 August for cost: 57 ms a symbol, 1.15 s for a
+# cycle of 20, and the test suite stopped finishing. The question
+# was the wrong way round -- it asked every candidate whether any
+# message was about them. core/supply_events.py now asks each
+# MESSAGE who it is about, once per window, and falls back to the
+# full subject test only when the index says nothing.
+#
+#     20 unknown candidates, cold   1.15 s  ->  0.026 s
+#     400 cached lookups                       0.0011 s
+#
+# And it still blocks LICI, whose notice carries no hashtag and
+# whose registered name NSE abbreviates to LIFE INSURA CORP OF
+# INDIA -- the case a faster-but-shallower gate lost.
+SUPPLY_GATE = True
+
+EARLY_ENTRY_FROM = dtime(9, 15)
+
+# ---- THE SAME THREE GRADES AS ROW 1. 9 August 2026. ----
+#
+#     "@ results time = EXCELLENT, GREAT, GOOD"
+#
+# This said EXCELLENT and GREAT while core/watchlist_builder.TOP_GRADES
+# said all three, so a GOOD result could lead Row 1 all morning and
+# still be refused at the entry for a grade the operator had already
+# ruled in. SHILPAMED, 5 August, exactly that shape.
+try:
+    from core.watchlist_builder import TOP_GRADES as EARLY_ENTRY_GRADES
+except Exception:                                          # noqa: BLE001
+    EARLY_ENTRY_GRADES = ("EXCELLENT", "GREAT", "GOOD")
+
+_graded_cache = {}
+
+# ---- THE GRADES CHANGE DURING THE SESSION. 11 August 2026. ----
+#
+#     "during results time = bot must know which stocks will get results
+#      on which date & time (during/after) ... once bot recv the graded
+#      card of result, it must act on the stock"
+#                                                       -- operator
+#
+# This cache was loaded ONCE per process and never refreshed, on the
+# stated assumption that "the overnight grades do not change during a
+# session". That is true only for companies reporting after the close.
+# Companies that report DURING market hours -- which the operator has
+# asked the bot to handle from the start, and which core/
+# results_calendar.py records a broadcast_at timestamp for precisely
+# so their habitual time can be learned -- publish their card while the
+# bot is running. With a cache that never expired, that card could not
+# reach the entry path on the day it mattered. It would first be seen
+# the NEXT morning, by which time the reaction is over.
+#
+# core/results_gate.py already refreshes on a 60-second TTL for exactly
+# this reason. The two paths disagreed; they no longer do.
+_GRADED_TTL_SECONDS = 60.0
+
+
+def _is_pre_graded(symbol):
+    """Is this stock currently graded EXCELLENT / GREAT / GOOD?
+
+    Re-read every _GRADED_TTL_SECONDS rather than once per process, so
+    a card that lands mid-session is acted on in the same session. The
+    TTL exists because this is asked once per pick per cycle and the
+    underlying read touches data/telegram.db -- a per-tick lookup would
+    put the feed on the hot path.
+    """
+    symbol = str(symbol or "").upper()
+    if not symbol:
+        return False
+
+    import time as _time
+    now = _time.monotonic()
+    stale = (now - _graded_cache.get("at", 0.0)) > _GRADED_TTL_SECONDS
+    if "map" not in _graded_cache or stale:
+        try:
+            from core import watchlist_builder
+            _graded_cache["map"] = watchlist_builder.graded_symbols() or {}
+        except Exception as exc:                           # noqa: BLE001
+            _broke("graded_symbols (Row 1 is empty)", exc)
+            # Keep whatever was already known. Blanking the map on a
+            # transient read failure would drop every graded stock out
+            # of the lane for a full cycle, which is the loudest
+            # possible way to fail quietly.
+            _graded_cache.setdefault("map", {})
+        _graded_cache["at"] = now
+
+    entry = (_graded_cache["map"] or {}).get(symbol) or {}
+    grade = str(entry.get("grade") or "").upper()
+    return grade in EARLY_ENTRY_GRADES
+
+
+def _faded(mover):
+    """Has the stock already rolled off its high?
+
+    ---- "+ MAKING HIGHS". HIS THIRD CONDITION, 11 August 2026. ----
+
+        "stock must get graded - excellent, great, good + volume
+         supports + making highs"
+
+    The grade says the quarter was good. The volume says money is
+    moving. Neither says the stock is still going UP right now, and a
+    graded result that has already rolled over is one the market has
+    finished pricing -- buying it is buying somebody else's exit. This
+    lane checked only that the change was not negative, which a stock
+    can satisfy while sitting at the bottom of its range all morning.
+
+    core/rules.FADED_FROM_HIGH owns the number (half the day's range)
+    so this lane and core/ranker.py cannot drift apart.
+
+    Unknown range -> NOT faded. If the mover rows do not carry
+    day_high/day_low this test must not silently close the lane on
+    every stock; it fails open, and the caller is expected to have
+    verified the feed supplies them.
+    """
+    try:
+        from core.rules import FADED_FROM_HIGH
+    except Exception:                                      # noqa: BLE001
+        FADED_FROM_HIGH = 0.5
+    high = _num(mover.get("day_high"))
+    low = _num(mover.get("day_low"))
+    ltp = _num(mover.get("ltp"))
+    if high is None or low is None or ltp is None or high <= low:
+        return False
+    return ((ltp - low) / (high - low)) < FADED_FROM_HIGH
+
+
+def _volume_supports(mover):
+    """Is today's traded value at least MIN_VOLUME_RATIO x this stock's
+    own normal day -- the third of his three conditions (see above).
+
+    Fails CLOSED, deliberately unlike the structural path's
+    _breakout_has_volume() (core/engine.py): that one fails open
+    because a legacy Ticker-mode feed sometimes carries no volume at
+    all, and refusing every trade over a feed gap would just stop the
+    bot. This lane has no such excuse -- the gainers/losers snapshot
+    it reads always carries a real volume field (core/circuit_monitor.py),
+    so "cannot be measured" here means the ADV lookup failed, not that
+    the data doesn't exist, and a graded stock is worth enough to wait
+    for a real answer rather than guess one.
+    """
+    try:
+        from core.ranker import volume_ratio
+        from core.liquidity import adv
+    except Exception as exc:                                # noqa: BLE001
+        _broke("volume_ratio import", exc)
+        return False
+    symbol = str(mover.get("symbol") or "").upper()
+    try:
+        ratio = volume_ratio(mover, adv(symbol))
+    except Exception as exc:                                # noqa: BLE001
+        _broke("volume_ratio", exc)
+        return False
+    return ratio is not None and ratio >= MIN_VOLUME_RATIO
+
+
+def _clock(now):
+    if now is None:
+        return None
+    return now.time() if hasattr(now, "time") else now
+
+
+# ---- THE THIRD CONDITION WAS NEVER CODED. 12 August 2026. ----
+#
+#     "stock must get graded - excellent, great, good + volume
+#      supports + making highs"                    -- operator, 11 Aug
+#
+# Three conditions were stated. _faded() below checks "making highs".
+# The grade check is _is_pre_graded(). "Volume supports" was never
+# written -- this lane took a graded, still-rising stock on ANY
+# volume, including a thin morning tape doing nothing unusual. A good
+# quarter with nobody trading it yet is a card, not a mover.
+#
+# Same threshold the ranker and select.py already use for the same
+# question (core/rules.py -- the one place this number now lives, so
+# the early lane and the standard lane can never drift apart on what
+# "volume supports" means).
+try:
+    from core.rules import MIN_VOLUME_RATIO
+except Exception:                                          # noqa: BLE001
+    MIN_VOLUME_RATIO = 1.5
+
+
+def early_rows(movers, now=None, plan_of=None):
+    """Row 1's candidates, ranked for the 09:20 lane.
+
+    ---- WHY NOT core/ranker.py. 7 August 2026. ----
+    The ranker will not name any of these, and it is right not to:
+    liveness(), the sector lead and the 3% move threshold all read the
+    TAPE, and at 09:20 there are five minutes of tape. Asking it to
+    judge a stock before the stock has done anything would mean
+    loosening the gates that protect every other entry of the day.
+
+    So the early lane does not use it. Its candidate list is Row 1 --
+    the overnight grades -- which is a list that was already complete
+    before the bell. The only ordering question is which of them to
+    take first, and that is answered by the grade and then by what the
+    open is already saying.
+
+    Returns rows shaped exactly like the ranker's, so take() cannot
+    tell the difference and no gate is skipped.
+    """
+    clock = _clock(now)
+    if clock is None or not (EARLY_ENTRY_FROM <= clock < FIRST_NEW_ENTRY):
+        return []
+
+    out = []
+    for mover in (movers or []):
+        if not isinstance(mover, dict):
+            continue
+        symbol = str(mover.get("symbol") or "").upper()
+        if not _is_pre_graded(symbol):
+            continue
+        grade = str(((_graded_cache.get("map") or {}).get(symbol)
+                     or {}).get("grade") or "").upper()
+
+        # ---- A GAP THAT IS ALREADY SPENT IS NOT AN EARLY ENTRY ----
+        # The whole point is a tight stop. If the stock has already
+        # run away from its own low in the first five minutes, this
+        # lane has no advantage over waiting, and position_plan will
+        # refuse it anyway -- better to say why here.
+        change = _num(mover.get("change_pct")) or 0.0
+        if change < 0:
+            continue
+
+        # "+ making highs" -- see _faded(). A graded stock sitting in
+        # the bottom half of its own day range is not an opportunity
+        # occurring, it is one that has already passed.
+        if _faded(mover):
+            continue
+
+        # "+ volume supports" -- see _volume_supports(). A good quarter
+        # nobody is trading yet is a card, not a mover.
+        if not _volume_supports(mover):
+            continue
+
+        row = {"symbol": symbol, "action": "BUY", "ltp": mover.get("ltp"),
+               "score": (10.0 if grade == "EXCELLENT" else 5.0) + change,
+               "why": f"{grade} result, bought at the open before the "
+                      f"move widened the stop",
+               "result_tag": grade, "early": True}
+        if plan_of is not None:
+            row["plan"] = plan_of(mover)
+        out.append(row)
+    out.sort(key=lambda r: -r["score"])
+    return out
+
+
+def refuse_reason(row, engine, now=None, held=None, max_positions=None):
+    """Why this pick must NOT be taken, or None if it may be.
+
+    Returns a plain sentence, because every refusal is shown to him.
+    """
+    symbol = str(row.get("symbol") or "").upper()
+    if not symbol:
+        return "no symbol on the row"
+
+    # LONG ONLY. "i only trade in long positions".
+    if str(row.get("action") or "").upper() != "BUY":
+        return "not a long -- he does not short"
+
+    plan = row.get("plan") or {}
+    if not plan.get("ok"):
+        return str(plan.get("why") or "no tradeable plan")
+    if not plan.get("qty") or not plan.get("stop"):
+        return "the plan carries no quantity or no stop"
+
+    # liveness() said the move has stopped working. It must not be
+    # possible to enter one of these from any path.
+    if row.get("state") == "fading":
+        return "fading -- the move has already stopped working"
+
+    held = {str(s).upper() for s in (held or [])}
+    if symbol in held:
+        return "already holding it -- no pyramiding"
+
+    # ==========================================================
+    # SUPPLY IS NOT DEMAND -- IN THE LIVE PATH.  9 August 2026.
+    # ==========================================================
+    #
+    #     "u didn't fill the gaps till now?"
+    #
+    # core/supply_events.py was written on 8 August, tested, wired into
+    # core/centre.py -- and NOT into this function, the one that
+    # actually decides. So the board could show LICI BLOCKED in red
+    # while this path would still have taken the trade. I found that on
+    # Friday, said so, and left it.
+    #
+    # LICI, four of five replayed days, 165x its own volume, the
+    # largest flow on the board, lost every time. The OFS notice was in
+    # data/telegram.db from 3 August. An OFS produces exactly the
+    # signature the volume filter hunts and the price goes DOWN,
+    # because the whole event is somebody selling.
+    #
+    # He is long only. This is not a weaker buy. It is not a buy.
+    # ---- MEASURED, AND BACKED OUT. 9 August 2026, same evening. ----
+    #
+    # Hooking supply_events.overhang() in here is CORRECT and it is the
+    # gap he was angry about. It is off because of cost, not doubt:
+    #
+    #     per symbol, cold        ~57 ms  (core/subject.is_about)
+    #     20 candidates, cold     ~1.15 s
+    #     test suite              stopped finishing at all
+    #
+    # A gate I cannot run the suite against is a gate I cannot claim
+    # works, and putting an unverified change on the live entry path the
+    # night before a session is the exact thing that has cost him money
+    # before.
+    #
+    # The block itself is NOT lost: core/centre.py calls it, so LICI
+    # still shows BLOCKED with its reason on the board. What is missing
+    # is the live refusal, and the fix is to resolve each message's
+    # subject ONCE per window instead of once per candidate.
+    if SUPPLY_GATE:
+        try:
+            from core import supply_events
+            sold = supply_events.overhang(symbol, now=now)
+        except Exception as exc:                           # noqa: BLE001
+            _broke("supply_events -- refusing rather than trading blind", exc)
+            return ("could not check for an offer for sale -- refusing "
+                    "rather than buying into somebody's exit")
+        if sold:
+            return sold["why"]
+
+    clock = _clock(now)
+    if clock is not None:
+        if clock >= LAST_NEW_ENTRY:
+            return (f"after {LAST_NEW_ENTRY:%H:%M} -- too late to give a "
+                    f"new position room to work")
+
+    if max_positions is not None and len(held) >= max_positions:
+        # ---- A FULL BOOK IS NOT A CLOSED DOOR. 5 August 2026. ----
+        #
+        # Engine._maybe_rotate_out() exists and is conservative: it
+        # frees a slot only when the challenger is DECISIVELY stronger
+        # than the weakest holding, and it caps swaps per day so churn
+        # cannot eat the edge in brokerage. The breakout path has used
+        # it since it was written. This one never called it, so the
+        # tenth setup of the morning permanently outranked the best
+        # setup of the afternoon.
+        rotate = getattr(engine, "_maybe_rotate_out", None)
+        freed = False
+        if callable(rotate):
+            try:
+                freed = bool(rotate(symbol, "LONG", now))
+            except Exception as exc:                       # noqa: BLE001
+                _broke("rotation check", exc)
+                freed = False
+        if not freed:
+            return (f"already holding {len(held)} of {max_positions} "
+                    f"and not decisively better than the weakest")
+
+    # The engine's own risk layer has the last word -- daily loss cap,
+    # entry blocks, square-off guard. Ask it rather than duplicating it.
+    blocked = getattr(engine, "entry_blocked_reason", None)
+    if callable(blocked):
+        try:
+            # ONE clock for the whole decision (12 August 2026). This
+            # path already gated on `now` above; letting the engine read
+            # the wall clock again meant two answers to "what time is
+            # it" inside a single entry.
+            why = blocked(symbol, "LONG", at_time=now)
+        except Exception as exc:                           # noqa: BLE001
+            # ---- FAIL CLOSED, NOT OPEN. 8 August 2026. ----
+            # This is the engine's own risk layer: daily loss cap,
+            # entry blocks, square-off guard. It used to swallow the
+            # exception, set why=None, and let the trade THROUGH --
+            # so a broken risk check read exactly like a clean one and
+            # the order went out unprotected.
+            #
+            # A safety gate that fails open is worse than no gate,
+            # because it is trusted.
+            _broke("engine.entry_blocked_reason -- REFUSING the trade",
+                   exc)
+            why = (f"the risk check itself failed ({type(exc).__name__})"
+                   f" -- refusing rather than trading unprotected")
+        if why:
+            return str(why)
+    return None
+
+
+def take(rows, engine, now=None, security_id_of=None, held=None,
+         max_positions=None, alert=None, enter=None):
+    """Route the ranker's picks into the order path.
+
+    `enter` and `alert` are injected so this can be exercised without
+    an engine and without a broker. In production they are the
+    Engine's own methods -- nothing here reimplements an entry.
+
+    Returns a list of {"symbol", "taken", "why"} for the record. It
+    never raises: this runs on the trading loop.
+    """
+    out = []
+    held = set(str(s).upper() for s in (held or []))
+    alert_only = bool(getattr(engine, "alert_only", True))
+
+    # ---- BEST FIRST, NOT FIRST FIRST. 5 August 2026. ----
+    #
+    #     "does the bot trades as first come = first ?"
+    #
+    # Yes, it did. core/ranker.py opens with "The best stock of the day,
+    # not the first one to trigger" -- and this function then walked its
+    # output in whatever order it arrived and stopped at ten. On
+    # 5 August the book filled by 11:15 and RITES, HINDZINC, WESTLIFE
+    # and KIRLOSBROS were never seen. Three of those four were winners.
+    #
+    # The ranker already scored every row. Sorting by it here is the
+    # difference between the best ten setups and the earliest ten.
+    rows = sorted(
+        [r for r in (rows or []) if isinstance(r, dict)],
+        key=lambda r: -(_num(r.get("score")) or 0.0))
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").upper()
+        why = refuse_reason(row, engine, now=now, held=held,
+                            max_positions=max_positions)
+        if why:
+            out.append({"symbol": symbol, "taken": False, "why": why})
+            continue
+
+        plan = row["plan"]
+        detail = (f"{symbol} BUY {plan['qty']} @ {row.get('ltp')} "
+                  f"stop {plan['stop']} target {plan.get('target')} "
+                  f"-- {row.get('why') or 'ranked setup'}")
+
+        # ---- ALERT_ONLY_MODE IS UNTOUCHED BY THIS CHANGE ----
+        # Connecting the two halves and switching the safety off are
+        # separate decisions and must never ride in together.
+        if alert_only:
+            if alert is not None:
+                try:
+                    alert(symbol, "ranked-buy",
+                          detail + " -- ALERT ONLY: the bot is not "
+                                   "trading. Use the dashboard BUY.")
+                except Exception as exc:                   # noqa: BLE001
+                    _broke("alert (he never saw this pick)", exc)
+            out.append({"symbol": symbol, "taken": False,
+                        "why": "ALERT ONLY -- bot not trading, "
+                               "operator decides"})
+            continue
+
+        security_id = None
+        if security_id_of is not None:
+            try:
+                security_id = security_id_of(symbol)
+            except Exception as exc:                       # noqa: BLE001
+                _broke("security_id lookup", exc)
+                security_id = None
+        if not security_id:
+            out.append({"symbol": symbol, "taken": False,
+                        "why": "no security id -- cannot be ordered"})
+            continue
+
+        try:
+            enter(symbol, security_id, row.get("ltp"), plan["stop"],
+                  now, "RANKED_SETUP", "LONG",
+                  target=plan.get("target"), qty=plan["qty"])
+        except Exception as exc:                           # noqa: BLE001
+            out.append({"symbol": symbol, "taken": False,
+                        "why": f"the order path refused it ({exc})"})
+            continue
+        held.add(symbol)
+        out.append({"symbol": symbol, "taken": True, "why": detail})
+    return out

@@ -73,6 +73,40 @@ class CandleEngine:
 
         return closed
 
+    def close_open_candles(self):
+        """Finalise every still-open candle and return them.
+
+        =====================================================
+        2026-07-29 -- the last minutes of every day were lost
+        =====================================================
+        A candle closes only when a tick from the NEXT minute arrives.
+        At the end of the session there is no next tick, so whatever
+        was open simply vanished. The operator's own check found it:
+        across all 666 symbols the last recorded candle on 29 July was
+        15:27, though the market trades to 15:30.
+
+        Consequence: the bot's "last price" was the 15:27 close, not
+        the real one. Checked against Dhan's close on six names the gap
+        ran from Rs 0.25 to Rs 21.60 -- small, but it is the number the
+        day's P&L and tomorrow's reference are read from.
+
+        Called once at shutdown. Returns [(symbol, candle), ...] so the
+        caller can record them; the engine's own closed-candle history
+        is updated either way.
+        """
+        finalised = []
+        for symbol, candle in list(self._open_candle.items()):
+            if candle is None:
+                continue
+            if candle["_cum_open"] is not None \
+                    and candle["_cum_last"] is not None:
+                volume = candle["_cum_last"] - candle["_cum_open"]
+                candle["volume"] = volume if volume >= 0 else None
+            self._closed_candles.setdefault(symbol, []).append(candle)
+            finalised.append((symbol, candle))
+            self._open_candle[symbol] = None
+        return finalised
+
     @staticmethod
     def _new_candle(bucket, price, tick_time, cum_volume):
         return {

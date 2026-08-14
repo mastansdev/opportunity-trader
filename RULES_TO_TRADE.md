@@ -1,5 +1,11 @@
 # Rules to Trade — how a stock qualifies
 
+> **SUPERSEDED — read [BOT.md](BOT.md) for the live rules.**
+>
+> The worked examples from the 24 July session are still the clearest
+> explanation of *why* each gate exists. The thresholds have since
+> changed and now live in `core/rules.py`, which `BOT.md` reads.
+
 Every rule the bot applies, in the order it applies them, with a real
 example from the **2026-07-24** session for each. Read this to know
 exactly how narrow the funnel is and where a stock dies.

@@ -1,0 +1,626 @@
+"""
+==========================================================
+Why is this stock moving? Ask BOTH stores, best answer wins
+==========================================================
+
+    "i brought the required sources to bot , & u couldn't do the
+     proper work?"                  -- operator, 5 August 2026
+
+WHAT WENT WRONG
+---------------
+The bot keeps two separate memories of why a stock moves:
+
+    news_memory.db   `impact.reason`  -- written from newswire stories
+    stock_events.db  `events`         -- written from the PRO channels
+
+core/ranker.py only ever read the FIRST one. Everything the PRO
+channels publish -- the grades he pays for and the only source he says
+he trusts -- sat in the second store, unread, all day.
+
+SHILPAMED, 5 August. The best-performing name of the session, +12.63%.
+The only thing the ranker could see about it was this:
+
+    reason:    "matched on: SHILPAMED"
+    direction: UNKNOWN
+
+That is the keyword matcher reporting its own work. Meanwhile, in the
+OTHER store, timestamped 13:51 IST -- three minutes before the stock
+began to run:
+
+    Earnings Pulse    #SHILPAMED - Good Results        grade=GOOD
+    Earnings Pro      PAT +51% vs est                  grade=GOOD
+    Earnings 360      CLEAN | Rising, Expanding        grade=GOOD
+
+The stock was refused "reason is a lookup, not a mechanism" and never
+reached his screen. A clean entry at 14:03 would have hit its target
+at 14:38 for +Rs 2,972 on Rs 27,603 of stock.
+
+41% of every reason row in news_memory is a "matched on:" lookup. This
+is not one unlucky stock.
+
+WHAT THIS DOES
+--------------
+One function, why(), asked once per symbol. It reads both stores and
+returns the STRONGEST real answer, in this order:
+
+    1. a graded PRO channel event from today
+    2. a written newswire reason that actually explains something
+    3. nothing -- and nothing is a valid answer
+
+WHY THE PRO CHANNELS RANK FIRST
+-------------------------------
+    "those 9 are our sources & pro channels"
+    "we cannot deviate from NSE & PRO CHANNELS"
+
+They are also earlier. On SHILPAMED the PRO grade existed at 13:51 and
+the newswire reason never did.
+
+WHAT THIS DOES NOT DO
+---------------------
+It does not decide whether to trade. core/ranker.py still applies
+every gate it applied before -- move, volume, liquidity, sector,
+circuit, MTF, liveness. This only stops a real reason from being
+thrown away for being in the wrong drawer.
+
+    "pls make sure these chips & related stocks are never mis matched
+     as they are the one we trust"
+
+So nothing here infers, widens or borrows across symbols. An answer
+for a symbol comes from rows carrying that symbol and no other.
+
+Author : H&M Opportunity Trader
+==========================================================
+"""
+
+import re
+
+POSITIVE = "POSITIVE"
+NEGATIVE = "NEGATIVE"
+UNKNOWN = "UNKNOWN"
+
+# What the PRO channels publish as a verdict, and which way each points.
+# Read off real messages -- see data/stock_events.db `grade`.
+_POSITIVE_GRADES = {"EXCELLENT", "GREAT", "GOOD"}
+_NEGATIVE_GRADES = {"WEAK", "POOR"}
+# MIXED and OK are deliberately absent. They are not a direction, and
+# core/ranker.py refuses anything whose reason contradicts the move --
+# a grade that points nowhere must not be dressed up as one that does.
+
+# The kinds worth quoting as "why it is moving". MACRO and
+# MARKET_ANSWER are about the market, not the stock, and attaching one
+# to a single symbol is exactly the mis-match he warned about.
+_STOCK_KINDS = {"RESULT", "ORDER", "CONCALL", "NEWS", "AI_VERDICT"}
+
+# The matcher reporting its own work, not a reason.
+_LOOKUP = re.compile(r"^\s*matched on\s*:", re.I)
+MIN_REASON_CHARS = 15
+
+
+
+# ---- A FAILURE MUST LEAVE A MARK. 8 August 2026. ----
+#
+#     "why these many bugs were un noticied till now?"
+#
+# 251 handlers on the live path swallow an exception and return
+# nothing. Six real bugs hid in that pattern in a single day: the
+# calendar refusing a date object, why() never fetching the PRO
+# events, news events dropped for having no grade. Each one returned
+# None, nothing was logged, and the bot ran on less information than
+# it had while every test passed.
+#
+# None is a legitimate answer here -- most stocks have no reason. But
+# an EXCEPTION is not the same as "no reason", and until now they
+# looked identical from the outside.
+#
+# Rate-limited to once per source per session: this runs inside the
+# ranking loop over 1,100 symbols and a warning per symbol would be
+# its own kind of blindness.
+_complained = set()
+
+
+def _broke(where, exc):
+    """Say it once, then stay quiet. Returns None for the caller."""
+    if where not in _complained:
+        _complained.add(where)
+        try:
+            from core.logger import warn
+            warn(f"[WHY] {where} raised and was swallowed: "
+                 f"{type(exc).__name__}: {exc}. Reasons from this "
+                 f"source are MISSING until it is fixed.")
+        except Exception:                                  # noqa: BLE001
+            pass
+    return None
+
+
+def is_a_real_reason(text):
+    """Does this text explain anything, or is it bookkeeping?
+
+    "matched on: SHILPAMED" is the keyword matcher naming itself. So is
+    a fragment too short to contain a claim.
+    """
+    text = str(text or "").strip()
+    if not text or _LOOKUP.match(text):
+        return False
+    return len(text) >= MIN_REASON_CHARS
+
+
+def direction_of_grade(grade):
+    """A PRO channel grade as a direction, or UNKNOWN."""
+    grade = str(grade or "").strip().upper()
+    if grade in _POSITIVE_GRADES:
+        return POSITIVE
+    if grade in _NEGATIVE_GRADES:
+        return NEGATIVE
+    return UNKNOWN
+
+
+
+# ---- NAMING A STOCK IS NOT NEWS. 8 August 2026. ----
+#
+# The first version of the NEWS fallback above accepted any headline
+# over 15 characters. That immediately regressed NAVINFLUOR and
+# GMMPFAUDLR, whose result cards were replaced by this, from the
+# Breakouts scanner:
+#
+#     "#NAVINFLUOR.NS NAVINFLUOR.NS Navin Fluorine International"
+#
+# Long enough to pass, and it says nothing at all -- it is the ticker
+# three times. A reason has to make a CLAIM about the company, not
+# announce that the company exists.
+_NOISE_WORDS = {"NS", "BSE", "NSE", "LTD", "LIMITED", "INDIA", "THE",
+                "AND", "CAP", "SMALL", "MID", "LARGE"}
+
+
+_name_words_cache = {}
+
+
+def _own_name_words(symbol):
+    """The words that are just this company's own name."""
+    symbol = str(symbol or "").upper()
+    if symbol in _name_words_cache:
+        return _name_words_cache[symbol]
+    words = set(re.findall(r"[A-Za-z]{2,}", symbol))
+    try:
+        from core.master_loader import MasterLoader
+        if "__loader__" not in _name_words_cache:
+            _name_words_cache["__loader__"] = MasterLoader()
+        row = _name_words_cache["__loader__"].get_by_symbol(symbol) or {}
+        words |= set(re.findall(r"[A-Za-z]{2,}",
+                                str(row.get("COMPANY NAME") or "").upper()))
+    except Exception:                                      # noqa: BLE001
+        pass
+    if len(_name_words_cache) > 3000:
+        _name_words_cache.clear()
+    _name_words_cache[symbol] = words
+    return words
+
+
+def _says_something(headline, symbol=None):
+    """Does this headline claim anything, or just name the stock?
+
+    ---- STRIP THE COMPANY'S OWN NAME. 8 August 2026. ----
+    Counting "meaningful words" was not enough. The Breakouts scanner
+    posts "#NAVINFLUOR.NS NAVINFLUOR.NS Navin Fluorine International"
+    -- four distinct words, all of them the company's own name, and it
+    replaced NAVINFLUOR's real result card.
+
+    A reason says something the company NAME does not. So remove the
+    ticker and the registered name, and require what is left to be a
+    sentence.
+    """
+    if not is_a_real_reason(headline):
+        return False
+    words = re.findall(r"[A-Za-z]{2,}", str(headline).upper())
+    own = _own_name_words(symbol) if symbol else set()
+    seen, meat = set(), 0
+    for word in words:
+        if word in _NOISE_WORDS or word in own or word in seen:
+            continue
+        seen.add(word)
+        meat += 1
+    return meat >= 3
+
+
+def from_events(events, on_date=None):
+    """The best PRO channel answer for ONE symbol, or None.
+
+    `events` is core/stock_events.py's for_symbol() output -- newest
+    first. `on_date` limits it to a single session ("2026-08-05");
+    without it, the newest graded event wins whenever it happened.
+
+    Yesterday's result is not why a stock is moving today, so callers
+    on the live path should always pass on_date.
+    """
+    for event in (events or []):
+        if not isinstance(event, dict):
+            continue
+        at = str(event.get("at") or "")
+        if on_date and not at.startswith(str(on_date)):
+            continue
+        if str(event.get("kind") or "").upper() not in _STOCK_KINDS:
+            continue
+
+        # An explicit AI verdict outranks a grade: it was written about
+        # this event specifically.
+        reason = event.get("ai_reason")
+        direction = str(event.get("ai_direction") or "").upper()
+        if is_a_real_reason(reason) and direction in (POSITIVE, NEGATIVE):
+            return {"text": str(reason).strip(),
+                    "weight": float(event.get("ai_confidence") or 0.8),
+                    "direction": direction,
+                    "source": "PRO channel verdict"}
+
+        grade_direction = direction_of_grade(event.get("grade"))
+        if grade_direction == UNKNOWN:
+            # ---- A NEWS ITEM HAS NO GRADE. 8 August 2026. ----
+            #
+            #     "decngold has news"          -- operator
+            #
+            # DECNGOLD moved +8.87% on 6 August. The bot HAD the
+            # reason, stored and correctly tagged:
+            #
+            #   kind=NEWS  "DECCAN GOLD: CO. PRODUCES FIRST GOLD DORE
+            #               AT ALTYN TOR PROJECT IN KYRGYZSTAN"
+            #
+            # and threw it away here. This grade check was written for
+            # result cards, where a grade always exists. Company news
+            # has no grade and never will, so EVERY news catalyst was
+            # discarded however good -- and his rules name news as an
+            # entry reason in its own right:
+            #
+            #     "NEWS = ONLY POSITIVE NEWS WHICH WILL GIVE SOME
+            #      POINTS TO GRAB & EXIT"
+            #
+            # So a NEWS or ORDER event qualifies on its own headline.
+            # Direction is left UNKNOWN rather than guessed: the
+            # ranker already refuses a reason that contradicts the
+            # move, and inventing a direction from a headline is how
+            # the "matched on:" rubbish got into news_memory.
+            kind = str(event.get("kind") or "").upper()
+            headline = str(event.get("headline") or "").strip()
+            # ---- A SCANNER IS NOT A NEWS SOURCE. 8 August 2026. ----
+            # Breakouts posts a listing, not a story:
+            #   "#NAVINFLUOR.NS NAVINFLUOR.NS Navin Fluorine Inte,
+            #    NSE, Large-cap 39037 cr, Basic Materials- Chemicals"
+            # Ticker, exchange, market cap, sector. It states that the
+            # stock exists. Allowing it as a NEWS reason replaced
+            # NAVINFLUOR's real result card with its own directory
+            # entry, which is worse than having no reason at all.
+            source = str(event.get("source") or "").upper()
+            if kind in ("NEWS", "ORDER") \
+                    and "BREAKOUT" not in source \
+                    and _says_something(headline, event.get("symbol")):
+                return {"text": headline,
+                        "weight": 0.6,
+                        "direction": UNKNOWN,
+                        "source": "PRO channel " + str(
+                            event.get("source") or "").strip()}
+            continue
+        headline = str(event.get("headline") or "").strip()
+        if not is_a_real_reason(headline):
+            continue
+        # The grade IS the claim; the headline carries the detail.
+        return {"text": headline,
+                "weight": 0.9,
+                "direction": grade_direction,
+                "source": "PRO channel " + str(event.get("source")
+                                               or "").strip()}
+    return None
+
+
+def from_news(hits):
+    """The best newswire answer for ONE symbol, or None.
+
+    `hits` is core/news_impact.py's for_symbol() output. Anything that
+    is only a keyword match is skipped rather than returned -- that is
+    the whole SHILPAMED failure.
+    """
+    for hit in (hits or []):
+        if not isinstance(hit, dict):
+            continue
+        text = hit.get("reason") or hit.get("headline")
+        if not is_a_real_reason(text):
+            continue
+        return {"text": str(text).strip(),
+                "weight": float(hit.get("confidence") or 0.5),
+                "direction": str(hit.get("direction") or UNKNOWN).upper(),
+                "source": "news"}
+    return None
+
+
+def from_gappers(symbol):
+    """The pre-open gapper card's answer for ONE symbol, or None.
+
+    ---- A TABLE IS A REASON TOO. 6 August 2026. ----
+
+        "have we / bot recvd & read about today pre-opened stocks?"
+
+    On 6 August the ranker refused 494 of 605 moving stocks for "no
+    reason found", and NAVINFLUOR -- up 8.58% on Rs 119 crore, closing
+    near its high -- was one of them.
+
+    The bot was holding this at 09:08 IST, from Earnings Pulse, with
+    all twelve symbols correctly linked:
+
+        NAVINFLUOR   Quality: Great   MCap 39,079 Cr   Gap +4.5%
+
+    A named stock, a graded result, a measured gap. from_events() and
+    from_news() both returned None because they look for a SENTENCE
+    and the card is a TABLE. The source was never missing. The reader
+    was.
+    """
+    try:
+        from core import gappers
+        row = gappers.row_for(symbol)
+    except Exception as exc:                               # noqa: BLE001
+        return _broke("gapper card", exc)
+    if not row:
+        return None
+    line = gappers.reason_line(row)
+    if not line:
+        return None
+
+    # ---- THE GRADE MUST DRIVE THE SCORE. 6 August 2026. ----
+    #
+    # The first version returned weight=2 for every stock. ranker.py
+    # multiplies the weight into the score, so SOTL (Excellent result,
+    # +13.4% gap) and PACEDIGITK (Weak result, -4.6% gap) both came out
+    # at exactly 8.00 and the ranker could not tell them apart. It had
+    # found five candidates and could not rank them, which is the one
+    # job it exists to do.
+    #
+    # ranker.py expects 0..1. The channel already graded the result --
+    # use its grade.
+    weight = {"EXCELLENT": 0.95, "GREAT": 0.85, "GOOD": 0.65,
+              "OK": 0.45, "WEAK": 0.20}.get(
+        str(row.get("quality") or "").upper(), 0.45)
+
+    # ---- A DOWN GAP IS NOT A REASON TO BUY. ----
+    #
+    #     "i only trade in long positions"
+    #
+    # CUMMINSIND (-4.9%) and PACEDIGITK (-4.6%) gapped DOWN on their
+    # results and then recovered intraday. The ranker offered both as
+    # long candidates, because direction came back None and its
+    # "reason contradicts the move" gate had nothing to test.
+    #
+    # ranker.py reads POSITIVE / NEGATIVE, so say which it is.
+    direction = "POSITIVE" if row.get("direction") == "UP" else "NEGATIVE"
+
+    return {"text": line, "weight": weight, "direction": direction,
+            "source": "Earnings Pulse -- pre-open gappers",
+            "quality": row.get("quality"), "gap_pct": row.get("gap_pct")}
+
+
+def from_calendar(symbol, on_date=None):
+    """"It reported yesterday" is itself the reason, or None.
+
+    ---- THE BOT WAS BOUND TO NOW. 6 August 2026. ----
+
+        "what alphabetical order? none are the hard coded rules here
+         GMMPFAUDLR result last day. so bot doesnt know which stock got
+         result last day , today & next day? it is binded to now"
+
+    He is right and the data was already in the building. GMMPFAUDLR
+    closed up 13.8% on 6 August, and data/results_calendar.db has held
+    this the whole time:
+
+        GMMPFAUDLR  results_date 2026-08-05  NSE_ANN  17:03
+        "quarterly financial results for the quarter ended Jun 30 2026"
+
+    5,669 rows, refreshed the same morning. The ranker never asked.
+
+    A result filed after yesterday's close is the single most common
+    reason a stock moves at today's open -- and unlike a channel card
+    it exists for EVERY listed company, from the exchange itself, on
+    the day it happens. So it is a first-class reason source.
+    """
+    if not symbol:
+        return None
+    try:
+        import sqlite3
+        from datetime import date, datetime, timedelta
+        # ---- IT ONLY ACCEPTED A STRING. 8 August 2026. ----
+        #
+        # strptime() takes str. Handed a date or a datetime it raises
+        # TypeError, the bare except below swallows it, and the whole
+        # function returns None -- silently, with no log line.
+        #
+        # Measured that evening: why(symbol="SBCL") returned "reported
+        # results yesterday", and why(symbol="SBCL", on_date=<datetime>)
+        # returned nothing. Every tools/replay_day.py decision passes a
+        # datetime, so the results calendar -- the one reason source
+        # that exists for EVERY listed company -- was absent from every
+        # replayed decision, and from the centre.
+        #
+        # Accept all three shapes rather than trusting callers to guess.
+        if on_date is None:
+            today = datetime.now().date()
+        elif isinstance(on_date, str):
+            today = datetime.strptime(on_date[:10], "%Y-%m-%d").date()
+        elif isinstance(on_date, datetime):
+            # datetime FIRST -- datetime subclasses date, so testing
+            # isinstance(x, date) matches both and the datetime branch
+            # never runs. That is precisely how the first fix still
+            # returned None for every replay call.
+            today = on_date.date()
+        else:
+            today = on_date                 # date
+        con = sqlite3.connect("data/results_calendar.db")
+        rows = con.execute(
+            "select results_date, purpose from results_events "
+            "where upper(symbol) = ? and results_date >= ? "
+            "and results_date <= ? order by results_date desc limit 1",
+            (str(symbol).upper(),
+             (today - timedelta(days=4)).isoformat(),
+             (today + timedelta(days=4)).isoformat())).fetchall()
+        con.close()
+    except Exception as exc:                               # noqa: BLE001
+        return _broke("results calendar", exc)
+    if not rows:
+        return None
+    when, purpose = rows[0]
+    try:
+        from datetime import datetime as _dt
+        gap = (_dt.strptime(when, "%Y-%m-%d").date() - today).days
+    except Exception as exc:                               # noqa: BLE001
+        return _broke("results calendar date", exc)
+
+    # ---- A RESULT DUE TOMORROW IS NOT A REASON TO BUY TODAY ----
+    # It is a reason to be careful: the operator holds overnight on
+    # MTF, and buying into an unknown print is a coin toss he did not
+    # ask for. Reported = a reason. Upcoming = a warning, no weight.
+    if gap > 0:
+        return {"text": (f"results due in {gap} day(s) -- "
+                         f"{str(purpose)[:60]}"),
+                "weight": 0.0, "direction": None,
+                "source": "NSE results calendar", "upcoming": True}
+    when_words = {0: "reported results today",
+                  -1: "reported results yesterday"}.get(
+        gap, f"reported results {abs(gap)} sessions ago")
+    return {"text": f"{when_words} -- {str(purpose)[:70]}",
+            # Below a graded channel card, above an unexplained move:
+            # the exchange confirms THAT it reported, the card grades
+            # HOW it went.
+            "weight": 0.55, "direction": None,
+            "source": "NSE results calendar"}
+
+
+# ---- ONE READER, ONE QUERY PER SYMBOL PER MINUTE. 8 Aug 2026 ----
+#
+# The first version built a StockEvents() and hit the database on
+# EVERY why() call. Measured: 7.6 seconds for a single ranking cycle
+# of 60 symbols. The live loop ranks every few seconds, so this would
+# have spent the whole session opening sqlite connections while the
+# market moved.
+#
+# Same trap core/catalysts.py hit this morning. Opening a store per
+# symbol per cycle is never right on the trading loop.
+#
+# The events for a stock do not change second to second, so a short
+# TTL is honest: fresh enough that a card landing at 11:51 is seen on
+# the next cycle, cheap enough that ranking is not the bottleneck.
+_EVENT_TTL_SECONDS = 45.0
+_events_cache = {}
+_events_reader = [None]
+
+
+def _events_for(symbol):
+    """This stock's PRO channel events, cached briefly."""
+    import time
+    symbol = str(symbol or "").upper()
+    if not symbol:
+        return None
+    now = time.time()
+    hit = _events_cache.get(symbol)
+    if hit is not None and (now - hit[0]) < _EVENT_TTL_SECONDS:
+        return hit[1]
+    try:
+        if _events_reader[0] is None:
+            from core.stock_events import StockEvents
+            _events_reader[0] = StockEvents()
+        rows = _events_reader[0].for_symbol(symbol, limit=25)
+    except Exception as exc:                               # noqa: BLE001
+        rows = _broke("PRO channel events", exc)
+    # Bounded. A session touches ~1,100 symbols; this keeps the last
+    # few cycles rather than growing all day.
+    if len(_events_cache) > 2500:
+        _events_cache.clear()
+    _events_cache[symbol] = (now, rows)
+    return rows
+
+
+def why(events=None, news_hits=None, on_date=None, symbol=None):
+    """The single answer, or None.
+
+    PRO channels first -- they are the source he trusts and, on
+    SHILPAMED, they were also two hours earlier than anything else.
+    The gapper card is checked last: it is a real mechanism, but a
+    written explanation of the move beats a table of gaps.
+
+    `symbol` is optional so every existing caller keeps working; pass
+    it and the gapper card is consulted too.
+
+    Returns {"text", "weight", "direction", "source"} in exactly the
+    shape core/ranker.py's mechanism_of() already expects, so the
+    ranker needs no new field to read.
+    """
+    if not symbol:
+        return from_events(events, on_date=on_date) or from_news(news_hits)
+
+    # A result due TOMORROW is a warning, never a reason -- and it
+    # outranks everything, because he holds overnight on MTF and
+    # buying into an unknown print is a coin toss he did not ask for.
+    ahead = from_calendar(symbol, on_date=on_date)
+    if ahead and ahead.get("upcoming"):
+        return ahead
+
+    # ---- FETCH THE PRO EVENTS IF NOBODY HANDED THEM IN. 8 Aug 2026 ----
+    #
+    #     "on 06/08/2026 i stopped the bot early & terminal -2 news
+    #      collector left running."           -- operator
+    #
+    # He offered that as the explanation for why no PRO channel card
+    # appeared on 6 August. It was not the cause. data/stock_events.db
+    # holds 166 graded RESULT events for that day; the collector did
+    # its job.
+    #
+    # The cause is this function. from_events() reads the `events`
+    # argument, and every caller that does not fetch and pass them
+    # gets None -- silently, with the calendar answering instead. The
+    # live dashboard passes them via _mechanism_for(); the replay,
+    # core/centre.py and every test call why(symbol=X) and never have.
+    #
+    # So the nine PRO channels he pays for -- the grades, the AI
+    # verdicts, the only source he says he trusts -- have been absent
+    # from every replayed decision and every number I have shown him.
+    #
+    # A function that needs to be fed to work will eventually be
+    # called by someone who does not know that. It fetches for itself.
+    if events is None:
+        events = _events_for(symbol)
+
+    return (from_events(events, on_date=on_date)
+            or from_news(news_hits)
+            # ---- ORDER WINS AND BUSINESS UPDATES. 8 August 2026. ----
+            #
+            #     "concall , business updates are already with telegram
+            #      pro channels & also check for the data we were
+            #      ignoring"                        -- operator
+            #
+            # Business Pulse and OrderBook Pulse had been arriving for
+            # a month, correctly symbol-tagged, and nothing read them.
+            # Eleven of twelve stocks they named came back with no
+            # reason at all.
+            #
+            # Placed AFTER the filings and the news -- a published
+            # result outranks a contract -- and BEFORE the gapper card,
+            # because a Rs 990 crore order is a written explanation of
+            # a move and the gapper table is only a table of gaps.
+            or from_catalysts(symbol, on_date=on_date)
+            or from_gappers(symbol)
+            or ahead)
+
+
+def from_catalysts(symbol, on_date=None):
+    """An order win or a business update, if one landed recently.
+
+    These are the ANTICIPATION reasons -- the ones that move a stock
+    with no result anywhere near it. Weighted by the size printed on
+    the card: Rs 1,918 crore and Rs 1.05 crore are not the same news.
+    """
+    try:
+        from core import catalysts
+    except Exception as exc:                               # noqa: BLE001
+        return _broke("catalysts import", exc)
+    when = None
+    if on_date is not None:
+        try:
+            when = (on_date if hasattr(on_date, "hour")
+                    else datetime.combine(on_date, datetime.min.time()))
+        except Exception:                                  # noqa: BLE001
+            when = None
+    try:
+        return catalysts.for_symbol(symbol, now=when)
+    except Exception as exc:                               # noqa: BLE001
+        return _broke("catalysts", exc)
