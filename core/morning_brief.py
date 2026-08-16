@@ -96,12 +96,22 @@ quiet night is useful information. Do not manufacture significance.
 class MorningBrief:
     """Three sentences about the overnight session. Opinion, recorded."""
 
-    def __init__(self, client=None, store_path=STORE_PATH, model=MODEL):
+    def __init__(self, client=None, store_path=STORE_PATH, model=MODEL,
+                 budget=None):
         # client injected so tests never touch the network and a missing
         # key degrades to "no brief" rather than a crash.
         self._client = client
         self.store_path = store_path
         self.model = model
+        # ---- IT SPENT WITHOUT RECORDING. 16 August 2026. ----
+        # _record() below saves the BRIEF TEXT, not the cost, and the
+        # name made it look accounted for. data/ai_spend.db knew only
+        # news_direction and ai_check; this call was invisible to both
+        # the ledger and the Rs 2,500 cap. Injectable for tests.
+        if budget is None:
+            from core.ai_budget import AiBudget
+            budget = AiBudget()
+        self._budget = budget
         self._lock = threading.Lock()
         self._today = None
 
@@ -151,6 +161,11 @@ class MorningBrief:
         if extra_context:
             context += "\n\n" + extra_context
 
+        allowed, why = self._budget.may_call()
+        if not allowed:
+            warn(f"[BRIEF] Not calling: {why}. No brief today.")
+            return None
+
         try:
             response = self._client.messages.create(
                 model=self.model,
@@ -158,6 +173,16 @@ class MorningBrief:
                 system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": context}],
             )
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                self._budget.record(
+                    self.model, purpose="morning_brief",
+                    input_tokens=getattr(usage, "input_tokens", 0),
+                    output_tokens=getattr(usage, "output_tokens", 0),
+                    cache_read_tokens=getattr(
+                        usage, "cache_read_input_tokens", 0) or 0,
+                    cache_write_tokens=getattr(
+                        usage, "cache_creation_input_tokens", 0) or 0)
             parts = getattr(response, "content", None) or []
             text = "".join(getattr(p, "text", "") for p in parts).strip()
         except Exception as exc:                           # noqa: BLE001

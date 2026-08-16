@@ -315,12 +315,18 @@ class NewsImpact:
     """
 
     def __init__(self, master_loader=None, db_path=DB_PATH, client=None,
-                 model=MODEL):
+                 model=MODEL, budget=None):
         self.master_loader = master_loader
         self.db_path = db_path
         self.model = model
         self._client = client
         self._client_tried = client is not None
+        # Every paid call goes through one meter. Injectable so a test
+        # can hand in a tmp_path ledger and never touch data/ai_spend.db.
+        if budget is None:
+            from core.ai_budget import AiBudget
+            budget = AiBudget()
+        self._budget = budget
         self._lock = threading.Lock()
         self._profiles = None
         self._identity_owners = None
@@ -690,6 +696,32 @@ Reply with JSON only, no other text:
             # description, so it is named rather than counted.
             f"{c['symbol']} -- {profiles.get(c['symbol'], (set(), set(), ''))[2]}"
             for c in candidates)
+        # ---- IT SPENT WITHOUT RECORDING, AND WITHOUT A CAP ----
+        #
+        #     "last time 5$ were used within no time but that time u
+        #      claimed it will last atleast 60-90 days as per the
+        #      usage. but 5$ completed within 5 days."
+        #                             -- operator, 16 August 2026
+        #
+        # data/ai_spend.db holds 1,892 rows for 31 Jul - 5 Aug totalling
+        # $1.4321, and the arithmetic checks out exactly against Haiku
+        # 4.5's published rates. It reported TWO purposes: news_direction
+        # and ai_check.
+        #
+        # This call was never one of them. Five modules reach
+        # messages.create() and only three recorded anything or asked
+        # may_call() first -- so the ledger under-reported BY
+        # CONSTRUCTION and the Rs 2,500 monthly cap could not bind on
+        # the calls it did not know about.
+        #
+        # This one is the expensive shape: max_tokens=1200 against
+        # news_direction's 200, with 1,500 characters of body in the
+        # prompt where that one sends a 600-character headline.
+        allowed, why = self._budget.may_call()
+        if not allowed:
+            warn(f"[IMPACT] Not calling: {why}. Keyword links only.")
+            return None
+
         try:
             reply = client.messages.create(
                 model=self.model, max_tokens=1200,
@@ -700,6 +732,17 @@ Reply with JSON only, no other text:
         except Exception as exc:                           # noqa: BLE001
             warn(f"[IMPACT] reasoning failed ({exc}) -- keyword links only.")
             return None
+
+        usage = getattr(reply, "usage", None)
+        if usage is not None:
+            self._budget.record(
+                self.model, purpose="news_impact",
+                input_tokens=getattr(usage, "input_tokens", 0),
+                output_tokens=getattr(usage, "output_tokens", 0),
+                cache_read_tokens=getattr(
+                    usage, "cache_read_input_tokens", 0) or 0,
+                cache_write_tokens=getattr(
+                    usage, "cache_creation_input_tokens", 0) or 0)
 
         match = re.search(r"\{.*\}", text, re.S)
         if not match:

@@ -320,11 +320,38 @@ def words_with_positions(data):
     return out
 
 
-def _read_claude(data):
+def _read_claude(data, budget=None):
+    # ---- THE MOST EXPENSIVE CALL IN THE BOT, AND THE ONLY ONE THAT
+    #      NEITHER RECORDED NOR ASKED. 16 August 2026. ----
+    #
+    #     "5$ completed within 5 days"      -- operator
+    #
+    # data/ai_spend.db recorded $1.4321 across 1,892 calls for that
+    # window and the arithmetic is exact against Haiku 4.5's published
+    # rates -- so the ledger was not wrong, it was INCOMPLETE. It knew
+    # two purposes, news_direction and ai_check. Five modules reach
+    # messages.create().
+    #
+    # This is the vision path: a base64 JPEG in the prompt. An image is
+    # billed by its pixels, not its characters, so one call here costs
+    # multiples of the 469-token text calls that made up the whole
+    # ledger -- and it was charged to him with no row written and no
+    # cap consulted.
+    #
+    # Note it is tried SECOND: _read_tesseract() runs locally and free,
+    # and this only runs when that fails or is not installed. That
+    # limits the volume; it never limited the spend.
     import base64
     from core.morning_brief import anthropic_client
     client = anthropic_client()
     if client is None:
+        return ""
+    if budget is None:
+        from core.ai_budget import AiBudget
+        budget = AiBudget()
+    allowed, why = budget.may_call()
+    if not allowed:
+        warn(f"[IMAGE] Not reading with the model: {why}")
         return ""
     encoded = base64.standard_b64encode(data).decode("ascii")
     message = client.messages.create(
@@ -344,6 +371,18 @@ def _read_claude(data):
                 "anything. If there is no text, reply with nothing."},
         ]}],
     )
+    usage = getattr(message, "usage", None)
+    if usage is not None:
+        # An image's cost arrives in input_tokens like any other input,
+        # so nothing special is needed here beyond actually WRITING the
+        # row -- which is the whole of what was missing.
+        budget.record(
+            "claude-haiku-4-5-20251001", purpose="image_text",
+            input_tokens=getattr(usage, "input_tokens", 0),
+            output_tokens=getattr(usage, "output_tokens", 0),
+            cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+            cache_write_tokens=getattr(
+                usage, "cache_creation_input_tokens", 0) or 0)
     parts = [b.text for b in message.content if getattr(b, "text", None)]
     return "\n".join(parts)
 
