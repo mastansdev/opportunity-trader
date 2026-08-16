@@ -284,6 +284,48 @@ Click any symbol, anywhere on this page.
   </div>
 </div>
 
+<!--
+    "i want a bloom berg terminal style data analysis"
+    "which company is linked what sector, theme, which raw material
+     provider, end user of the products"   -- operator, 16 August 2026
+
+WHAT WAS WORTH COPYING, AND WHAT WAS NOT.
+
+A Bloomberg Terminal is a keyboard. You type a ticker, then a short
+mnemonic, then GO -- RELIANCE DES, RELIANCE CN, AAPL US Equity FA.
+That is the whole interaction model and it is why professionals are
+fast on it: no menus, no hunting, one line for every question.
+
+That part transfers exactly and costs nothing. It is built here.
+
+What did NOT get copied is a second page. Four dashboards were
+collapsed into two on 13 August and the watchlist, the run-up reading,
+delivery %, the AI spend and the stock card were all found stranded on
+pages he had stopped opening. Building a separate "terminal" screen
+would recreate that exact fault in a week. The command line drives THIS
+page instead.
+
+Every function below is backed by data already in the bot. Nothing
+here fetches anything new, and no function was invented to look
+impressive -- if there is no store behind it, it is not on the list.
+-->
+<div class="bar" style="margin-bottom:10px;gap:10px;">
+  <div style="display:flex;align-items:center;flex:1;gap:0;
+       border:1px solid var(--hair);border-radius:10px;
+       background:var(--card);max-width:560px;">
+    <span style="padding:0 10px;color:var(--muted);font-size:13px;">&gt;</span>
+    <input id="cmd" placeholder="RELIANCE DES   ·   STEEL   ·   HELP"
+           autocomplete="off" spellcheck="false"
+           style="flex:1;border:0;outline:0;background:transparent;
+                  color:var(--ink);font:inherit;font-size:14px;
+                  padding:9px 4px;font-variant-numeric:tabular-nums;">
+    <button class="wladd" data-go="1">GO</button>
+  </div>
+  <span style="font-size:12px;color:var(--muted);">
+    press <b>/</b> to type &middot; <b>Esc</b> to close &middot; <b>HELP</b> for functions
+  </span>
+</div>
+
 <div class="tabs">
   <button class="tab" data-tab="pre">Pre</button>
   <button class="tab on" data-tab="live">Live</button>
@@ -1464,6 +1506,145 @@ async function openCard(symbol){
   $("cardbody").innerHTML = html;
 }
 
+// ---------------------------------------------------------------
+// THE COMMAND LINE
+// ---------------------------------------------------------------
+// <THING> <FN> <GO>. Bloomberg's model, and the reason it is fast:
+// one line answers every question, no menus.
+//
+// EVERY function here is backed by a store that already exists. None
+// was invented to lengthen the list -- an empty function is worse than
+// a missing one, because he learns the terminal lies.
+const FUNCTIONS = {
+  DES:  "what the company does, and its price",
+  FA:   "last reported results",
+  CN:   "stored events and linked news",
+  LINK: "sector, themes, raw materials -- and who else is in each",
+  SPLC: "same as LINK (Bloomberg's name for it)",
+  OPP:  "what each kind of opportunity has been worth",
+  HELP: "this list",
+};
+
+function cmdHelp(){
+  const fn = Object.entries(FUNCTIONS).map(([k, v]) =>
+    `<tr><td style="width:22%"><b>${k}</b></td><td>${att(v)}</td></tr>`).join("");
+  return `<div class="cap">Type a symbol, then a function</div>
+    <table><tbody>
+      <tr><td style="width:22%"><b>RELIANCE</b></td>
+          <td>the card &mdash; same as RELIANCE DES</td></tr>
+      <tr><td><b>RELIANCE LINK</b></td>
+          <td>every group it belongs to, and its peers in each</td></tr>
+      <tr><td><b>STEEL</b></td>
+          <td>every company that tag reaches (241 of them)</td></tr>
+      <tr><td><b>crude</b></td>
+          <td>partial tags work &mdash; finds CRUDE OIL</td></tr>
+    </tbody></table>
+    <div class="cap" style="margin-top:14px">Functions</div>
+    <table><tbody>${fn}</tbody></table>
+    <div class="note" style="margin-top:12px">
+      There is no supplier&rarr;customer chain here. Bloomberg's SPLC is
+      built from disclosed contracts and revenue concentration; this bot
+      has no such feed, so LINK answers what it CAN prove &mdash; who
+      shares a sector, a theme or a raw material. "Crude spikes, who
+      does that reach" is exact. "Who supplies Tata Steel" is not, and
+      it will not guess.
+    </div>`;
+}
+
+function renderLinks(d){
+  const g = d.groups || [];
+  if (!g.length) return `<div class="empty">No groups for ${att(d.symbol)}.</div>`;
+  // Narrowest group first: sharing a 3-member theme says far more than
+  // sharing a 151-member sector.
+  return `<div class="cap">Every group it belongs to</div>`
+    + `<table><thead><tr><th>Axis</th><th>Group</th><th class="num">Peers</th>
+       <th>Who else</th></tr></thead><tbody>`
+    + g.map(x => `<tr>
+        <td style="color:var(--muted)">${att(x.column.replace(/_/g, " "))}</td>
+        <td><span class="symlink" data-tagq="${att(x.tag)}"><b>${att(x.tag)}</b></span></td>
+        <td class="num">${x.count}</td>
+        <td class="why">${x.peers.slice(0, 12).map(p =>
+            `<span class="symlink" data-card="${att(p)}">${att(p)}</span>`
+          ).join(", ")}${x.peers.length > 12
+            ? ` <span style="color:var(--muted)">+${x.peers.length - 12} more</span>` : ""}</td>
+      </tr>`).join("") + `</tbody></table>`;
+}
+
+function renderTag(d){
+  const exact = d.exact || [], near = d.like || [];
+  let html = "";
+  for (const e of exact){
+    html += `<div class="cap" style="margin-top:14px">${att(e.tag)} `
+      + `<span class="sub">${att(e.column.replace(/_/g, " "))} &middot; `
+      + `${e.symbols.length} companies</span></div>`
+      + `<div class="why" style="line-height:2">` + e.symbols.map(s =>
+          `<span class="symlink" data-card="${att(s)}">${att(s)}</span>`
+        ).join(", ") + `</div>`;
+  }
+  if (!exact.length && near.length){
+    html += `<div class="cap">No exact tag &mdash; did you mean</div>`
+      + `<table><tbody>` + near.map(h =>
+          `<tr><td><span class="symlink" data-tagq="${att(h.tag)}">${att(h.tag)}</span></td>`
+          + `<td style="color:var(--muted)">${att(h.column.replace(/_/g, " "))}</td>`
+          + `<td class="num">${h.count}</td></tr>`).join("")
+      + `</tbody></table>`;
+  }
+  if (!html) html = `<div class="empty">Nothing carries "${att(d.tag)}".</div>`;
+  return html;
+}
+
+function showPanel(title, html){
+  $("cardsym").textContent = title;
+  $("cardbody").innerHTML = html;
+  $("cardwrap").style.display = "";
+}
+
+async function runCommand(text){
+  const raw = String(text || "").trim();
+  if (!raw) return;
+  const parts = raw.split(/\s+/);
+  const head = parts[0].toUpperCase();
+  const fn = (parts[1] || "").toUpperCase();
+
+  if (head === "HELP" || head === "?"){
+    showPanel("HELP", cmdHelp());
+    return;
+  }
+  if (head === "OPP"){
+    document.querySelector('[data-tab="brain"]').click();
+    $("cardwrap").style.display = "none";
+    return;
+  }
+  // A KNOWN SYMBOL WINS OVER A TAG. RELIANCE is a company, not a theme,
+  // and NAMES is already fetched for the watchlist search.
+  const known = (NAMES || []).some(r =>
+    String((r && (r.symbol || r.s)) || r || "").toUpperCase() === head);
+
+  if (known || ["DES", "FA", "CN", "LINK", "SPLC"].includes(fn)){
+    if (fn === "LINK" || fn === "SPLC"){
+      showPanel(head + " · LINK", `<div class="empty">loading&hellip;</div>`);
+      try{
+        const d = await (await fetch(`/api/links/${encodeURIComponent(head)}`,
+                                     {cache: "no-store"})).json();
+        showPanel(head + " · LINK", renderLinks(d));
+      }catch(err){ showPanel(head, `<div class="empty">${att(err.message)}</div>`); }
+      return;
+    }
+    // DES / FA / CN all live on the one card; it is short enough to
+    // read whole, and splitting it would hide the thing he came for.
+    openCard(head);
+    return;
+  }
+  // Not a symbol -> treat it as a tag. This is the branch that answers
+  // "crude spikes, who does that reach".
+  showPanel(head, `<div class="empty">loading&hellip;</div>`);
+  try{
+    const d = await (await fetch(`/api/tag/${encodeURIComponent(head)}`,
+                                 {cache: "no-store"})).json();
+    showPanel(head, renderTag(d));
+  }catch(err){ showPanel(head, `<div class="empty">${att(err.message)}</div>`); }
+}
+
 function drawBrain(s){
   const m = (s && s.opportunity_memory) || {};
   const rows = m.families || [];
@@ -1601,6 +1782,30 @@ document.addEventListener("keydown", e => {
                              : ($("wlAdd").value || "").trim());
 });
 
+// ---- THE KEYBOARD. This is the half that makes it a terminal. ----
+// "/" from anywhere puts the cursor in the command line, Enter runs
+// it, Esc closes the panel. A Bloomberg user never reaches for the
+// mouse and that is the whole point of the model.
+document.addEventListener("keydown", e => {
+  const typing = e.target && (e.target.tagName === "INPUT"
+                              || e.target.tagName === "TEXTAREA");
+  if (e.key === "/" && !typing){
+    e.preventDefault();
+    $("cmd").focus();
+    $("cmd").select();
+    return;
+  }
+  if (e.key === "Escape"){
+    $("cardwrap").style.display = "none";
+    if (e.target && e.target.id === "cmd") e.target.blur();
+    return;
+  }
+  if (e.key === "Enter" && e.target && e.target.id === "cmd"){
+    e.preventDefault();
+    runCommand(e.target.value);
+  }
+});
+
 // ---- A SORT BUTTON IS NOT A TAB. 11 August 2026. ----
 //
 //     "activity change% Turonver are tabs ? i clicked on them =
@@ -1729,6 +1934,17 @@ document.addEventListener("click", async (e) => {
   // Checked BEFORE the watchlist and BUY handlers: a symbol inside a
   // watchlist row is also inside a row carrying data-wl, and the card
   // must win over the row it sits in.
+  if (e.target && e.target.getAttribute && e.target.getAttribute("data-go")){
+    runCommand($("cmd").value);
+    return;
+  }
+  // A tag inside the panel is clickable too -- LINK lists the groups,
+  // clicking one lists its members. That is the whole chain walk.
+  const tagq = e.target && e.target.closest && e.target.closest("[data-tagq]");
+  if (tagq){
+    runCommand(tagq.getAttribute("data-tagq"));
+    return;
+  }
   const card = e.target && e.target.closest && e.target.closest("[data-card]");
   if (card){
     openCard(card.getAttribute("data-card"));

@@ -591,6 +591,50 @@ def build_app(dashboard_state, trade_controller, master_loader,
             return {"available": False, "stores": [],
                     "verdict": f"could not be read ({exc})"}
 
+    @app.get("/api/links/{symbol}")
+    def stock_links(symbol: str):
+        """Every group this stock belongs to, and who else is in it.
+
+            "which company is linked what sector, theme, which raw
+             material provider, end user of the products every thing
+             in as same as bloomberg"      -- operator, 16 Aug 2026
+
+        Bloomberg calls this SPLC and builds it from DISCLOSED supplier
+        and customer relationships. That dataset is not here and cannot
+        be derived from what is -- see core/sector_map.py, which says
+        so rather than guessing.
+
+        What this answers exactly: which companies share a sector, an
+        industry, a theme, a raw material or an economic sensitivity.
+        "Crude spikes -- who does that reach" is a real answer; "who
+        supplies Tata Steel" is not, and the payload does not pretend
+        otherwise.
+        """
+        try:
+            from core import sector_map
+            return sector_map.links_of(symbol)
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[LINKS] {symbol} failed: {exc}")
+            return {"symbol": symbol, "found": False, "groups": [],
+                    "error": str(exc)}
+
+    @app.get("/api/tag/{tag}")
+    def tag_members(tag: str):
+        """Who carries this tag -- the reverse of /api/links.
+
+        Type STEEL and get the 241 names it reaches. `like` carries the
+        near-misses so he never has to know the master's own spelling
+        before he can ask: "crude" finds "CRUDE OIL".
+        """
+        try:
+            from core import sector_map
+            return {"tag": str(tag or "").upper(),
+                    "exact": sector_map.carrying(tag),
+                    "like": sector_map.like(tag)}
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[TAG] {tag} failed: {exc}")
+            return {"tag": tag, "exact": [], "like": [], "error": str(exc)}
+
     @app.get("/api/stock/{symbol}")
     def stock_card(symbol: str):  # noqa: D401  (see _json_safe above)
         """Everything the bot knows about one stock.

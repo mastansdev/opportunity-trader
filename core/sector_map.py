@@ -273,3 +273,155 @@ def spread(pushes, movers=None, per_sector=3, path=MASTER_CSV):
                      "action": "BUY" if way > 0 else "SELL"}
             (up if way > 0 else down).append(entry)
     return up, down
+
+
+# ==========================================================
+#  THE CHAIN: who is linked to what
+# ==========================================================
+#
+#     "which company is linked what sector, theme, which raw material
+#      provider, end user of the products every thing in as same as
+#      bloomberg"                   -- operator, 16 August 2026
+#
+# Bloomberg calls this SPLC -- supply chain -- and builds it from
+# DISCLOSED supplier and customer relationships: contracts, filings,
+# revenue concentration. That dataset is not in this repo and cannot be
+# derived from what is. Saying otherwise would be inventing a fact.
+#
+# WHAT IS HERE IS REAL AND IS NOT NOTHING. data/master_stocks.csv
+# classifies all 1,314 tradeable names on five axes, and a reverse
+# index over them answers the question that actually matters to an
+# opportunity bot:
+#
+#     COMMODITY_EXPOSURE    1,807 tags   STEEL 241, CRUDE OIL 89,
+#                                        ALUMINIUM 69, COPPER 61
+#     THEMES                3,370 tags   966 distinct
+#     ECONOMIC_SENSITIVITY  1,442 tags   EXPORT ORIENTED, IMPORT
+#                                        DEPENDENT, GOVERNMENT SPENDING
+#     BUSINESS_TYPE         1,314 tags   MANUFACTURER 754, DISTRIBUTOR
+#                                        51, EPC / CONTRACTOR 77
+#     INDUSTRY                635 distinct
+#
+# "Crude spikes -- who does that reach?" is answerable exactly.
+# "Who supplies Tata Steel?" is not, and this says so rather than
+# guessing. BUSINESS_TYPE is the closest thing to a position in the
+# chain: a MANUFACTURER exposed to STEEL consumes it, a METALS & MINING
+# manufacturer produces it.
+
+# The columns that carry a LIST of tags, separated by | or comma.
+TAG_COLUMNS = ("THEMES", "COMMODITY_EXPOSURE", "ECONOMIC_SENSITIVITY",
+               "KEYWORDS")
+# The columns that carry exactly one value.
+SINGLE_COLUMNS = ("SECTOR", "INDUSTRY", "BUSINESS_TYPE", "OWNERSHIP")
+
+_TAG_CACHE = None
+
+
+def _split_tags(raw):
+    if not raw:
+        return []
+    out = []
+    for part in str(raw).replace("|", ",").split(","):
+        part = part.strip().upper()
+        # NONE is a real answer to "what commodity does this touch" and
+        # it is not a group worth listing 665 members for.
+        if part and part != "NONE":
+            out.append(part)
+    return out
+
+
+def _tag_index(path=MASTER_CSV):
+    """{column: {tag: [symbols]}} over tradeable rows. Cached."""
+    global _TAG_CACHE
+    with _LOCK:
+        if _TAG_CACHE is not None:
+            return _TAG_CACHE
+        index = {c: {} for c in TAG_COLUMNS + SINGLE_COLUMNS}
+        for row in _rows(path):
+            symbol = (row.get("SYMBOL") or "").strip().upper()
+            if not symbol or not _tradeable(row):
+                continue
+            for column in SINGLE_COLUMNS:
+                value = (row.get(column) or "").strip().upper()
+                if value and value != "NONE":
+                    index[column].setdefault(value, []).append(symbol)
+            for column in TAG_COLUMNS:
+                for tag in _split_tags(row.get(column)):
+                    index[column].setdefault(tag, []).append(symbol)
+        _TAG_CACHE = {c: {t: sorted(set(s)) for t, s in tags.items()}
+                      for c, tags in index.items()}
+        return _TAG_CACHE
+
+
+def carrying(tag, path=MASTER_CSV):
+    """Every tradeable symbol carrying `tag`, and where it was found.
+
+    [{"column", "tag", "symbols"}], biggest group first. Searched
+    across every axis, because he does not have to know whether STEEL
+    is a commodity or a theme -- it is both, on different rows.
+    """
+    needle = str(tag or "").strip().upper()
+    if not needle:
+        return []
+    out = []
+    for column, tags in _tag_index(path).items():
+        for value, symbols in tags.items():
+            if value == needle:
+                out.append({"column": column, "tag": value,
+                            "symbols": symbols})
+    out.sort(key=lambda r: -len(r["symbols"]))
+    return out
+
+
+def like(fragment, limit=20, path=MASTER_CSV):
+    """Tags CONTAINING the fragment -- for "crude" finding "CRUDE OIL".
+
+    Exact matches first, then by group size. Without this he has to
+    know the master's own spelling before he can ask a question.
+    """
+    needle = str(fragment or "").strip().upper()
+    if len(needle) < 2:
+        return []
+    hits = []
+    for column, tags in _tag_index(path).items():
+        for value, symbols in tags.items():
+            if needle in value:
+                hits.append({"column": column, "tag": value,
+                             "count": len(symbols),
+                             "exact": value == needle})
+    hits.sort(key=lambda r: (not r["exact"], -r["count"]))
+    return hits[:limit]
+
+
+def links_of(symbol, path=MASTER_CSV):
+    """Every group this symbol belongs to, with its fellow members.
+
+    The answer to "what is this company connected to" -- its sector,
+    its industry, every theme, every raw material it is exposed to,
+    and what kind of business it is. Peers are the other members of
+    each group, so a crude spike names its own list.
+    """
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return {"symbol": "", "found": False, "groups": []}
+    index = _tag_index(path)
+    groups = []
+    for column in SINGLE_COLUMNS + TAG_COLUMNS:
+        for value, symbols in index.get(column, {}).items():
+            if sym in symbols:
+                peers = [s for s in symbols if s != sym]
+                groups.append({"column": column, "tag": value,
+                               "peers": peers, "count": len(peers)})
+    # Narrowest first: sharing a 3-member theme says far more about two
+    # companies than sharing a 151-member sector.
+    groups.sort(key=lambda g: (g["count"], g["column"]))
+    return {"symbol": sym, "found": bool(groups), "groups": groups}
+
+
+def tag_counts(column=None, path=MASTER_CSV):
+    """{column: [(tag, n)]} biggest first -- the map of the whole board."""
+    index = _tag_index(path)
+    wanted = [column] if column else list(index)
+    return {c: sorted(((t, len(s)) for t, s in index.get(c, {}).items()),
+                      key=lambda r: -r[1])
+            for c in wanted}

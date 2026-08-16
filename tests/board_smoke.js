@@ -91,9 +91,14 @@ function armBtn(id, arm){
 const CONTROLS = [
   armBtn("btn-on",  "on"),
   armBtn("btn-off", "off"),
-  control("tab-pre",  {tab: "pre"}),
-  control("tab-live", {tab: "live"}),
-  control("tab-post", {tab: "post"}),
+  control("tab-pre",   {tab: "pre"}),
+  control("tab-live",  {tab: "live"}),
+  control("tab-post",  {tab: "post"}),
+  // 16 August 2026: Watch and Brain were in the markup and were never
+  // clicked here. The coverage check below counts controls in the HTML
+  // and compares -- it caught the omission the moment Brain landed.
+  control("tab-watch", {tab: "watch"}),
+  control("tab-brain", {tab: "brain"}),
   control("sort-activity", {sort: "activity"}),
   control("sort-change",   {sort: "change"}),
   control("sort-turnover", {sort: "turnover"}),
@@ -260,8 +265,15 @@ check("qty and BUY sit inside the symbol cell", () => {
 // The smoke test above never CLICKED anything. That was the hole.
 // ---------------------------------------------------------------
 
+// Every pane the switcher knows about. Kept in step with the
+// [data-tab] buttons above -- if this list is short, clicking a tab it
+// does not know about looks like "blanked every pane" when the page is
+// working perfectly. That is exactly what happened when Watch and
+// Brain were added: 16 August 2026.
+const PANES = ["pre", "live", "post", "watch", "brain"];
+
 function paneState(){
-  return ["pre", "live", "post"].map(n => NODES[n + "-pane"]
+  return PANES.map(n => NODES[n + "-pane"]
     ? NODES[n + "-pane"].style.display : "?");
 }
 
@@ -288,7 +300,13 @@ check("each tab still shows exactly one pane", () => {
 check("every control on the page is exercised", () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "dashboard",
     "static", "board.html"), "utf8");
-  const found = (html.match(/data-(tab|sort)="[a-z%]+"/g) || []).length;
+  // ---- COUNT THE MARKUP, NOT THE SCRIPT. 16 August 2026. ----
+  // This read the whole file, so
+  //     document.querySelector('[data-tab="brain"]')
+  // -- a SELECTOR, not a control -- counted as a ninth button and the
+  // check failed with nothing wrong. Controls live above <script>.
+  const markup = html.split("<script")[0];
+  const found = (markup.match(/data-(tab|sort)="[a-z%]+"/g) || []).length;
   if (found > CONTROLS.length)
     throw new Error("board.html has " + found + " controls, this test clicks "
       + CONTROLS.length + " -- add the new one here");
