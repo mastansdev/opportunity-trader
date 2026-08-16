@@ -186,3 +186,84 @@ def test_it_does_not_claim_a_supply_chain_it_cannot_prove(page):
     assert "supplies" in page.lower() or "disclosed contracts" in page.lower(), (
         "the HELP text no longer tells him the chain is not a real "
         "supplier->customer graph")
+
+
+# ---------------------------------------------------------------
+# WHY -- the question the refusal store cannot answer
+# ---------------------------------------------------------------
+#
+#     "TVSMOTOR posted business updates & posted good quarterly
+#      results, stock rallied more than 300 rs since business update &
+#      as we all know markets price the future, so we / bot is no where
+#      cashing that option why even after getting all the data?"
+#                                     -- operator, 16 August 2026
+#
+# Traced end to end, and the bot did NOT miss the data:
+#
+#   03 Aug 03:31  Business Pulse "Monthly Business Update: TVS Motor"
+#   03 Aug 03:32  "JULY TOTAL SALES 629,675 VS 456,350 (YOY); EST 510,000"
+#   news_memory.impact:
+#       TVSMOTOR | POSITIVE | 0.85 | how='reasoned'
+#       "July sales surged 38% YoY and beat estimates, signaling
+#        strong demand momentum."
+#
+# It read it, reasoned it, scored it 0.85, and never bought the stock,
+# which went 3,876 -> 4,466 (+590 rs, +15.2%) over the following days.
+#
+# The gate is core/why_moving.py:238, and it is deliberate:
+#
+#       if on_date and not at.startswith(str(on_date)):
+#           continue
+#       "Yesterday's result is not why a stock is moving today"
+#
+# A catalyst is a reason for exactly ONE SESSION. On day two of a
+# rally the stock has no reason at all and is refused as "no reason
+# found" -- 562,427 of those recorded, the second commonest refusal.
+#
+# That is a design decision, not a bug, and changing it changes the
+# entry rule. These tests hold the DIAGNOSIS visible so the decision
+# gets made deliberately rather than forgotten again.
+
+def test_why_is_on_the_function_list(page):
+    assert "WHY:" in page
+    assert "/api/why/" in page
+
+
+def test_it_says_the_refusal_store_cannot_name_the_stock(page):
+    """data/decisions.db refusals is (date, at, reason, n). No symbol.
+    Any answer claiming to read a stock's refusal history would be
+    invented, so WHY re-runs the gates live and says so."""
+    # WHITESPACE NORMALISED. The phrase is wrapped across a line in the
+    # docstring -- "with no\n        symbol column" -- so a raw
+    # substring test failed on a sentence that says exactly the right
+    # thing. Eighth time a test on this project has matched prose and
+    # been wrong about it; the fix is to compare meaning, not layout.
+    import re
+    src = (ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
+    block = src[src.find('@app.get("/api/why")'):src.find('@app.get("/api/links')]
+    flat = re.sub(r"\s+", " ", block)
+    assert "no symbol column" in flat or "carries no symbol" in flat, (
+        "/api/why no longer states that the refusal store cannot name "
+        "the stock -- an answer that implied otherwise would be invented")
+
+
+def test_the_panel_explains_the_one_session_rule(page):
+    """The single most useful sentence on the screen: why a stock in a
+    two-week rally reads as 'no reason found' on day four."""
+    assert "reason for exactly ONE session" in page
+    assert "why_moving" in page
+
+
+def test_the_freshness_gate_still_exists_and_is_deliberate():
+    """If this ever changes, the diagnosis above stops being true and
+    the note on the panel becomes a lie."""
+    src = (ROOT / "core" / "why_moving.py").read_text(encoding="utf-8")
+    assert "if on_date and not at.startswith(str(on_date)):" in src
+    assert "not why a stock is moving today" in src
+
+
+def test_the_live_path_actually_passes_todays_date():
+    """The gate only bites because dashboard/state.py passes on_date.
+    Without it the newest reason would win whenever it happened."""
+    src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
+    assert 'on_date=datetime.now().strftime("%Y-%m-%d")' in src

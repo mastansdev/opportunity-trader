@@ -591,6 +591,130 @@ def build_app(dashboard_state, trade_controller, master_loader,
             return {"available": False, "stores": [],
                     "verdict": f"could not be read ({exc})"}
 
+    @app.get("/api/why")
+    def why_refused_today():
+        """What the bot turned down today, and how often.
+
+            "why it is not being used to predict the stock movement"
+                                    -- operator, 16 August 2026
+
+        THE STORE CANNOT NAME THE STOCK. data/decisions.db's refusals
+        table is (date, at, reason, n) -- counts per reason, with no
+        symbol column, 112,272 rows summing to millions of refusals.
+        So "why was TVSMOTOR skipped" is not answerable from history
+        and this endpoint does not pretend it is; /api/why/{symbol}
+        below re-runs the gates LIVE instead.
+        """
+        try:
+            import sqlite3
+            from datetime import datetime
+            con = sqlite3.connect("file:data/decisions.db?mode=ro", uri=True)
+            today = datetime.now().strftime("%Y-%m-%d")
+            rows = [{"reason": r[0], "n": r[1]} for r in con.execute(
+                "SELECT reason, SUM(n) FROM refusals WHERE date = ? "
+                "GROUP BY reason ORDER BY SUM(n) DESC", (today,))]
+            if not rows:                      # before the first refresh
+                rows = [{"reason": r[0], "n": r[1]} for r in con.execute(
+                    "SELECT reason, SUM(n) FROM refusals GROUP BY reason "
+                    "ORDER BY SUM(n) DESC LIMIT 15")]
+                scope = "all time -- nothing refused yet today"
+            else:
+                scope = today
+            picks = [dict(zip([c[0] for c in con.description], r))
+                     for r in con.execute(
+                         "SELECT symbol, rank, score, price, change_pct, "
+                         "mechanism FROM picks WHERE date = ? "
+                         "ORDER BY rank LIMIT 20", (today,))]
+            con.close()
+            return {"scope": scope, "reasons": rows, "picks": picks,
+                    "note": "counts only -- the refusal store carries no "
+                            "symbol. Ask /api/why/{symbol} for one stock."}
+        except Exception as exc:                           # noqa: BLE001
+            return {"scope": None, "reasons": [], "picks": [],
+                    "error": str(exc)}
+
+    @app.get("/api/why/{symbol}")
+    def why_this_symbol(symbol: str):
+        """Would this stock be refused RIGHT NOW, and by which gate.
+
+        Re-runs the real gates rather than reading history, because
+        history does not record the symbol. Every line is the same
+        check core/auto_entry.py's refuse_reason() applies.
+        """
+        sym = str(symbol or "").upper().strip()
+        out = {"symbol": sym, "checks": [], "verdict": None}
+        try:
+            known = set(master_loader.all_symbols())
+            blocked = master_loader.blocked_symbols()
+            in_universe = sym in known
+            out["checks"].append({
+                "gate": "in the tradeable universe", "ok": in_universe,
+                "detail": ("subscribed" if in_universe
+                           else blocked.get(sym, "not in master_stocks.csv"))})
+
+            snap = dashboard_state.get_snapshot() or {}
+            ranked = (snap.get("ranked") or {})
+            row = next((r for r in (ranked.get("rows") or [])
+                        if str(r.get("symbol", "")).upper() == sym), None)
+            refused = next((r for r in (ranked.get("refused_rows") or [])
+                            if str(r.get("symbol", "")).upper() == sym), None)
+
+            if row:
+                out["checks"].append({"gate": "cleared the ranker",
+                                      "ok": True,
+                                      "detail": row.get("mechanism") or ""})
+                out["verdict"] = "on the board now"
+            elif refused:
+                why = (refused.get("blocked_reason")
+                       or (refused.get("blocking") or [None])[0]
+                       or "refused, reason not recorded on the row")
+                out["checks"].append({"gate": "cleared the ranker",
+                                      "ok": False, "detail": why})
+                out["verdict"] = why
+            else:
+                out["checks"].append({
+                    "gate": "reached the ranker at all", "ok": False,
+                    "detail": "not in today's ranked or refused list -- it "
+                              "did not move enough to be looked at, or no "
+                              "tick has arrived"})
+                out["verdict"] = ("never reached the ranker today")
+
+            # THE ONE THAT EXPLAINS THE MULTI-DAY RALLIES.
+            # core/why_moving.py:238 drops any event not dated today:
+            # "Yesterday's result is not why a stock is moving today."
+            # So a catalyst is a reason for exactly ONE session, and a
+            # stock still climbing on day four has no reason at all.
+            try:
+                import sqlite3
+                from datetime import datetime
+                con = sqlite3.connect("file:data/stock_events.db?mode=ro",
+                                      uri=True)
+                today = datetime.now().strftime("%Y-%m-%d")
+                latest = con.execute(
+                    "SELECT at, kind, ai_direction, ai_reason FROM events "
+                    "WHERE upper(symbol) = ? AND ai_reason IS NOT NULL "
+                    "ORDER BY at DESC LIMIT 1", (sym,)).fetchone()
+                con.close()
+                if latest:
+                    fresh = str(latest[0]).startswith(today)
+                    out["checks"].append({
+                        "gate": "has a reason DATED TODAY", "ok": fresh,
+                        "detail": (f"{str(latest[0])[:10]} · "
+                                   f"{latest[2] or '?'} · {latest[3] or ''}"
+                                   + ("" if fresh else
+                                      "  <-- older than today, so the live "
+                                      "path cannot see it"))})
+                else:
+                    out["checks"].append({
+                        "gate": "has a reason DATED TODAY", "ok": False,
+                        "detail": "no reasoned event stored at all"})
+            except Exception:                              # noqa: BLE001
+                pass
+            return out
+        except Exception as exc:                           # noqa: BLE001
+            out["error"] = str(exc)
+            return out
+
     @app.get("/api/links/{symbol}")
     def stock_links(symbol: str):
         """Every group this stock belongs to, and who else is in it.

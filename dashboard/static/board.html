@@ -1521,6 +1521,7 @@ const FUNCTIONS = {
   CN:   "stored events and linked news",
   LINK: "sector, themes, raw materials -- and who else is in each",
   SPLC: "same as LINK (Bloomberg's name for it)",
+  WHY:  "would this be refused right now, and by which gate",
   OPP:  "what each kind of opportunity has been worth",
   HELP: "this list",
 };
@@ -1534,6 +1535,8 @@ function cmdHelp(){
           <td>the card &mdash; same as RELIANCE DES</td></tr>
       <tr><td><b>RELIANCE LINK</b></td>
           <td>every group it belongs to, and its peers in each</td></tr>
+      <tr><td><b>TVSMOTOR WHY</b></td>
+          <td>every gate, and the one that stopped it</td></tr>
       <tr><td><b>STEEL</b></td>
           <td>every company that tag reaches (241 of them)</td></tr>
       <tr><td><b>crude</b></td>
@@ -1549,6 +1552,32 @@ function cmdHelp(){
       does that reach" is exact. "Who supplies Tata Steel" is not, and
       it will not guess.
     </div>`;
+}
+
+// ---- WHY IT WAS NOT BOUGHT. ----
+// The refusal STORE cannot answer this: data/decisions.db's refusals
+// table is (date, at, reason, n) -- counts per reason, no symbol, 112k
+// rows summing to millions. So /api/why/{symbol} re-runs the real
+// gates live instead of reading a history that never named the stock.
+function renderWhy(d){
+  const rows = d.checks || [];
+  if (!rows.length) return `<div class="empty">No gates ran for ${att(d.symbol)}.</div>`;
+  return `<div class="cap">${att(d.symbol)} &mdash; ${att(d.verdict || "")}</div>`
+    + `<table><tbody>` + rows.map(c => `<tr>
+        <td style="width:8%"><span class="chip rc" style="background:var(${
+          c.ok ? "--ok-bg" : "--stop-bg"});color:var(${
+          c.ok ? "--ok-fg" : "--stop-fg"})">${c.ok ? "ok" : "no"}</span></td>
+        <td style="width:30%">${att(c.gate)}</td>
+        <td class="why">${att(c.detail || "")}</td></tr>`).join("")
+    + `</tbody></table>`
+    + `<div class="note" style="margin-top:12px">
+         A catalyst is a reason for exactly ONE session &mdash;
+         core/why_moving.py drops any event not dated today, on purpose:
+         "yesterday's result is not why a stock is moving today". A stock
+         still climbing on day four therefore has no reason at all, and
+         is refused as "no reason found". That is the design, and it is
+         worth arguing about rather than assuming.
+       </div>`;
 }
 
 function renderLinks(d){
@@ -1620,6 +1649,17 @@ async function runCommand(text){
   const known = (NAMES || []).some(r =>
     String((r && (r.symbol || r.s)) || r || "").toUpperCase() === head);
 
+  if (fn === "WHY" || head === "WHY"){
+    const target = fn === "WHY" ? head : (parts[1] || "").toUpperCase();
+    if (!target){ showPanel("WHY", cmdHelp()); return; }
+    showPanel(target + " · WHY", `<div class="empty">loading&hellip;</div>`);
+    try{
+      const d = await (await fetch(`/api/why/${encodeURIComponent(target)}`,
+                                   {cache: "no-store"})).json();
+      showPanel(target + " · WHY", renderWhy(d));
+    }catch(err){ showPanel(target, `<div class="empty">${att(err.message)}</div>`); }
+    return;
+  }
   if (known || ["DES", "FA", "CN", "LINK", "SPLC"].includes(fn)){
     if (fn === "LINK" || fn === "SPLC"){
       showPanel(head + " · LINK", `<div class="empty">loading&hellip;</div>`);
