@@ -215,8 +215,14 @@ class MasterLoader:
             # BE, with security ids that exist nowhere in Dhan's master.
             # Correcting the ids -- the obvious fix -- would have made
             # two trade-to-trade stocks REACHABLE: no intraday exit, no
-            # MTF, on a bot that squares off at 15:15 and cannot take
-            # delivery of something it did not plan to hold.
+            # MTF. That matters even though this bot CAN hold
+            # overnight -- config.FORCE_SQUARE_OFF_AT_CLOSE is False
+            # and preflight says so in words, "positions carry
+            # overnight (MTF)". A T2T name is refused not because the
+            # bot must be flat by 15:30, but because it cannot be
+            # bought on margin and cannot be sold before delivery
+            # settles -- so neither the sizing nor the stop means what
+            # core/position_plan.py computed.
             #
             # Marking those two NO fixed the instance. This fixes the
             # class, in code, where forgetting is not an option.

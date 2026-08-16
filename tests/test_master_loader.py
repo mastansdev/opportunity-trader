@@ -203,7 +203,9 @@ def test_lookup_by_symbol_and_security_id_agree(tmp_path):
 # series BE, with security ids that exist nowhere in Dhan's master.
 # Correcting the ids -- the obvious fix -- would have made two
 # trade-to-trade stocks reachable: no intraday exit, no MTF, on a bot
-# that squares off at 15:15.
+# that sizes every position on a 2.5% stop. (It is NOT flat at 15:30
+# -- FORCE_SQUARE_OFF_AT_CLOSE is False -- but a T2T name cannot be
+# bought on margin or sold before settlement either way.)
 
 _SERIES_HEADER = (
     "SECURITY ID,SYMBOL,SERIES,COMPANY NAME,SECTOR,INDUSTRY,CORE BUSINESS,"

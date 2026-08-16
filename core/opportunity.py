@@ -221,7 +221,8 @@ TYPES = (
                       r"cement price", r"commodity price", r"\brealisation",
                       r"\bspread\b.{0,15}\bexpand", r"\bmargin tailwind"),
          note="QUARTERS. Recorded so a move has an explanation, not "
-              "because a 15:15 square-off can trade a cycle."),
+              "because a position measured in days can trade a cycle "
+              "that turns over quarters."),
 
     dict(key="SECTOR_ROTATION", family=SECTOR, horizon=QUARTERS, side=EITHER,
          label="Sector rotation / flows",
@@ -479,9 +480,12 @@ def evaluate(since_days=120, min_cases=10):
     return {"available": True, "families": families,
             "scanned": got.get("scanned", 0),
             "min_cases": min_cases,
-            "note": "SESSION horizon is the only one a 15:15 square-off "
-                    "can act on. DAYS and QUARTERS are recorded so a "
-                    "move has an explanation, not so it can be traded."}
+            "note": "This bot may hold overnight on MTF -- config."
+                    "FORCE_SQUARE_OFF_AT_CLOSE is False -- so SESSION "
+                    "and DAYS are both reachable. QUARTERS is recorded "
+                    "so a move has an explanation, not so it can be "
+                    "traded: a theme that turns over in quarters is not "
+                    "a position sized on a 2.5% stop."}
 
 
 def verdict():

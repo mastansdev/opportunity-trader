@@ -207,9 +207,13 @@ def test_the_module_says_out_loud_that_it_does_not_vote():
 
 
 def test_horizons_are_declared_and_honest():
-    """A 15:15 square-off cannot trade a commodity cycle. Each family
-    must say which it is, so "can this bot act on it" is answered
-    rather than assumed."""
+    """A position sized on a 2.5% stop cannot ride a commodity cycle.
+    Each family must say which it is, so "can this bot act on it" is
+    answered rather than assumed.
+
+    NOTE: this bot is NOT flat at 15:30. FORCE_SQUARE_OFF_AT_CLOSE is
+    False and preflight reports "positions carry overnight (MTF)", so
+    SESSION and DAYS are both reachable. Only QUARTERS is out."""
     for spec in op.TYPES:
         assert spec["horizon"] in (op.SESSION, op.DAYS, op.QUARTERS), \
             spec["key"]
