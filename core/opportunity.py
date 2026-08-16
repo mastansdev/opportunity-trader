@@ -232,6 +232,20 @@ TYPES = (
          note="core/sector_map.py already measures today's leadership "
               "from prices, which is a better answer than a headline."),
 
+    dict(key="BUSINESS_UPDATE", family=COMPANY, horizon=SESSION,
+         side=EITHER, label="Business update / operational filing",
+         patterns=_rx(r"business update", r"operational update",
+                      r"\bmonthly (?:sales|numbers|update)",
+                      r"\bpre[- ]?quarter update", r"\bupdate on operations"),
+         note="ADDED FROM EVIDENCE, 16 August 2026. He named it -- "
+              "'a business update, expansion, capacity, guidance' -- and "
+              "a scan of the 3,829 NEWS/MACRO events no family matched "
+              "found 'business update' 128 times, the only opportunity "
+              "phrase in the top of that list. Everything above it was "
+              "earnings content (ebitda margin, investor presentation, "
+              "cons profit), which already has its own kind and grade "
+              "and is not an un-recognised family."),
+
     dict(key="GUIDANCE", family=COMPANY, horizon=SESSION, side=EITHER,
          label="Guidance / outlook change",
          patterns=_rx(r"\bguidance\b", r"\boutlook\b.{0,20}\b(?:raise|cut|revis)",
