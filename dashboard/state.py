@@ -2718,6 +2718,23 @@ class DashboardState:
                 # is that nothing becomes a rule until it is scored
                 # against real outcomes.
                 row["runup"] = self._runup_for(row.get("symbol"))
+                # ---- WHAT KIND OF OPPORTUNITY IS THIS. 16 Aug 2026 ----
+                #
+                #     "bot itself act as an opportunity bot ... company
+                #      news, government schemes, multi year order wins,
+                #      acquisitions, FDA approvals ... 100's"
+                #
+                # core/opportunity.py names the family. It is attached
+                # here, in the SHOWS layer, and NOWHERE on the entry
+                # path -- tests/test_opportunity_brain.py fails the
+                # build if it reaches the ranker, the engine or either
+                # plan module.
+                #
+                # It is a LABEL FOR RECALL, not a reason. The type
+                # comes from matching words, and core/ranker.py refuses
+                # keyword reasons by name; core/rules.is_a_reason()
+                # still governs whether anything may be traded.
+                row["opportunity"] = self._opportunity_for(row)
                 # ---- WHO IS BUYING TO KEEP. 8 August 2026. ----
                 #
                 #     "by seeing them many FII/DII, retail Algos started
@@ -3206,6 +3223,36 @@ class DashboardState:
         # between 0 candidates and a real list.
         return why(events=events, news_hits=hits, symbol=symbol,
                    on_date=datetime.now().strftime("%Y-%m-%d"))
+
+    def _opportunity_for(self, row):
+        """Which opportunity families this row's own reason text names.
+
+        Fail-soft to None, like every sibling build_*: a panel may cost
+        itself and may never cost the snapshot. core/watchlist.py took
+        the whole refresh down on 4 August by raising here.
+
+        None means "nothing recognised" AND "could not say" -- which is
+        correct, because neither is a reason to trade and the caller
+        must not be able to tell them apart and act on the difference.
+        """
+        try:
+            from core import opportunity
+
+            text = " ".join(str(row.get(k) or "") for k in
+                            ("mechanism", "why", "reason", "headline"))
+            if not text.strip():
+                return None
+            hits = opportunity.classify(text)
+            if not hits:
+                return None
+            # Most specific first is not knowable here, so keep the
+            # order the taxonomy declares and cap it -- three chips is
+            # already more than a row can carry.
+            return [{"key": h["key"], "label": h["label"],
+                     "horizon": h["horizon"], "direction": h["direction"],
+                     "matched": h["matched"]} for h in hits[:3]]
+        except Exception:                                  # noqa: BLE001
+            return None
 
     def build_members(self):
         """NIFTY 50 and F&O membership, for narrowing the LIVE tables.

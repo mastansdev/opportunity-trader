@@ -606,6 +606,32 @@ function reasonChips(r){
         r.runup.text || r.runup.reading);
   }
 
+  // ---- WHAT KIND OF OPPORTUNITY. 16 August 2026. ----
+  //
+  //     "bot itself act as an opportunity bot ... company news,
+  //      government schemes, multi year order wins, acquisitions, FDA
+  //      approvals, mine ore approvals ... 100's of opportunites"
+  //
+  // core/opportunity.py names the family. 959 events of exactly these
+  // kinds were already in data/stock_events.db and none could be
+  // NAMED -- they sat under the generic NEWS / MACRO kinds, so the bot
+  // could never ask "what happened last time an FDA approval landed".
+  //
+  // The horizon is on the chip because it is the uncomfortable half:
+  // a commodity cycle is real and a 15:15 square-off cannot trade it.
+  // SESSION is the only one this bot can act on, so the others are
+  // drawn muted -- visible, explaining the move, not inviting a trade.
+  if (r.opportunity && r.opportunity.length) {
+    for (const o of r.opportunity) {
+      const live = o.horizon === "SESSION";
+      add(o.label + (live ? "" : " · " + o.horizon.toLowerCase()),
+          live ? "news" : "flat",
+          o.label + " -- matched on \"" + o.matched + "\", direction "
+          + o.direction + ". A TYPE IS NOT A REASON: this names the "
+          + "family so the bot can recall it, and never decides a trade.");
+    }
+  }
+
   if (r.headroom_pct !== null && r.headroom_pct !== undefined
       && Number(r.headroom_pct) < 3)
     add(Number(r.headroom_pct).toFixed(1) + "% to UC", "tape",
