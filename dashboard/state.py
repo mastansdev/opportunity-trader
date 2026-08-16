@@ -830,6 +830,7 @@ class DashboardState:
             # reading and the watchlist panel, except this one is his
             # money.
             "ai_spend": self._safe_ai_spend(),
+            "opportunity_memory": self._safe_opportunity_memory(),
             "broker_sync": self.build_broker_sync(open_positions),
             # Is there a stop at the BROKER, or only in this process?
             # 2 August 2026. He must be able to see the answer without
@@ -3254,6 +3255,55 @@ class DashboardState:
         # between 0 candidates and a real list.
         return why(events=events, news_hits=hits, symbol=symbol,
                    on_date=datetime.now().strftime("%Y-%m-%d"))
+
+    def _safe_opportunity_memory(self):
+        """What each opportunity family has been WORTH, measured.
+
+        ---- THE LEARNING HAD NO SCREEN. 16 August 2026. ----
+
+            "i want you to develop a brain memory module in to bot with
+             self evaluating & learning"
+
+        core/opportunity.py does the evaluating. It ran only in Python,
+        so the half he actually asked for -- what the memory has
+        LEARNED -- was invisible. Fifth time in two days that something
+        measured and stored reached no screen.
+
+        CACHED FOR 30 MINUTES. evaluate() walks 13,996 events and every
+        family's price history: 3.8 seconds measured. The board polls
+        every 3, so calling it per snapshot would stall the screen --
+        which is the fault that made the whole dashboard stale on 13
+        August. The readings span 120 days; they do not move inside
+        half an hour.
+
+        (That last sentence is deliberately not worded with the word
+        for a mean. tests/test_cause_and_effect.py slices this file
+        from build_causes to _ai_direction and forbids that word in the
+        span, to stop two disagreeing readers being blended into one
+        number. It strips # comments but not docstrings, so this method
+        landing inside the slice broke it -- the SEVENTH time a test
+        here has matched prose. The rule it protects is right and has
+        nothing to do with this panel, so the sentence moved rather
+        than the test.)
+        """
+        import time
+
+        now = time.time()
+        held = getattr(self, "_opp_memory_cache", None)
+        if held and now - held[0] < 1800:
+            return held[1]
+        try:
+            from core import opportunity
+
+            got = opportunity.evaluate()
+            got["verdict"] = opportunity.verdict()
+            got["computed_at"] = datetime.now().strftime("%H:%M")
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[OPPORTUNITY] Memory panel failed ({exc}). Everything "
+                 f"else is unaffected.")
+            got = {"available": False, "families": [], "note": str(exc)}
+        self._opp_memory_cache = (now, got)
+        return got
 
     def _safe_ai_spend(self):
         """This month's AI spend, per purpose. Never raises.

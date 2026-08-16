@@ -249,6 +249,7 @@ SERVED ALONGSIDE, NOT INSTEAD
   <button class="tab on" data-tab="live">Live</button>
   <button class="tab" data-tab="post">Post</button>
   <button class="tab" data-tab="watch">Watch</button>
+  <button class="tab" data-tab="brain">Brain</button>
 </div>
 
 <div id="live-pane">
@@ -375,6 +376,58 @@ ONE ACTION, NOT TWO. The old panel had SELL beside BUY (data-act=
 nothing else on /board can short. Restoring the panel is not the
 moment to add an action the board has never had.
 -->
+<!--
+    "i want you to develop a brain memory module in to bot with self
+     evaluating & learning to find the opportunity on based of the
+     memory."                       -- operator, 16 August 2026
+
+core/opportunity.py names 13 kinds of opportunity and measures what
+each one DID afterwards. This is that measurement. It was computed
+and stored the day it was written and shown on no screen -- the fifth
+time in two days something measured reached nobody.
+
+READ THE n COLUMN FIRST. A family under 10 measurable cases prints no
+average at all, on purpose: "nothing concluded from fewer than 10
+comparable cases". An average of four is how a coincidence becomes a
+rule.
+
+THE TWO AVERAGE COLUMNS ARE NOT THE SAME QUESTION.
+ALL is every event of that family. LONG is the subset whose sentence
+reads positive -- the only half a long-only bot could ever act on.
+They differ a lot: GUIDANCE reads -0.22% over everything and +0.23%
+over its positive half, because approvals and rejections were
+cancelling each other out in one bucket.
+
+HORIZON says whether this bot can act on it. SESSION and DAYS are
+reachable -- it holds overnight on MTF. QUARTERS is not: a theme that
+turns over in quarters is not a position sized on a 2.5% stop.
+
+NOTHING HERE VOTES. tests/test_opportunity_brain.py fails the build if
+core/opportunity.py is ever imported by the engine, the ranker or
+either plan module.
+-->
+<div id="brain-pane" style="display:none">
+  <div class="cap">What each kind of opportunity has been worth</div>
+  <div id="brainverdict" class="note" style="margin:0 0 12px;"></div>
+  <table>
+    <thead><tr>
+      <th>Opportunity</th><th>Horizon</th>
+      <th class="num">Seen</th><th class="num">n</th>
+      <th class="num">Avg (all)</th><th class="num">Up%</th>
+      <th class="num">n long</th><th class="num">Avg (long)</th>
+      <th>Verdict</th>
+    </tr></thead>
+    <tbody id="brainrows">
+      <tr><td colspan="9" class="empty">waiting for the first snapshot&hellip;</td></tr>
+    </tbody>
+  </table>
+  <div class="note" style="margin-top:12px;">
+    Next-session close-to-close after the event. It reports; it never
+    decides. Entry, stop, size and exit come from
+    <code>core/position_plan.py</code> and <code>core/exit_plan.py</code>.
+  </div>
+</div>
+
 <div id="watch-pane" style="display:none">
   <div class="cap">Add a stock to watch</div>
   <div class="wlsearch">
@@ -1070,7 +1123,7 @@ function draw(s){
   const typing = document.activeElement
     && document.activeElement.classList
     && document.activeElement.classList.contains("qty");
-  if (typing){ drawPre(s); drawPost(s); drawWatch(s); return; }
+  if (typing){ drawPre(s); drawPost(s); drawWatch(s); drawBrain(s); return; }
 
   $("body").innerHTML = drawn.length
     // He asked for this line gone, 11 August. The count of what did
@@ -1091,6 +1144,7 @@ function draw(s){
   drawPre(s);
   drawPost(s);
   drawWatch(s);
+  drawBrain(s);
 }
 
 // "20 stocks is good number to see. less is more."
@@ -1263,6 +1317,55 @@ function wlRows(rows, removable){
     + `</tbody></table>`;
 }
 
+function drawBrain(s){
+  const m = (s && s.opportunity_memory) || {};
+  const rows = m.families || [];
+  const v = $("brainverdict");
+  if (v) {
+    v.textContent = m.available === false
+      ? ("The opportunity memory could not be read" +
+         (m.note ? " — " + m.note : "") + ".")
+      : (m.verdict || "");
+  }
+  if (!rows.length){
+    $("brainrows").innerHTML =
+      `<tr><td colspan="9" class="empty">nothing recognised yet</td></tr>`;
+    return;
+  }
+  // A number with no sign is unreadable at a glance, and a missing
+  // number must look missing rather than like a zero.
+  const pc = v2 => (v2 === null || v2 === undefined) ? "&mdash;"
+    : `<span style="color:${v2 >= 0 ? "#1d9e75" : "#e24b4a"}">${
+        v2 >= 0 ? "+" : ""}${Number(v2).toFixed(2)}%</span>`;
+  const rt = v2 => (v2 === null || v2 === undefined) ? "&mdash;"
+    : `${Number(v2).toFixed(0)}%`;
+
+  $("brainrows").innerHTML = rows.map(f => {
+    // QUARTERS is real and unreachable for this bot. Say so in the row
+    // rather than letting a good-looking average invite a trade.
+    const reach = f.horizon === "QUARTERS";
+    const thin = f.verdict !== "measured";
+    return `<tr${reach ? ' style="opacity:.55"' : ""}>
+      <td>${att(f.label || f.key)}</td>
+      <td><span class="chip rc" style="background:var(${
+          f.horizon === "SESSION" ? "--ok-bg" : reach ? "--flat-bg" : "--warn-bg"
+        });color:var(${
+          f.horizon === "SESSION" ? "--ok-fg" : reach ? "--flat-fg" : "--warn-fg"
+        })">${att(f.horizon)}</span></td>
+      <td class="num">${f.seen ?? "—"}</td>
+      <td class="num">${f.measured ?? "—"}</td>
+      <td class="num">${pc(f.avg_pct)}</td>
+      <td class="num">${rt(f.up_rate)}</td>
+      <td class="num">${f.positive_cases ?? "—"}</td>
+      <td class="num">${pc(f.avg_pct_positive)}</td>
+      <td style="font-size:12px;color:var(--muted)">${
+        thin ? att(f.verdict) : (reach
+          ? "measured — but this bot cannot hold it that long"
+          : "measured")}</td>
+    </tr>`;
+  }).join("");
+}
+
 function drawWatch(s){
   const w = (s && s.watchlist) || {};
   const group = (title, sub, rows, removable) =>
@@ -1368,11 +1471,11 @@ document.addEventListener("keydown", e => {
 document.querySelectorAll(".tabs [data-tab]").forEach(b =>
   b.addEventListener("click", () => {
     const name = b.dataset.tab;
-    if (!["pre", "live", "post", "watch"].includes(name)) return;
+    if (!["pre", "live", "post", "watch", "brain"].includes(name)) return;
     document.querySelectorAll(".tabs [data-tab]").forEach(
       x => x.classList.remove("on"));
     b.classList.add("on");
-    for (const pane of ["pre", "live", "post", "watch"])
+    for (const pane of ["pre", "live", "post", "watch", "brain"])
       $(pane + "-pane").style.display = (pane === name) ? "" : "none";
   }));
 

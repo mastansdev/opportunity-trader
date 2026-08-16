@@ -283,3 +283,73 @@ def test_every_family_is_reported_even_with_no_hits():
     got = op.evaluate(since_days=1)
     if got["available"]:
         assert len(got["families"]) == len(op.TYPES)
+
+
+# ---------------------------------------------------------------
+# 6. THE LEARNING ITSELF MUST REACH THE SCREEN
+# ---------------------------------------------------------------
+#
+# The per-row type chips shipped first. The MEASUREMENT -- what each
+# family has actually been worth -- ran only in Python, so the half he
+# asked for ("self evaluating & learning") was invisible. Fifth time in
+# two days that something measured and stored reached no screen.
+
+def test_the_snapshot_carries_the_measured_memory():
+    src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
+    assert '"opportunity_memory"' in src, (
+        "the snapshot does not carry the brain's measurements, so no "
+        "screen can show what it has learned")
+    assert "_safe_opportunity_memory" in src
+
+
+def test_the_memory_is_cached_because_it_is_slow():
+    """evaluate() walks ~14,000 events and their price history: 3.8s
+    measured. The board polls every 3s. Calling it per snapshot would
+    stall the screen -- the exact fault that made the dashboard stale
+    on 13 August."""
+    src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
+    body = src[src.find("def _safe_opportunity_memory"):
+               src.find("def _safe_ai_spend")]
+    assert "_opp_memory_cache" in body, "no cache -- this runs every poll"
+    assert "1800" in body, "the cache window is not the documented 30 min"
+
+
+def test_the_board_has_a_brain_tab_that_switches():
+    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
+        encoding="utf-8")
+    assert 'data-tab="brain"' in page
+    assert 'id="brain-pane"' in page
+    block = page[page.find('document.querySelectorAll(".tabs [data-tab]")'):]
+    block = block[:block.find("async function tick")]
+    assert block.count('"brain"') >= 2, (
+        "the tab is in the markup but not in BOTH the allow-list and "
+        "the show/hide loop, so it highlights and shows nothing")
+
+
+def test_the_brain_tab_shows_the_case_count_beside_every_average():
+    """An average with no n is how a coincidence becomes a rule. The
+    column that makes the number safe to read must be on the screen,
+    not just in the data."""
+    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
+        encoding="utf-8")
+    pane = page[page.find('id="brain-pane"'):page.find('id="watch-pane"')]
+    assert "f.measured" in page or ">n<" in pane, (
+        "no case-count column beside the averages")
+    assert "positive_cases" in page, (
+        "the long-only sub-population has no n on the screen")
+
+
+def test_an_unreachable_horizon_says_so_on_the_row():
+    """COMMODITY_CYCLE measures well and this bot cannot hold a
+    position for a quarter. A good-looking average must not read as an
+    invitation."""
+    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
+        encoding="utf-8")
+    assert "cannot hold it that long" in page
+
+
+def test_the_panel_never_takes_the_snapshot_down():
+    src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
+    body = src[src.find("def _safe_opportunity_memory"):
+               src.find("def _safe_ai_spend")]
+    assert "except Exception" in body
