@@ -1432,6 +1432,50 @@ class Engine:
                     parts.append(f"results:{grade}")
         except Exception:                                  # noqa: BLE001
             pass
+        # ---- THE COLUMN THAT WAS NEVER FILLED. 16 August 2026. ----
+        #
+        #     "measure it against trade_memory first"
+        #
+        # He asked whether a catalyst should stay valid for more than
+        # one session -- the TVSMOTOR question. trade_memory has the
+        # exact column for it, days_since_results, and it is NULL on
+        # all 134 rows, because this dict has hardcoded None since it
+        # was written. So the question could not be answered from the
+        # bot's OWN trades and had to be proxied with price moves
+        # across 715 stored catalysts instead.
+        #
+        # A proxy is not the same measurement. The bot buys intraday
+        # on a breakout with a 1.8-3% stop and trails; "buy the close,
+        # hold five days" is a different trade. Filling this in means
+        # the next time the question comes up it can be answered on
+        # real fills.
+        #
+        # core/runup.py's reported_on() already does the lookup and is
+        # time-bounded ("results_date <= ?"), so it cannot see a result
+        # published after the moment being asked about.
+        try:
+            from datetime import date as _date
+
+            from core import runup
+            when = self.clock().date() if callable(
+                getattr(self, "clock", None)) else _date.today()
+            # within_days=180, not runup's default 12. That default is
+            # the RUN-UP window -- there is no run-up into a result
+            # three weeks old -- and it is right for that question and
+            # wrong for this one. TVSMOTOR reported 21 July; on 14
+            # August "24 days since results" is a real answer and the
+            # 12-day default would have written None again.
+            reported = runup.reported_on(symbol, on_date=when,
+                                         within_days=180)
+            if reported:
+                got = reported if isinstance(reported, _date) else None
+                if got is None:
+                    from datetime import datetime as _dt
+                    got = _dt.fromisoformat(str(reported)[:10]).date()
+                out["days_since_results"] = (when - got).days
+        except Exception:                                  # noqa: BLE001
+            pass                       # bookkeeping must never block a trade
+
         out["had_reason"] = 1 if parts else 0
         out["reason_summary"] = ", ".join(parts)[:160] or None
         return out

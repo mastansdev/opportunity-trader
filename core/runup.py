@@ -167,13 +167,20 @@ RECENT_RESULT_DAYS = 12
 _reported_cache = {}
 
 
-def reported_on(symbol, on_date=None, results_db=RESULTS_DB):
+def reported_on(symbol, on_date=None, results_db=RESULTS_DB,
+                within_days=None):
     """The most recent results date for this stock at or before
     `on_date`, or None.
 
     Time-bounded on purpose. graded_symbols() had to learn the same
     lesson on 8 August: a function that can only answer "right now"
     cannot be replayed, and every number built on it is unfalsifiable.
+
+    `within_days` defaults to RECENT_RESULT_DAYS (12), which is the
+    window a RUN-UP reading needs -- there is no run-up into a result
+    three weeks old. Callers asking a different question pass their
+    own: core/engine.py stamps days_since_results onto every position
+    and 24 days since results is a real answer, not a None.
     """
     symbol = str(symbol or "").upper()
     if not symbol:
@@ -181,11 +188,12 @@ def reported_on(symbol, on_date=None, results_db=RESULTS_DB):
     on_date = on_date or datetime.now()
     if hasattr(on_date, "date"):
         on_date = on_date.date()
-    key = (symbol, on_date.isoformat(), results_db)
+    key = (symbol, on_date.isoformat(), results_db, within_days)
     if key in _reported_cache:
         return _reported_cache[key]
 
-    floor = (on_date - timedelta(days=RECENT_RESULT_DAYS)).isoformat()
+    window = RECENT_RESULT_DAYS if within_days is None else int(within_days)
+    floor = (on_date - timedelta(days=window)).isoformat()
     rows = _rows(
         results_db,
         "select results_date from results_events where upper(symbol) = ? "
