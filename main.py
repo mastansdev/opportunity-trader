@@ -470,6 +470,31 @@ def main():
             nxt = market_calendar.next_trading_day(today)
             decision(f"[CALENDAR] {today} is not a trading day ({why}). "
                      f"Next session: {nxt}. Nothing to do -- exiting.")
+            # ---- IT EXITED WITHOUT SAYING HOW TO LOOK. 16 Aug 2026 ----
+            #
+            #     "py main.py started but it exited as today is non
+            #      market day(weekend-sunday)"
+            #
+            # The exit is right and stays. The reasoning above -- "a
+            # dashboard showing a frozen, empty market" -- was written
+            # when the dashboard WAS the live movers table. It is not
+            # any more: the Brain tab reads 14,000 stored events, Watch
+            # is his own list, Post is the closed book, and none of
+            # them needs a tick. He was sent to look at one and had no
+            # way to get there.
+            #
+            # tools/dashboard_preview.py already serves exactly this
+            # and has since it was written. It was simply never named
+            # at the one moment he needs it.
+            from dashboard.access_token import get_or_create_token
+            from config import DASHBOARD_HOST as _H, DASHBOARD_PORT as _P
+            decision("")
+            decision("  To review stored data on a non-trading day:")
+            decision("      py tools/dashboard_preview.py --no-fetch")
+            decision(f"      http://{_H}:{_P}/board"
+                     f"?token={get_or_create_token()}")
+            decision("  Brain, Watch and Post work with the market shut.")
+            decision("")
             sys.exit(0)
     except Exception as exc:
         warn(f"[CALENDAR] Market calendar unavailable ({exc}).")

@@ -146,6 +146,10 @@ SERVED ALONGSIDE, NOT INSTEAD
   #toast{position:fixed;right:18px;bottom:18px;z-index:50;padding:10px 16px;
          border-radius:10px;font-size:13px;display:none;max-width:60vw;}
   table + .cap{margin-top:18px;}
+  /* Every symbol on this page opens core/stock_card.py. Underlined on
+     hover only -- a permanently decorated table is harder to scan. */
+  .symlink{cursor:pointer;}
+  .symlink:hover{text-decoration:underline;}
   /* ---- THE WATCHLIST CAME BACK. 16 August 2026. ----
      Collapsing four dashboards into one dropped this panel entirely:
      the store, the POST route and the snapshot key all survived, and
@@ -243,6 +247,42 @@ SERVED ALONGSIDE, NOT INSTEAD
 </div>
 
 <div id="toast"></div>
+
+<!--
+    "dashboard must contain all info from bot. recall the memory of any
+     stock on demand"                    -- operator, 29 July 2026
+
+    "how the data is being stored corresponding to stock? i cannot see
+     them even now ... only place is dashboard to check any specific
+     data about how its being tagged & whats being used"
+                                         -- operator, 16 August 2026
+
+core/stock_card.py answered the first request on 11 August. Its own
+docstring states the principle: "if the bot holds a fact and acts on
+it, hiding that fact is a bug by definition."
+
+GET /api/stock/{symbol} has served it ever since. board.html called it
+ZERO times -- the card was reachable only from /full, the page he
+moved away from on 13 August. So the answer to "where is it" was: on
+a screen you stopped opening. Sixth time in two days that something
+built and working reached nobody.
+
+Click any symbol, anywhere on this page.
+-->
+<div id="cardwrap" style="display:none;position:fixed;inset:0;z-index:60;
+     background:rgba(0,0,0,.35);">
+  <div id="card" style="position:absolute;right:0;top:0;bottom:0;
+       width:min(680px,94vw);overflow:auto;background:var(--page);
+       border-left:1px solid var(--hair);padding:18px 20px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;
+         margin-bottom:12px;">
+      <div id="cardsym" style="font-size:19px;font-weight:600;">&mdash;</div>
+      <button id="cardclose" class="chip" style="cursor:pointer;border:0;
+              background:var(--flat-bg);color:var(--flat-fg);">close</button>
+    </div>
+    <div id="cardbody"><div class="empty">loading&hellip;</div></div>
+  </div>
+</div>
 
 <div class="tabs">
   <button class="tab" data-tab="pre">Pre</button>
@@ -815,7 +855,7 @@ function row(r){
   // "[qty] ; BUY button next to stock symbol name" -- 11 August 2026.
   // It was at the far right, eleven columns from the name he is reading.
   return `<tr data-row="${sym}">
-    <td class="sym">${sym}
+    <td class="sym"><span class="symlink" data-card="${sym}">${sym}</span>
       <span class="chip capb">${capOf(r)}</span>
       <div class="act">${buy}</div>${planline}</td>
     <td>${gc}</td>
@@ -1166,7 +1206,7 @@ function gapRow(r, g){
   const gc = GRADE[gr] ? chip(gr, GRADE[gr][0], GRADE[gr][1])
                        : chip("—", "--flat-bg", "--flat-fg");
   return `<tr>
-    <td class="sym">${r.symbol}</td><td>${gc}</td>
+    <td class="sym"><span class="symlink" data-card="${r.symbol}">${r.symbol}</span></td><td>${gc}</td>
     <td class="num">${n2(r.prev_close)}</td><td class="num">${n2(r.open || r.ltp)}</td>
     <td class="num ${g >= 0 ? "up" : "dn"}">${g >= 0 ? "+" : ""}${g.toFixed(2)}%</td>
     <td class="num">${vol(r.volume)}</td>
@@ -1233,7 +1273,7 @@ function drawPost(s){
            color:var(--warn-fg);font-size:10px;margin-left:6px;"
            title="adopted from the broker -- the bot did not choose this
  entry, only managed the exit">adopted</span>`;
-    return `<tr><td class="sym">${t.symbol}${whose}</td>
+    return `<tr><td class="sym"><span class="symlink" data-card="${t.symbol}">${t.symbol}</span>${whose}</td>
       <td class="num">${t.qty ?? "—"}</td>
       <td class="num">${hhmm(t.entry_time)}</td><td class="num">${n2(t.entry_price)}</td>
       <td class="num">${hhmm(t.exit_time)}</td><td class="num">${n2(t.exit_price)}</td>
@@ -1309,12 +1349,119 @@ function wlRows(rows, removable){
           ? `<span style="color:${r.change_pct >= 0 ? "#1d9e75" : "#e24b4a"}">${
               r.change_pct >= 0 ? "+" : ""}${r.change_pct.toFixed(2)}%</span>`
           : "&mdash;";
-        return `<tr><td>${att(sym)}</td><td>${att(r.when || "—")}</td>
+        return `<tr><td><span class="symlink" data-card="${att(sym)}">${att(sym)}</span></td><td>${att(r.when || "—")}</td>
                 <td class="why">${att(r.why || "")}</td>
                 <td class="num">${mv}</td>
                 <td style="white-space:nowrap">${act}${rm}</td></tr>`;
       }).join("")
     + `</tbody></table>`;
+}
+
+// ---------------------------------------------------------------
+// EVERYTHING THE BOT KNOWS ABOUT ONE STOCK
+// ---------------------------------------------------------------
+// Reads GET /api/stock/{symbol} -- core/stock_card.py, unchanged. This
+// draws it; it invents nothing. Every section is omitted entirely when
+// the card has nothing for it, because an empty heading reads as "the
+// bot has no data" when the truth is "this stock has no results yet".
+function cardSection(title, rows){
+  const real = (rows || []).filter(r => r[1] !== null && r[1] !== undefined
+                                        && r[1] !== "" && r[1] !== "—");
+  if (!real.length) return "";
+  return `<div class="cap" style="margin-top:14px">${att(title)}</div>`
+    + `<table><tbody>` + real.map(r =>
+        `<tr><td style="width:38%;color:var(--muted)">${att(r[0])}</td>`
+        + `<td>${r[2] ? r[1] : att(r[1])}</td></tr>`).join("")
+    + `</tbody></table>`;
+}
+
+async function openCard(symbol){
+  const sym = String(symbol || "").toUpperCase();
+  if (!sym) return;
+  $("cardsym").textContent = sym;
+  $("cardbody").innerHTML = `<div class="empty">loading&hellip;</div>`;
+  $("cardwrap").style.display = "";
+  let d;
+  try {
+    const res = await fetch(`/api/stock/${encodeURIComponent(sym)}`,
+                            {cache: "no-store"});
+    d = await res.json();
+  } catch (err) {
+    $("cardbody").innerHTML =
+      `<div class="empty">could not reach the bot: ${att(err.message)}</div>`;
+    return;
+  }
+  if (!d || d.found === false){
+    $("cardbody").innerHTML =
+      `<div class="empty">${att(sym)} is not in the master database.</div>`;
+    return;
+  }
+  const b = d.business || {}, p = d.price || {}, r = d.results || {};
+  const t = d.today || {}, ev = d.events || {};
+  const list = v => Array.isArray(v) ? v.join(" · ") : v;
+  const pcell = v => (v === null || v === undefined) ? null
+    : `<span style="color:${v >= 0 ? "#1d9e75" : "#e24b4a"}">${
+        v >= 0 ? "+" : ""}${Number(v).toFixed(2)}%</span>`;
+
+  let html = "";
+  html += cardSection("What this company does", [
+    ["Name", b.name], ["Sector", b.sector], ["Industry", b.industry],
+    ["Business", b.does], ["Type", b.type], ["Ownership", b.ownership],
+    ["Commodity exposure", list(b.commodity_exposure)],
+    ["Economic sensitivity", list(b.economic_sensitivity)],
+    ["Themes", list(b.themes)],
+  ]);
+  html += cardSection("Price", [
+    ["Last", p.last], ["Previous close", p.prev_close],
+    ["Open", p.open], ["High", p.high], ["Low", p.low],
+    ["Change", pcell(p.change_pct), true],
+    ["Volume", p.volume === null || p.volume === undefined ? null
+      : Number(p.volume).toLocaleString("en-IN")],
+    ["Upper circuit", p.upper_circuit], ["Lower circuit", p.lower_circuit],
+  ]);
+  html += cardSection("Today, through the bot's eyes", [
+    ["Entry attempt", t.attempt],
+    ["Volume vs its own normal", t.volume_multiple
+      ? Number(t.volume_multiple).toFixed(2) + "x" : null],
+  ]);
+  html += cardSection("Last results", [
+    ["Period", r.period], ["Grade", r.grade], ["Summary", r.summary],
+    ["Sales QoQ", pcell(r.sales_qoq), true],
+    ["PAT QoQ", pcell(r.pat_qoq), true],
+    ["Sales YoY", pcell(r.sales_yoy), true],
+    ["PAT YoY", pcell(r.pat_yoy), true],
+    ["Margin change", r.opm_bps_qoq === null || r.opm_bps_qoq === undefined
+      ? null : r.opm_bps_qoq + " bps"],
+  ]);
+
+  // ---- THE TAGS HE ASKED ABOUT. ----
+  // "whats being used" -- every stored event, with the opportunity
+  // family core/opportunity.py reads out of its headline. This is the
+  // link between "the bot stored something" and "the bot called it an
+  // order win", in one place, per stock.
+  const rows = ev.rows || [];
+  if (rows.length){
+    html += `<div class="cap" style="margin-top:14px">Stored events `
+      + `(${ev.count ?? rows.length})</div>`
+      + `<table><thead><tr><th>When</th><th>Kind</th><th>Grade</th>`
+      + `<th>Headline</th></tr></thead><tbody>`
+      + rows.map(e => `<tr><td style="white-space:nowrap">${
+            att(String(e.at || "").slice(0, 16).replace("T", " "))}</td>`
+          + `<td>${att(e.kind || "")}</td><td>${att(e.grade || "—")}</td>`
+          + `<td class="why">${att(cut(e.headline || "", 120))}</td></tr>`
+        ).join("") + `</tbody></table>`;
+  }
+  const impact = (d.news || {}).impact || [];
+  if (impact.length){
+    html += `<div class="cap" style="margin-top:14px">News linked to it</div>`
+      + `<table><tbody>` + impact.slice(0, 8).map(n =>
+          `<tr><td style="width:22%">${att(n.direction || "UNKNOWN")}</td>`
+          + `<td class="why">${att(cut(n.reason || "", 140))}</td></tr>`
+        ).join("") + `</tbody></table>`;
+  }
+  if (!html) html = `<div class="empty">The bot holds nothing on `
+    + `${att(sym)} yet.</div>`;
+  $("cardbody").innerHTML = html;
 }
 
 function drawBrain(s){
@@ -1575,6 +1722,20 @@ document.addEventListener("click", async (e) => {
       tick();
     }catch(err){ toast("Could not reach the bot: " + err.message, false); }
     finally { sw_busy = false; }
+    return;
+  }
+
+  // ---- OPEN / CLOSE THE STOCK CARD. ----
+  // Checked BEFORE the watchlist and BUY handlers: a symbol inside a
+  // watchlist row is also inside a row carrying data-wl, and the card
+  // must win over the row it sits in.
+  const card = e.target && e.target.closest && e.target.closest("[data-card]");
+  if (card){
+    openCard(card.getAttribute("data-card"));
+    return;
+  }
+  if (e.target && (e.target.id === "cardclose" || e.target.id === "cardwrap")){
+    $("cardwrap").style.display = "none";
     return;
   }
 

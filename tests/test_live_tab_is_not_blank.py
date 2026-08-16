@@ -624,7 +624,16 @@ def test_a_long_reason_is_cut_but_kept_in_the_tooltip():
 def test_buy_and_qty_sit_next_to_the_symbol():
     """They were eleven columns away from the name he is reading."""
     page = _board().text
-    stock_cell = page.split('<td class="sym">${sym}')[1][:300]
+    # ---- THE ANCHOR MOVED, THE RULE DID NOT. 16 August 2026. ----
+    #
+    # This split on '<td class="sym">${sym}'. The symbol is now wrapped
+    # in <span class="symlink" data-card="..."> so that clicking it
+    # opens core/stock_card.py -- which board.html had never called.
+    # Splitting on the CELL rather than on the cell-plus-symbol keeps
+    # the question this test asks ("are BUY and qty next to the name?")
+    # and stops it breaking the next time the name gains a wrapper.
+    stock_cell = page.split('<td class="sym">')[1][:400]
+    assert "${sym}" in stock_cell, "the symbol left its own cell"
     assert 'class="act"' in stock_cell
     assert "${buy}" in stock_cell
 
