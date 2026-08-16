@@ -66,6 +66,34 @@ CLASSIFICATION_COLUMNS = [c for c in REQUIRED_COLUMNS
 # refuse to start just because the morning tool hasn't been run.
 SUBSCRIBE_COLUMN = "SUBSCRIBE"
 
+# NSE's series code -- EQ, BE, BZ, SM, ST ... Populated from Dhan's
+# live scrip master by tools/verify_master_database.py's source, and
+# OPTIONAL: an older file without the column loads and behaves exactly
+# as before. See the block in load() for why absent must mean "unknown"
+# rather than "not tradeable".
+SERIES_COLUMN = "SERIES"
+
+
+def _tradeable_series():
+    """The one definition, borrowed rather than copied.
+
+    core/universe_builder.py has owned TRADEABLE_SERIES = {"EQ"} since
+    it was written. Re-declaring it here would be a second copy of a
+    rule, which is the exact sediment core/rules.py exists to prevent
+    and which has already caused live bugs in this repo.
+
+    Imported lazily: universe_builder pulls in core/rules.py and
+    core/logger.py, and the master loader is constructed early by
+    tools that have no business dragging those in. Falls back to the
+    same value if the import fails, because a guard that cannot load
+    its own rule must still refuse T2T -- never wave it through.
+    """
+    try:
+        from core.universe_builder import TRADEABLE_SERIES
+        return TRADEABLE_SERIES
+    except Exception:                                       # noqa: BLE001
+        return {"EQ"}
+
 
 class MasterLoader:
 
@@ -167,6 +195,54 @@ class MasterLoader:
                         record.get("SUBSCRIBE_REASON") or "marked NO"
                     )
                     continue
+
+            # ---- THE SERIES RULE WAS WRITTEN DOWN AND NEVER RUN ----
+            #
+            # 16 August 2026. all_symbols()' own docstring below says
+            # "a T2T / illiquid / ex-date stock never reaches the feed"
+            # -- and that was only true when a HUMAN remembered to mark
+            # it NO. core/universe_builder.py has defined
+            #
+            #     TRADEABLE_SERIES = {"EQ"}    # BE/BZ = T2T, NO intraday
+            #
+            # since it was written, and enforced it only in the tools
+            # that PROPOSE list changes. Nothing on the live path ever
+            # asked: core/engine.py, core/ranker.py, core/auto_entry.py
+            # and this file contained zero mentions of "series".
+            #
+            # It was found the same morning as two rows that proved the
+            # cost. 3IINFOLTD and SPECIALITY were SUBSCRIBE=YES, series
+            # BE, with security ids that exist nowhere in Dhan's master.
+            # Correcting the ids -- the obvious fix -- would have made
+            # two trade-to-trade stocks REACHABLE: no intraday exit, no
+            # MTF, on a bot that squares off at 15:15 and cannot take
+            # delivery of something it did not plan to hold.
+            #
+            # Marking those two NO fixed the instance. This fixes the
+            # class, in code, where forgetting is not an option.
+            #
+            # FAIL-OPEN ON A BLANK. A file written before the SERIES
+            # column existed must still load and trade exactly as it
+            # did -- an absent column is "not known", never "not EQ".
+            # Only a series we can READ and that is NOT tradeable
+            # blocks the row.
+            # ---- pandas TURNS A BLANK CELL INTO A TRUTHY NaN ----
+            #
+            # `str(record.get("SERIES") or "")` reads "nan" for an
+            # empty cell, because float('nan') is truthy. That is not
+            # a nitpick: "nan" is not in TRADEABLE_SERIES, so the
+            # fail-open case this gate was written to protect --
+            # a row whose series is simply not known -- would have been
+            # BLOCKED instead. Caught by
+            # test_a_blank_series_is_unknown_not_untradeable.
+            raw = record.get(SERIES_COLUMN)
+            series = "" if raw is None or raw != raw else str(raw).strip().upper()
+            if series and series not in _tradeable_series():
+                self._blocked[symbol] = (
+                    f"series {series} -- not intraday tradeable (T2T); "
+                    f"core/universe_builder.TRADEABLE_SERIES")
+                continue
+
             self._subscribed.append(symbol)
 
         return len(df)

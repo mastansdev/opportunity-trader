@@ -2735,6 +2735,26 @@ class DashboardState:
                 # keyword reasons by name; core/rules.is_a_reason()
                 # still governs whether anything may be traded.
                 row["opportunity"] = self._opportunity_for(row)
+                # ---- IS REAL MONEY STACKED BEHIND IT. 16 Aug 2026 ----
+                #
+                #     "Volume confirms it -- money changing hands above
+                #      this stock's own normal for this time of day"
+                #
+                # total_buy_quantity / total_sell_quantity arrive on
+                # EVERY Quote packet and were read by nothing until
+                # today. core/tick_ohlc.py keeps them now; this puts
+                # the reading where he can see it.
+                #
+                # RESTING ORDERS CAN BE PULLED. This is a snapshot of
+                # what is standing in the book, not a record of what
+                # traded, so it is shown and never gated on -- tests/
+                # test_tick_pressure.py fails the build if it reaches
+                # an entry.
+                try:
+                    from core import tick_ohlc as _tick
+                    row["pressure"] = _tick.pressure(row.get("symbol"))
+                except Exception:                          # noqa: BLE001
+                    row["pressure"] = None
                 # ---- WHO IS BUYING TO KEEP. 8 August 2026. ----
                 #
                 #     "by seeing them many FII/DII, retail Algos started

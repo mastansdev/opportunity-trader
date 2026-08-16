@@ -185,3 +185,134 @@ def test_lookup_by_symbol_and_security_id_agree(tmp_path):
 
     assert by_symbol["SECURITY ID"] == "500"
     assert by_id["SYMBOL"] == "TCS"
+
+
+# ---------------------------------------------------------------
+# THE SERIES GATE -- a rule that existed and was never enforced
+# ---------------------------------------------------------------
+#
+# 16 August 2026. all_symbols()' own docstring promised that "a T2T /
+# illiquid / ex-date stock never reaches the feed", and that was only
+# true when a human remembered to mark it SUBSCRIBE=NO.
+# core/universe_builder.py has defined TRADEABLE_SERIES = {"EQ"} since
+# it was written and enforced it only in the tools that PROPOSE list
+# changes -- core/engine.py, core/ranker.py, core/auto_entry.py and
+# core/master_loader.py contained zero mentions of "series".
+#
+# The cost was concrete. 3IINFOLTD and SPECIALITY were SUBSCRIBE=YES,
+# series BE, with security ids that exist nowhere in Dhan's master.
+# Correcting the ids -- the obvious fix -- would have made two
+# trade-to-trade stocks reachable: no intraday exit, no MTF, on a bot
+# that squares off at 15:15.
+
+_SERIES_HEADER = (
+    "SECURITY ID,SYMBOL,SERIES,COMPANY NAME,SECTOR,INDUSTRY,CORE BUSINESS,"
+    "BUSINESS_TYPE,OWNERSHIP,COMMODITY_EXPOSURE,ECONOMIC_SENSITIVITY,"
+    "KEYWORDS,THEMES\n"
+)
+
+
+def _write_series_csv(tmp_path, rows):
+    path = os.path.join(str(tmp_path), "series_master.csv")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(_SERIES_HEADER)
+        f.write(rows)
+    return path
+
+
+def _row(sec_id, symbol, series):
+    return (f"{sec_id},{symbol},{series},{symbol} Ltd,IT,Software,"
+            f"Software services,SERVICE PROVIDER,PRIVATE,NONE,NONE,"
+            f"SOFTWARE,IT\n")
+
+
+def test_a_trade_to_trade_row_never_reaches_the_feed(tmp_path):
+    """THE ONE THAT MATTERS. BE is trade-to-trade: compulsory
+    delivery, no intraday square-off, no MTF."""
+    path = _write_series_csv(tmp_path, _row(1, "GOODEQ", "EQ")
+                             + _row(2, "BADBE", "BE"))
+    loader = MasterLoader(csv_path=path)
+    loader.load()
+
+    assert "GOODEQ" in loader.all_symbols()
+    assert "BADBE" not in loader.all_symbols(), (
+        "a BE-series stock reached the subscription list -- this bot "
+        "cannot exit it the same day")
+    assert "BADBE" in loader.blocked_symbols()
+    assert "BE" in loader.blocked_symbols()["BADBE"], (
+        "blocked without saying which series, so nobody can tell it "
+        "from a stock the operator excluded by hand")
+
+
+@pytest.mark.parametrize("series", ["BE", "BZ", "SM", "ST", "RR", "IV", "SF"])
+def test_every_non_eq_series_is_refused(series):
+    """The real file carries all of these. Only EQ is tradeable."""
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as d:
+        path = _write_series_csv(d, _row(1, "KEEPME", "EQ")
+                                 + _row(2, "DROPME", series))
+        loader = MasterLoader(csv_path=path)
+        loader.load()
+        assert "DROPME" not in loader.all_symbols(), series
+
+
+def test_a_blank_series_is_unknown_not_untradeable(tmp_path):
+    """FAIL-OPEN. A master file written before the SERIES column
+    existed must load and trade exactly as it did. Absent means "not
+    known", never "not EQ" -- silently dropping the whole universe
+    because a column is missing is far worse than the fault it guards."""
+    path = _write_series_csv(tmp_path, _row(1, "NOSERIES", ""))
+    loader = MasterLoader(csv_path=path)
+    loader.load()
+    assert "NOSERIES" in loader.all_symbols()
+
+
+def test_a_file_with_no_series_column_still_loads(tmp_path):
+    """The older shape, unchanged."""
+    rows = ("1,TCS,Tata Consultancy,IT,Software,Software services,"
+            "SERVICE PROVIDER,PRIVATE,NONE,NONE,SOFTWARE,IT\n")
+    loader = MasterLoader(csv_path=_write_csv(str(tmp_path), rows))
+    loader.load()
+    assert "TCS" in loader.all_symbols()
+
+
+def test_the_rule_is_borrowed_not_copied():
+    """core/universe_builder.py owns TRADEABLE_SERIES. A second copy
+    in master_loader would be the exact sediment core/rules.py exists
+    to prevent, and it has caused live bugs here before."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "core" / "master_loader.py").read_text(encoding="utf-8")
+    assert "from core.universe_builder import TRADEABLE_SERIES" in src
+
+    # Read the CODE, not the prose. The first version of this assert
+    # matched the docstring that EXPLAINS why the rule is borrowed --
+    # "universe_builder.py has owned TRADEABLE_SERIES = {"EQ"} since it
+    # was written" -- and failed on the sentence describing the very
+    # thing it was checking for. Same mistake, twice in one morning:
+    # tests/test_opportunity_brain.py matched engine.py's docstring for
+    # the word "opportunity".
+    import ast
+    tree = ast.parse(src)
+    declared = [
+        t.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        for t in node.targets
+        if isinstance(t, ast.Name)
+    ]
+    assert "TRADEABLE_SERIES" not in declared, (
+        "master_loader declares its own copy of the series rule")
+
+
+def test_the_live_file_has_a_series_for_every_tradeable_row():
+    """Belt and braces against the real data: if the column ever stops
+    being populated the gate silently stops guarding anything."""
+    loader = MasterLoader()
+    loader.load()
+    missing = [s for s in loader.all_symbols()
+               if not str((loader.get_by_symbol(s) or {}).get("SERIES")
+                          or "").strip()]
+    assert not missing, (
+        f"{len(missing)} tradeable row(s) have no SERIES, so the T2T "
+        f"gate cannot see them: {missing[:10]}")

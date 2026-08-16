@@ -632,6 +632,39 @@ function reasonChips(r){
     }
   }
 
+  // ---- WHO IS STANDING BEHIND THE MOVE. 16 August 2026. ----
+  //
+  //     "Volume confirms it -- money changing hands above this stock's
+  //      own normal for this time of day"
+  //
+  // total_buy_quantity and total_sell_quantity arrive on every Quote
+  // packet and were read by NOTHING until today -- the startup banner
+  // had listed them as "Arriving but UNUSED" every session since 30
+  // July. core/tick_ohlc.py keeps them; this draws them.
+  //
+  // Only shown when the book is genuinely lopsided. A 52:48 book is
+  // noise wearing a number, and a chip on every row teaches him to
+  // stop reading chips.
+  if (r.pressure && r.pressure.skew_pct !== null
+      && r.pressure.skew_pct !== undefined
+      && Math.abs(Number(r.pressure.skew_pct)) >= 20) {
+    const p = r.pressure, skew = Number(p.skew_pct);
+    add((skew > 0 ? "bid " : "offer ") + Math.abs(skew).toFixed(0) + "% heavier",
+        skew > 0 ? "news" : "tape",
+        "Order book: " + Number(p.buy).toLocaleString("en-IN") + " bid vs "
+        + Number(p.sell).toLocaleString("en-IN") + " offered"
+        + (p.ratio ? " (" + p.ratio + "x)" : "")
+        + ". RESTING ORDERS, which can be pulled -- shown, never traded on.");
+  }
+  // Above the day's average traded price: the last prints are landing
+  // higher than where the day's money actually changed hands.
+  if (r.pressure && r.pressure.above_atp === true) {
+    add("above ATP", "flat",
+        "Last price is above the day's average traded price"
+        + (r.pressure.atp ? " (" + Number(r.pressure.atp).toFixed(2) + ")" : "")
+        + " -- buyers are paying up rather than hitting bids.");
+  }
+
   if (r.headroom_pct !== null && r.headroom_pct !== undefined
       && Number(r.headroom_pct) < 3)
     add(Number(r.headroom_pct).toFixed(1) + "% to UC", "tape",
