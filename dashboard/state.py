@@ -819,6 +819,17 @@ class DashboardState:
             "calendar": self.build_calendar(),
             "results_today": self.build_results_today(),
             "watchlist": self._safe_watchlist(),
+            # ---- HE ASKED WHERE THE MONEY WENT. 16 August 2026. ----
+            #
+            #     "5$ completed within 5 days"
+            #
+            # AiBudget.status()'s own docstring says "For the dashboard
+            # and the startup banner" -- and the dashboard had never
+            # once called it. Spend was measured, stored, capped, and
+            # on no screen: the same fault as delivery %, the run-up
+            # reading and the watchlist panel, except this one is his
+            # money.
+            "ai_spend": self._safe_ai_spend(),
             "broker_sync": self.build_broker_sync(open_positions),
             # Is there a stop at the BROKER, or only in this process?
             # 2 August 2026. He must be able to see the answer without
@@ -3243,6 +3254,39 @@ class DashboardState:
         # between 0 candidates and a real list.
         return why(events=events, news_hits=hits, symbol=symbol,
                    on_date=datetime.now().strftime("%Y-%m-%d"))
+
+    def _safe_ai_spend(self):
+        """This month's AI spend, per purpose. Never raises.
+
+        Per PURPOSE, not just a total, because the total is what hid
+        the problem: the ledger reported Rs 126 while three of five
+        paid callers wrote no row at all. A breakdown makes a caller
+        that stops reporting visible, where a single number does not.
+        """
+        try:
+            import sqlite3
+            from core.ai_budget import AiBudget
+
+            meter = AiBudget()
+            got = meter.status()
+            got["by_purpose"] = []
+            try:
+                con = sqlite3.connect(f"file:{meter.db_path}?mode=ro",
+                                      uri=True)
+                got["by_purpose"] = [
+                    {"purpose": p, "calls": c, "rs": round(r or 0.0, 2)}
+                    for p, c, r in con.execute(
+                        "SELECT purpose, COUNT(*), SUM(rs) FROM spend "
+                        "WHERE month = ? GROUP BY purpose ORDER BY SUM(rs) "
+                        "DESC", (got["month"],))]
+                con.close()
+            except Exception:                              # noqa: BLE001
+                pass
+            return got
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[AI SPEND] Panel failed ({exc}). Everything else is "
+                 f"unaffected.")
+            return {"available": False, "note": str(exc)}
 
     def _opportunity_for(self, row):
         """Which opportunity families this row's own reason text names.

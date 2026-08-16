@@ -142,3 +142,52 @@ def test_the_recorded_total_still_matches_the_published_rates():
                    input_tokens=887_773, output_tokens=108_865)
     assert round(got, 4) == 1.4321, (
         f"the price table no longer reproduces the recorded spend: {got}")
+
+
+# ---------------------------------------------------------------
+# THE SPEND HAS TO REACH THE SCREEN
+# ---------------------------------------------------------------
+#
+# AiBudget.status()'s own docstring has said "For the dashboard and the
+# startup banner" since it was written. The dashboard never called it.
+# Spend was measured, stored, capped -- and on no screen, which is the
+# same fault as delivery %, the run-up reading and the watchlist panel,
+# except this one is his money and he had to ask where it went.
+
+def test_the_snapshot_publishes_this_months_spend():
+    src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
+    assert '"ai_spend"' in src, (
+        "the snapshot does not carry AI spend, so no screen can show it")
+    assert "_safe_ai_spend" in src
+
+
+def test_the_breakdown_is_per_purpose_not_just_a_total():
+    """The total is what hid the problem: Rs 126 looked reasonable
+    while three of five callers wrote no row at all. A per-purpose
+    breakdown makes a caller that stops reporting visible."""
+    src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
+    body = src[src.find("def _safe_ai_spend"):src.find("def _opportunity_for")]
+    assert "by_purpose" in body
+    assert "GROUP BY purpose" in body
+
+
+def test_the_board_shows_it():
+    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
+        encoding="utf-8")
+    assert 'id="aispend"' in page, "no spend chip on the board"
+    assert "s.ai_spend" in page, "the chip is never filled from the snapshot"
+
+
+def test_the_chip_says_so_when_the_cap_stops_the_reasoning():
+    """Hitting the cap does not throw an error -- it quietly stops news
+    being reasoned about. He must hear that from the screen rather than
+    from a gap in the reasons."""
+    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
+        encoding="utf-8")
+    assert "CAP REACHED" in page
+
+
+def test_the_panel_never_takes_the_snapshot_down():
+    src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
+    body = src[src.find("def _safe_ai_spend"):src.find("def _opportunity_for")]
+    assert "except Exception" in body

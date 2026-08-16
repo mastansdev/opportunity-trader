@@ -323,9 +323,23 @@ def _no_test_may_litter_the_live_data_folder():
     """
     import glob
 
-    before = set(glob.glob(os.path.join("data", "*")))
+    # ---- SQLITE'S OWN SIDECARS ARE NOT LITTER. 16 August 2026. ----
+    #
+    # Opening a WAL-mode database creates <name>.db-wal and -shm beside
+    # it, and closing it cleanly removes them again. They appeared the
+    # moment the dashboard started reading data/ai_spend.db and this
+    # guard reported the whole run as an error for them.
+    #
+    # They are sqlite working files, not a test writing junk into his
+    # data folder, and excluding them keeps the guard pointed at what
+    # it was built for: a test that CREATES a store.
+    def _real(paths):
+        return {p for p in paths
+                if not p.endswith(("-wal", "-shm", "-journal"))}
+
+    before = _real(glob.glob(os.path.join("data", "*")))
     yield
-    after = set(glob.glob(os.path.join("data", "*")))
+    after = _real(glob.glob(os.path.join("data", "*")))
     new = sorted(n for n in (after - before))
     assert not new, (
         "the test suite CREATED files in the live data folder: "

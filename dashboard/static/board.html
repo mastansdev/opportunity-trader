@@ -216,6 +216,19 @@ SERVED ALONGSIDE, NOT INSTEAD
          means a position dies with this process. -->
     <span id="stops" style="font-size:12px;padding:2px 9px;
           border-radius:7px;display:none;"></span>
+    <!-- ---- WHERE THE MONEY WENT. 16 August 2026. ----
+         "5$ completed within 5 days"
+
+         AiBudget.status()'s docstring has said "For the dashboard and
+         the startup banner" since it was written, and the dashboard
+         never called it. Spend was measured, stored, capped and on no
+         screen -- the same fault as delivery %, the run-up reading and
+         the watchlist panel, except this one is his money.
+
+         Hidden while nothing has been spent this month, so it is not
+         another permanent chip to stop reading. -->
+    <span id="aispend" style="font-size:12px;padding:2px 9px;
+          border-radius:7px;display:none;" title=""></span>
     <!-- ---- THE OTHER SCREEN. 13 August 2026. ----
          "if we want we can open the full right? or like tabs dashboard?"
          Yes. Two screens now, not four: this board for TRADING and
@@ -832,6 +845,38 @@ function draw(s){
   //
   // `unprotected` is computed in dashboard/state.py by asking which
   // held symbols have no resting order -- not assumed from the count.
+  // ---- WHAT THE AI HAS COST THIS MONTH. 16 August 2026. ----
+  //
+  //     "i need complete info of usage. last time 5$ were used within
+  //      no time"
+  //
+  // Silent until something has actually been spent, so it does not
+  // become another permanent chip he learns to skip. Turns amber past
+  // 70% of the cap and red once the meter starts refusing -- the point
+  // at which news stops being reasoned about, which he should hear
+  // from the screen rather than from a quiet gap in the reasons.
+  const ai = s.ai_spend || {};
+  const aiEl = $("aispend");
+  if (aiEl) {
+    if (!ai.spent_rs) {
+      aiEl.style.display = "none";
+    } else {
+      const pct = Number(ai.pct || 0);
+      aiEl.style.display = "";
+      const hot = ai.allowed === false, warm = pct >= 70;
+      aiEl.style.background = hot ? "var(--stop-bg)"
+                            : warm ? "var(--warn-bg)" : "transparent";
+      aiEl.style.color = hot ? "var(--stop-fg)"
+                       : warm ? "var(--warn-fg)" : "var(--muted)";
+      aiEl.textContent = `AI Rs ${Number(ai.spent_rs).toFixed(0)}`
+        + (ai.cap_rs ? ` / ${Number(ai.cap_rs).toFixed(0)}` : "")
+        + (hot ? " — CAP REACHED, news is not being reasoned" : "");
+      aiEl.title = (ai.by_purpose || [])
+        .map(p => `${p.purpose}: ${p.calls} calls, Rs ${p.rs}`)
+        .join("\n") || "no calls yet this month";
+    }
+  }
+
   const bs = s.broker_stop || {};
   const stopEl = $("stops");
   if (stopEl) {
