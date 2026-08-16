@@ -150,7 +150,7 @@ def _command_reader(engine, stop_event):
 # monkeypatch.setattr succeeds against a function that exists, whether
 # or not anything calls it. So the patch did nothing, main() consulted
 # the real guard, found no other bot, AND STARTED ONE -- inside the
-# test suite. On 14 August that test ran for twenty minutes with a
+# test suite. On 16 August that test ran for twenty minutes with a
 # live tick worker and a full ranker before it was traced with py-spy.
 # On a morning with ALERT_ONLY_MODE off it would have been a second
 # bot on his Dhan account, started by pytest.
@@ -165,7 +165,7 @@ def main():
     # screen in seconds, and the failure it precedes is two processes
     # trading the same account.
     #
-    # ---- IT USED TO REFUSE SECOND. 14 August 2026. ----
+    # ---- IT USED TO REFUSE SECOND. 16 August 2026. ----
     #
     # The token block now below this ran BEFORE the guard, so a second
     # bot asked Dhan for a token on its way to being turned away. Dhan

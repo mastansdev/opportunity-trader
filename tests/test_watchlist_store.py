@@ -159,7 +159,7 @@ def test_the_file_is_replaced_not_truncated(tmp_path):
 # ---------------------------------------------------------------
 # 4. IT IS ON THE SCREEN, AND IT IS HIS ALONE TO EDIT
 # ---------------------------------------------------------------
-# ---- THESE FOUR READ A PAGE THAT NO LONGER EXISTS. 14 August 2026 ----
+# ---- THESE FOUR READ A PAGE THAT NO LONGER EXISTS. 16 August 2026 ----
 #
 # They opened dashboard/static/screen.html, which was deleted when four
 # dashboards were collapsed into /board and /full. The panel was NOT
@@ -251,7 +251,7 @@ def test_editing_needs_the_operator_token():
     """It writes a file. A view-only visitor must not change what he
     is watching -- though it can never place an order either way.
 
-    ---- IT MUST ACCEPT BOTH SPELLINGS. 14 August 2026. ----
+    ---- IT MUST ACCEPT BOTH SPELLINGS. 16 August 2026. ----
 
     This asserted _token_matches(token) -- the query parameter alone.
     _require_operator() learned on 5 August to take the X-Operator-

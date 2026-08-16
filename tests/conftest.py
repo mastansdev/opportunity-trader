@@ -264,7 +264,7 @@ def _never_touch_the_live_dhan_token(tmp_path, monkeypatch):
 def _never_touch_the_live_bot_lock(tmp_path, monkeypatch):
     """No test may claim, read or release the real single-bot lock.
 
-    ---- IT HAPPENED TOO. 14 August 2026. ----
+    ---- IT HAPPENED TOO. 16 August 2026. ----
 
     tests/test_single_instance.py patched a guard main.py had stopped
     calling the day before. The patch succeeded against the dead
@@ -296,7 +296,7 @@ def _never_touch_the_live_bot_lock(tmp_path, monkeypatch):
 def _no_test_may_litter_the_live_data_folder():
     """Nothing in this suite may CREATE a file in data/.
 
-    ---- THREE OF THEM WERE ALREADY THERE. 14 August 2026. ----
+    ---- THREE OF THEM WERE ALREADY THERE. 16 August 2026. ----
 
     A store inventory found five empty databases in the folder that
     holds the bot's real memory:

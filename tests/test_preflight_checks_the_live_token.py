@@ -50,18 +50,70 @@ def _jwt(hours_left):
 
 def test_it_reads_the_token_the_bot_minted_not_the_env_one(monkeypatch):
     """THE REGRESSION. Two tokens exist; the check must read the live
-    one."""
+    one.
+
+    ---- IT ONLY PASSED ON WEEKDAYS. 16 August 2026. ----
+
+    This handed _token() a 24-hour token and asserted "24" in message
+    or "past the next close". Both strings come from ONE branch -- the
+    one taken when the token outlives the next 15:30 close.
+
+    On a Friday a 24-hour token does outlive it, so the test passed
+    every working day since it was written. On a Sunday the next close
+    is Monday 15:30, a 24-hour token dies Monday morning, and the
+    function correctly takes the "alive now, expires ..." branch --
+    which carries neither string. Red all weekend, for a token that is
+    fine and a function that is right.
+
+    Same fault as the hardcoded dates in tests/test_engine.py (commit
+    1691b16, "Tests must not depend on what time they are run").
+
+    What this test is FOR is which credential gets read, so it now
+    asserts that and nothing about the calendar: give the live token a
+    lifetime no weekend can reach, and make the .env token distinct
+    enough that reading the wrong one is unmistakable.
+    """
     import tools.dry_run_live_path as dr
     from core import dhan_auth
 
-    monkeypatch.setattr(dhan_auth, "access_token", lambda *a, **k: _jwt(24))
+    # 30 days: past the next close on any day of the week, so the
+    # branch is decided by the CREDENTIAL, not by today's date.
+    live = _jwt(24 * 30)
+    monkeypatch.setattr(dhan_auth, "access_token", lambda *a, **k: live)
     monkeypatch.setattr(dhan_auth, "source", lambda: "totp")
     # The .env token is nearly dead. If the check reads THIS, it fails.
     monkeypatch.setenv("DHAN_ACCESS_TOKEN", _jwt(0.2))
 
     ok, message = dr._token()
     assert ok is True, message
-    assert "24" in message or "past the next close" in message, message
+    assert "past the next close" in message, (
+        "the live TOTP token outlives the next close by 30 days, so this "
+        "is the branch that must be taken. Reading the .env token "
+        "instead would report it dying within the hour: " + message)
+    assert "TOTP" in message, (
+        "it read a token but not the one the bot mints: " + message)
+
+
+def test_a_token_dying_before_the_next_close_is_reported_broken(monkeypatch):
+    """The other half, and the one that costs money if it is wrong.
+
+    Written 16 August 2026 alongside the fix above: replacing a
+    calendar-dependent assertion must not quietly drop the case the
+    stage exists for. A token that expires DURING the session it is
+    about to run must not read as healthy.
+    """
+    import tools.dry_run_live_path as dr
+    from core import dhan_auth
+
+    monkeypatch.setattr(dhan_auth, "access_token", lambda *a, **k: _jwt(0.1))
+    monkeypatch.setattr(dhan_auth, "source", lambda: "totp")
+
+    ok, message = dr._token()
+    # Six minutes of life left. Whatever the weekday, that is never a
+    # token to start a session on: either it dies mid-session (False),
+    # or the market is shut and it is a reminder (True) -- but it may
+    # never claim to outlive the next close.
+    assert "past the next close" not in message, message
 
 
 def test_it_never_names_a_tool_that_does_not_exist():

@@ -72,7 +72,7 @@ def _path(path):
     real data/main_bot.lock was still being written.
 
     That is the same silent no-op that let a test boot a live bot on
-    14 August -- a patch that succeeds and covers nothing. Once was
+    16 August -- a patch that succeeds and covers nothing. Once was
     enough. tests/conftest.py redirects this for the whole suite, and
     it has to bite.
     """

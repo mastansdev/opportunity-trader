@@ -131,7 +131,7 @@ def test_the_dashboard_computes_it():
 
 
 def test_the_page_renders_it():
-    """---- IT WAS GUARDING A DELETED FILE. 14 August 2026. ----
+    """---- IT WAS GUARDING A DELETED FILE. 16 August 2026. ----
 
     This opened dashboard/static/app.html, which went when four
     dashboards were collapsed into /board and /full. The reading was

@@ -28,7 +28,7 @@ REFUSES, DOES NOT WARN. A warning at 09:00 scrolls off the screen in
 seconds and the thing it precedes is two processes trading one
 account.
 
----- AND THEN THIS FILE STARTED THE SECOND BOT. 14 August 2026. ----
+---- AND THEN THIS FILE STARTED THE SECOND BOT. 16 August 2026. ----
 
 Every test below used to patch main._another_bot_is_already_running,
 the port probe that core/single_instance.py replaced on 13 August. The
@@ -86,7 +86,7 @@ def a_bot_may_not_boot(monkeypatch):
     raising=True is the default and is deliberate here. If somebody
     renames MasterLoader, this fixture must break at once; a tripwire
     that has quietly stopped covering anything is precisely the fault
-    of 14 August.
+    of 16 August.
     """
     def _forbidden(name):
         def _boom(*a, **k):                                # pragma: no cover

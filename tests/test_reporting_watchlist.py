@@ -178,7 +178,7 @@ def test_every_date_is_a_string(db):
 
 
 def test_a_missing_database_returns_empty_rather_than_raising(tmp_path):
-    # ---- IT LEFT LITTER IN THE LIVE DATA FOLDER. 14 August 2026. ----
+    # ---- IT LEFT LITTER IN THE LIVE DATA FOLDER. 16 August 2026. ----
     #
     # This named "data/does-not-exist.db". sqlite3.connect() CREATES
     # the file it is handed, so every run left an empty database behind

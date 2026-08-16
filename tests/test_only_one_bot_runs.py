@@ -198,7 +198,7 @@ def test_the_lock_is_not_committed():
 # THE SUITE MUST NOT BE ABLE TO LOCK HIM OUT
 # ---------------------------------------------------------------
 #
-# 14 August 2026. A test booted a real bot (see tests/
+# 16 August 2026. A test booted a real bot (see tests/
 # test_single_instance.py) and claim() stamped pytest's own pid into
 # data/main_bot.lock:
 #

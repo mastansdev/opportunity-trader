@@ -305,7 +305,7 @@ def build_app(dashboard_state, trade_controller, master_loader,
     @app.post("/api/watchlist/{action}/{symbol}")
     def watchlist_edit(action: str, symbol: str, request: Request,
                        token: str = ""):
-        # ---- IT WAS MISSED BY THE BOTH-SPELLINGS FIX. 14 August 2026 ----
+        # ---- IT WAS MISSED BY THE BOTH-SPELLINGS FIX. 16 August 2026 ----
         #
         # _require_operator() below learned on 5 August to accept the
         # X-Operator-Token HEADER *or* ?token=... , because the page

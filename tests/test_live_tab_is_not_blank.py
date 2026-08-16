@@ -585,7 +585,7 @@ def test_the_reason_is_chips_not_a_paragraph():
     is deciding to spend money."""
     page = _board().text
     assert "function reasonChips(r)" in page
-    # ---- IT MEASURED COMMENT VOLUME. 14 August 2026. ----
+    # ---- IT MEASURED COMMENT VOLUME. 16 August 2026. ----
     #
     # This was page.split("function row(r)")[1][:1800] -- "somewhere in
     # the first 1800 characters after row() starts". row() then gained
@@ -644,7 +644,7 @@ def test_the_table_is_not_rebuilt_while_he_is_typing_a_quantity():
 def test_the_other_tabs_still_update_while_he_types():
     """Pausing the whole screen would be a different bug.
 
-    ---- MATCHED ON THE WHOLE LINE. 14 August 2026. ----
+    ---- MATCHED ON THE WHOLE LINE. 16 August 2026. ----
 
     Both of these asserted the exact text
 
