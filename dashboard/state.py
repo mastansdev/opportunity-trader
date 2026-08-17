@@ -252,6 +252,37 @@ except ImportError:  # pragma: no cover -- optional, system health degrades grac
     psutil = None
 
 
+def _text(value):
+    """A clean upper-case string, or "". NEVER raises on a NaN.
+
+    ---- IT TOOK THE BOT DOWN AT STARTUP. 17 August 2026. ----
+
+        AttributeError: 'float' object has no attribute 'upper'
+        state.py:5956  name = (row.get("sector") or "").upper()
+
+    pandas reads an empty SECTOR cell as float('nan'), and NaN IS
+    TRUTHY -- so `nan or ""` returns the nan, not the "". Two guards
+    in this file were written as `or ""` and neither could work:
+
+        if not sector: continue        <- a NaN sector passed straight
+                                          through and became a dict key
+        (row.get("sector") or "").upper()   <- and then this crashed
+
+    213 rows in data/master_stocks.csv have no SECTOR. Every one is
+    SUBSCRIBE=NO -- ETFs and InvITs, MONIFTY500, GOLDETF, EMBASSY --
+    and one of them reached the gainers list, which is enough.
+
+    Same trap as core/master_loader.py's series gate the day before,
+    where `str(x or "")` read "nan" and blocked a row it should have
+    waved through. NaN is not falsy and never will be; the only safe
+    test is value != value.
+    """
+    if value is None or value != value:            # None or NaN
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() == "nan" else text.upper()
+
+
 def _num(value):
     """A number, or None. Never a string and never a guess.
 
@@ -4843,7 +4874,10 @@ class DashboardState:
 
         sector_totals = {}
         for row in rows:
-            sector = row["sector"]
+            # _text(), not `or ""`: a NaN sector is TRUTHY and used
+            # to pass this guard, become a dict key, and crash the
+            # whole snapshot 1,100 lines later. See _text().
+            sector = _text(row.get("sector"))
             if not sector:
                 continue
             total, count = sector_totals.get(sector, (0.0, 0))
@@ -5953,7 +5987,7 @@ class DashboardState:
         bank_trend = None
         for row in (gainers_losers.get("sector_gainers", []) +
                     gainers_losers.get("sector_losers", [])):
-            name = (row.get("sector") or "").upper()
+            name = _text(row.get("sector"))
             if "BANK" in name or "FINANC" in name:
                 bank_trend = row["avg_change_pct"]
                 break
