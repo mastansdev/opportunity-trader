@@ -1137,8 +1137,33 @@ function draw(s){
   // Long only. Gainers, plus anything he is actually holding.
   const seen = {};
   const ranked = [];
+  // ---- THE Rs 50 FLOOR. 17 August 2026. ----
+  //
+  //     "why stocks with below 50 rs cmp is showing on dashboard? we
+  //      are not trading them right?"
+  //
+  // Right on both counts. config.MIN_TRADABLE_PRICE_RS is an ENTRY
+  // rule -- core/engine.py checks it twice and records the refusal as
+  // "under the Rs 50 floor -- never tradeable", 1,075 of them. It was
+  // never a DISPLAY rule, and this table merges the raw gainers list,
+  // which is built from prices rather than from the tradeable
+  // universe. So they were drawn.
+  //
+  // A stock under the floor can NEVER be bought -- that is a
+  // permanent fact about it, not a gate it failed this morning. It
+  // does not belong in the one table that is meant to be the money.
+  // Refusals that are situational -- no volume, no reason, fading --
+  // still show, because those are worth reading.
+  //
+  // Still in the snapshot, so WHY and the stock card can answer for
+  // it. Only the money table is cleaner. The floor comes from the
+  // snapshot, not from a number typed in here.
+  const floor = Number(s.min_tradable_price || 0);
   for (const r of [].concat(gl.gainers || [], cleared, refused)){
     if (!r || !r.symbol || seen[r.symbol]) continue;
+    if (!inBook[r.symbol] && floor > 0
+        && Number(r.ltp || r.last_price || 0) > 0
+        && Number(r.ltp || r.last_price || 0) < floor) continue;
     if (!inBook[r.symbol] && Number(r.change_pct || 0) < 0) continue;
     seen[r.symbol] = 1;
     const known = byName[r.symbol];

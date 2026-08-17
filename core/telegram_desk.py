@@ -264,9 +264,7 @@ class TelegramDesk:
             self._pending = (verb, symbol, want,
                              time.time() + CONFIRM_SECONDS)
 
-        alert_only = bool(getattr(self.engine, "alert_only", True))
-        note = ("\n_ALERT ONLY is ON -- this will be recorded, not sent "
-                "to Dhan._" if alert_only else "")
+        note = self._reach()
         if verb == "EXITALL":
             return (f"*EXIT EVERYTHING*\nClose every open position at "
                     f"market.{note}\n\nReply `YES` within "
@@ -274,6 +272,44 @@ class TelegramDesk:
         size = f" x{want}" if want else " (bot default size)"
         return (f"*{verb} {symbol}*{size}{note}\n\nReply `YES` within "
                 f"{CONFIRM_SECONDS}s.")
+
+    @staticmethod
+    def _reach():
+        """Does a confirmed command actually reach Dhan? Say so exactly.
+
+        ---- THE FIRST VERSION OF THIS LINE WAS WRONG. 17 Aug 2026 ----
+
+        It read config.ALERT_ONLY_MODE and told him "ALERT ONLY is ON
+        -- this will be recorded, not sent to Dhan". That is not what
+        ALERT_ONLY_MODE does, and a confirmation prompt that is wrong
+        about safety is worse than no prompt at all.
+
+        ALERT_ONLY_MODE governs THE BOT'S OWN entries. It is checked in
+        core/engine.py's breakout path and NOT in the manual path -- a
+        BUY he asks for goes through whether the bot is armed or not,
+        deliberately, because it is his trade and not the bot's. The
+        dashboard BUY button has always behaved this way.
+
+        What decides whether an order reaches Dhan is TRADING_MODE,
+        read by trading/execution.py: LIVE wires LiveExecution,
+        anything else wires PaperExecution. So with TRADING_MODE=LIVE
+        and ALERT_ONLY_MODE=True the old message would have said "not
+        sent to Dhan" WHILE PLACING A REAL ORDER.
+
+        Read at call time, never cached: he can edit .env between
+        sessions and a stale answer here is the same bug again.
+        """
+        try:
+            from config import TRADING_MODE
+            live = str(TRADING_MODE).upper() == "LIVE"
+        except Exception:                                   # noqa: BLE001
+            return ("\n_Could not read TRADING_MODE -- assume this is "
+                    "REAL until you have checked._")
+        if live:
+            return ("\n*LIVE -- this places a REAL order at Dhan.*"
+                    "\n_A market order cannot be cancelled once it fills._")
+        return ("\n_PAPER mode -- this is recorded and does not reach "
+                "Dhan._")
 
     def _confirm(self):
         """Fire the pending command, if it has not expired."""

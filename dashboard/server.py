@@ -357,10 +357,25 @@ def build_app(dashboard_state, trade_controller, master_loader,
                 if symbol not in known:
                     return {"success": False,
                             "error": f"{symbol} is not on our NSE board"}
-                return {"success": bool(store.add(symbol))}
+                done = bool(store.add(symbol))
+                if done:
+                    getattr(dashboard_state, "refresh_watchlist_panel",
+                            lambda: None)()
+                return {"success": done}
 
             if action == "remove":
-                return {"success": bool(store.remove(symbol))}
+                done = bool(store.remove(symbol))
+                # THE EDIT MUST REACH THE SCREEN, NOT JUST THE FILE.
+                # /api/snapshot serves the payload the live loop built,
+                # and build_watchlist() only runs inside a full
+                # _build(). Without this the row stays on his screen
+                # until the next one -- which is exactly why "i'm
+                # unable to delete the stocks added in - Watch tab"
+                # was true while every delete worked.
+                if done:
+                    getattr(dashboard_state, "refresh_watchlist_panel",
+                            lambda: None)()
+                return {"success": done}
             return {"success": False, "error": "add or remove only"}
         except Exception as exc:                           # noqa: BLE001
             warn(f"[WATCHLIST] {action} {symbol} failed: {exc}")

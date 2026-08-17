@@ -390,3 +390,58 @@ def test_a_failing_watchlist_costs_only_the_watchlist():
     guard = inspect.getsource(DashboardState._safe_watchlist)
     assert "except Exception" in guard
     assert '"available": False' in guard
+
+
+# ---------------------------------------------------------------
+# THE EDIT HAS TO REACH THE SCREEN, NOT JUST THE FILE
+# ---------------------------------------------------------------
+#
+#     "i'm unable to delete the stocks added in - Watch tab"
+#                                 -- operator, 17 August 2026
+#
+# Every part of that path was already correct and it still looked
+# broken:
+#
+#     the click handler        fires, confirms, POSTs
+#     /api/watchlist/remove    returns {"success": true}
+#     core/watchlist_store.py  drops the row and saves the file
+#
+# and the stock stayed on his screen. /api/snapshot serves the payload
+# THE LIVE LOOP BUILDS -- deliberately, so the page and the engine can
+# never disagree -- and build_watchlist() only runs inside a full
+# _build(). Until the next one, the panel is the old list.
+#
+# Reproduced against a live server: the store had lost GAIL and the
+# snapshot still listed GAIL, MARICO, AUROPHARMA and BHARTIARTL, three
+# of them removed sessions earlier. So he pressed remove, nothing
+# happened, and he pressed it again. Every press had worked.
+
+def test_the_state_can_refresh_just_the_watchlist_panel():
+    """A full _build() walks 1,314 symbols and takes seconds. Doing
+    that on a click is how the dashboard went stale on 13 August, so
+    this replaces one panel in the served snapshot."""
+    src = open("dashboard/state.py", encoding="utf-8").read()
+    assert "def refresh_watchlist_panel" in src
+    body = src[src.find("def refresh_watchlist_panel"):]
+    body = body[:body.find("\n    def ", 10)]
+    assert "_safe_watchlist" in body, "it rebuilds more than the panel"
+    assert "self._lock" in body, "the snapshot is swapped without the lock"
+
+
+def test_both_add_and_remove_refresh_the_panel():
+    """An add that does not show is the same bug wearing the other
+    sign, and it was there too."""
+    src = open("dashboard/server.py", encoding="utf-8").read()
+    block = src[src.find('@app.post("/api/watchlist'):
+                src.find('@app.get("/api/why")')]
+    assert block.count("refresh_watchlist_panel") >= 2, (
+        "only one of add/remove refreshes the screen")
+
+
+def test_the_refresh_is_optional_so_a_bare_state_still_works():
+    """getattr with a default: tests and tools build partial states,
+    and a watchlist edit must not 500 because one lacks the method."""
+    src = open("dashboard/server.py", encoding="utf-8").read()
+    block = src[src.find('@app.post("/api/watchlist'):
+                src.find('@app.get("/api/why")')]
+    assert 'getattr(dashboard_state, "refresh_watchlist_panel"' in block

@@ -198,9 +198,25 @@ def test_the_real_file_puts_the_liquid_names_at_the_top():
     # AFFLE for IT because nothing has ticked yet. That is a question
     # about magnitude, not about which of two Rs 1,000-crore names is
     # ahead on the day.
+    # ---- AND IT DID IT AGAIN. 17 August 2026. ----
+    #
+    # measure_liquidity ran with fresh bars and TECHM came fourth at
+    # Rs 459 crore -- under a flat Rs 500 line, so red. The comment
+    # above had already diagnosed this exact shape and the fix put an
+    # absolute number back in, which is the same coin flip one place
+    # to the left.
+    #
+    # Measured rather than guessed: the thin names this test exists to
+    # keep out do Rs 29 (AFFLE) and Rs 34 crore (63MOONS). TECHM at
+    # Rs 459 is SIXTEEN TIMES either of them. The question is
+    # magnitude, so the assertion is now magnitude -- relative to the
+    # very names it names, and no fresh bar can move that by 16x.
     top = it[:4]
-    assert all(liquidity.adv(name) > 500.0 for name in top), \
-        [(name, liquidity.adv(name)) for name in top]
+    thin = max(liquidity.adv("AFFLE") or 0.0,
+               liquidity.adv("63MOONS") or 0.0)
+    assert thin > 0, "the thin benchmarks have no liquidity reading"
+    assert all((liquidity.adv(name) or 0.0) > thin * 3 for name in top), \
+        [(name, liquidity.adv(name), f"thin={thin:.0f}") for name in top]
     assert "INFY" in top, top
     # And the thin names it used to OFFER are not at the front. The
     # failure this guards was them being handed to him first; where

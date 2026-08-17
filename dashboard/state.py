@@ -119,6 +119,7 @@ from config import (
     MARKET_BREADTH_REFRESH_SECONDS,
     SHORTLIST_REFRESH_SECONDS, SHORTLIST_COUNT, BREAKOUT_PANEL_COUNT,
     ANNOUNCEMENT_PANEL_COUNT, INDEX_EXPECTED_RANGE,
+    MIN_TRADABLE_PRICE_RS,
 )
 
 from core import closed_book
@@ -756,6 +757,47 @@ class DashboardState:
         with self._lock:
             return self._snapshot
 
+    def refresh_watchlist_panel(self):
+        """Rebuild ONLY the watchlist, into the snapshot already served.
+
+        ---- "I'M UNABLE TO DELETE" WAS TRUE, AND THE DELETE WORKED ----
+
+            "i'm unable to delete the stocks added in - Watch tab"
+                                    -- operator, 17 August 2026
+
+        Every part of that path was correct and it still looked broken:
+
+            the click handler        fires, confirms, POSTs
+            /api/watchlist/remove    returns {"success": true}
+            core/watchlist_store.py  drops the row and saves the file
+
+        and the stock stayed on his screen. /api/snapshot returns the
+        payload THE LIVE LOOP BUILDS -- deliberately, so the page and
+        the engine can never disagree -- and build_watchlist() only
+        runs inside a full _build(). Until the next one, the panel is
+        the old list. Reproduced: the store lost GAIL, and the
+        snapshot still showed GAIL, MARICO, AUROPHARMA and BHARTIARTL,
+        three of them removed sessions earlier.
+
+        So he pressed remove, nothing changed, and pressed it again.
+        Every press worked.
+
+        This edits the served snapshot in place rather than forcing a
+        whole rebuild: _build() walks 1,314 symbols and takes seconds,
+        and doing that on a click is how the dashboard went stale on
+        13 August. One panel, one lock, immediate.
+        """
+        try:
+            panel = self._safe_watchlist()
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[WATCHLIST] Could not refresh the panel ({exc}).")
+            return False
+        with self._lock:
+            if isinstance(self._snapshot, dict):
+                self._snapshot = dict(self._snapshot)
+                self._snapshot["watchlist"] = panel
+        return True
+
     # --------------------------------------------------
 
     def _build(self):
@@ -899,6 +941,26 @@ class DashboardState:
             # on no screen: the same fault as delivery %, the run-up
             # reading and the watchlist panel, except this one is his
             # money.
+            # ---- THE FLOOR, PUBLISHED. 17 August 2026. ----
+            #
+            #     "why stocks with below 50 rs cmp is showing on
+            #      dashboard? we are not trading them right?"
+            #
+            # He is right on both counts. config.MIN_TRADABLE_PRICE_RS
+            # is an ENTRY rule -- core/engine.py checks it twice, at
+            # the breakout gate and again in _enter(), and 1,075
+            # refusals are recorded as "under the Rs 50 floor -- never
+            # tradeable". It is not a display rule, and nothing in
+            # dashboard/state.py or core/ranker.py mentions it.
+            #
+            # So the Live table drew them, because it merges the raw
+            # gainers list -- built from PRICES, not from the
+            # tradeable universe -- with the ranked rows.
+            #
+            # Published here rather than hardcoded in board.html: the
+            # screen must not carry its own copy of a rule, which is
+            # the sediment core/rules.py exists to prevent.
+            "min_tradable_price": float(MIN_TRADABLE_PRICE_RS),
             "ai_spend": self._safe_ai_spend(),
             "opportunity_memory": self._safe_opportunity_memory(),
             "broker_sync": self.build_broker_sync(open_positions),

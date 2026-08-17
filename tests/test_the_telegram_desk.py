@@ -135,10 +135,60 @@ def test_no_cancels_it(desk):
     assert desk.ctl.calls == []
 
 
-def test_the_quote_says_when_nothing_will_reach_dhan(desk):
-    """ALERT_ONLY on means it is recorded, not sent. He must be told
-    that BEFORE he types YES, not discover it afterwards."""
-    assert "ALERT ONLY" in desk.handle("BUY TCS", ME)
+def test_the_quote_names_the_switch_that_actually_decides(desk,
+                                                          monkeypatch):
+    """---- THE FIRST VERSION OF THIS PROMPT WAS WRONG. ----
+
+    It said "ALERT ONLY is ON -- this will be recorded, not sent to
+    Dhan". ALERT_ONLY_MODE does not do that. It governs THE BOT'S OWN
+    entries -- checked in core/engine.py's breakout path and NOT in
+    the manual path, so a BUY he asks for goes through whether the bot
+    is armed or not. That is deliberate: it is his trade.
+
+    What decides whether an order reaches Dhan is TRADING_MODE, read
+    by trading/execution.py. With TRADING_MODE=LIVE and
+    ALERT_ONLY_MODE=True the old message would have said "not sent to
+    Dhan" WHILE PLACING A REAL ORDER.
+
+    A confirmation prompt that is wrong about safety is worse than no
+    prompt.
+    """
+    import config
+
+    monkeypatch.setattr(config, "TRADING_MODE", "PAPER")
+    paper = desk.handle("BUY TCS", ME)
+    assert "PAPER" in paper and "does not reach Dhan" in paper
+
+    monkeypatch.setattr(config, "TRADING_MODE", "LIVE")
+    live = desk.handle("BUY TCS", ME)
+    assert "REAL order" in live, "a LIVE order was not announced as real"
+    assert "cannot be cancelled" in live
+
+
+def test_the_quote_never_claims_safety_it_cannot_deliver(desk,
+                                                         monkeypatch):
+    """The exact regression: LIVE mode with the bot disarmed must not
+    read as safe."""
+    import config
+
+    monkeypatch.setattr(config, "TRADING_MODE", "LIVE")
+    desk.engine.alert_only = True          # bot OFF, order still real
+    reply = desk.handle("BUY TCS", ME)
+    assert "does not reach Dhan" not in reply, (
+        "the prompt promises the order stays local while TRADING_MODE "
+        "is LIVE -- this is the bug that made it worse than no prompt")
+
+
+def test_an_unreadable_mode_assumes_the_dangerous_answer(desk,
+                                                         monkeypatch):
+    """If it cannot tell, it must not say 'safe'."""
+    import core.telegram_desk as td
+
+    monkeypatch.setattr(
+        td.TelegramDesk, "_reach",
+        staticmethod(lambda: "Could not read TRADING_MODE -- "
+                             "assume this is REAL until checked"))
+    assert "REAL" in desk.handle("BUY TCS", ME)
 
 
 def test_an_unknown_symbol_is_never_quoted(desk):
