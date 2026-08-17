@@ -51,6 +51,45 @@ So extending the window and keeping the "still extending" filter would
 select the WEAKER half of a +0.70% average, against round-trip charges
 and a 1.8-3% stop. That is not an edge, it is a coin flip with costs.
 
+---- AND THEN THE CHECK I SHOULD HAVE RUN FIRST ----
+
+Every number above is RAW. None of it was compared to what the market
+did over the same days. Benchmarked against the median stock, same
+start date, same horizon:
+
+    hold        n     stock   market   EXCESS   beat market
+    1 session  659   +0.27%   +0.22%   +0.05%      43%
+    3 sessions 658   +0.79%   +0.79%   -0.00%      45%
+    5 sessions 652   +1.05%   +0.94%   +0.12%      47%
+
+THE CATALYST HAS NO MEASURABLE EDGE OVER THE MARKET. The "+1.01% at
+five sessions" that looked like a reason to widen the window was
+almost entirely the market drifting up over June-August 2026, and
+fewer than half of catalyst stocks beat the median stock. Beta
+reported as signal, by me, until it was benchmarked.
+
+THE DAY-2 DIP, measured on request and benchmarked the same way --
+event day, next session closes DOWN, buy that close:
+
+    group                        n    EXCESS   beat market
+    day-2 DIP (faded)  +3d     328    +0.02%      52%
+    day-2 POP (extend) +3d     328    +0.09%      42%
+    day-2 DIP (faded)  +5d     324    +0.06%      52%
+    day-2 POP (extend) +5d     325    +0.29%      46%
+
+Also nothing. +0.06% excess is inside the round-trip charge on a
+Rs 1.2 lakh position. The POP shows a higher MEAN with a WORSE hit
+rate, which is the signature of a few large winners carrying a
+losing median -- the opposite of what a Rs 1,500 fixed-risk book
+wants.
+
+WHAT THIS DOES AND DOES NOT SAY. The window is June-August 2026, one
+regime, one rising market, and 715 catalysts that are not independent
+of each other. It does not prove the catalysts are worthless -- they
+explain WHY a stock is moving, which is what the reason gate uses them
+for. It says that as a PREDICTOR of the next five sessions, over this
+sample, they carry no excess return worth a stop.
+
 NOTHING ABOUT THE ENTRY RULES WAS CHANGED.
 
 What changed is that days_since_results is now stamped on every
@@ -121,3 +160,8 @@ def test_the_measurement_is_written_down_where_it_will_be_found():
     doc = __doc__ or ""
     assert "day 1 UP" in doc and "day 1 DOWN" in doc
     assert "+0.63%" in doc and "+0.78%" in doc
+    # The market-adjusted correction must stay beside the raw numbers.
+    # Without it the raw +1.01% reads as an edge, which is how it was
+    # first reported -- wrongly.
+    assert "EXCESS" in doc and "no measurable edge" in doc.lower()
+    assert "day-2 DIP" in doc
