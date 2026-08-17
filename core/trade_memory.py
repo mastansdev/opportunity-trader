@@ -219,6 +219,66 @@ class TradeMemory:
                 ).first()
                 if existing is not None:
                     return False
+
+                # ---- THE SAME FILL, FILED UNDER A SECOND DATE ----
+                #
+                # 16 August 2026. The check above is (symbol, direction,
+                # trade_date) and its comment is honest about what that
+                # buys: "a re-run or a restart can't double-count a
+                # trade". It cannot see a restart on the NEXT day.
+                #
+                # An adopted broker position is re-adopted once per
+                # process start. Start again tomorrow and the same
+                # holding is adopted, closed and recorded a second time
+                # under a new trade_date, which satisfies the constraint
+                # perfectly:
+                #
+                #   CORONA     2026-08-05  2266.24 -> 2096.70  -16,954
+                #   CORONA     2026-08-06  2266.24 -> 2096.70  -16,954
+                #   DEEPAKNTR  x2   -6,324      DEEPAKFERT x2  -4,030
+                #
+                # Rs 27,309 of loss counted twice, out of a book of
+                # Rs 69,766 -- so the adopted trades read 64% worse than
+                # they were, and every conclusion drawn from the total
+                # was drawn from a number that was wrong.
+                #
+                # tools/dry_run_live_path.py's junction 15 was built for
+                # exactly this ("DEEPAKNTR appeared twice ... adopted
+                # once per process start") and watches session_state
+                # .json, which is cleared between sessions. The
+                # duplicates land HERE, and here had no guard.
+                #
+                # ---- ONLY FOR A POSITION WITH NO FILL TIME. ----
+                #
+                # The first version of this guard checked every trade
+                # and broke test_same_symbol_on_a_different_day_is_a_
+                # new_trade, which is RIGHT: the same stock bought at
+                # the same price on two different days is two trades,
+                # and refusing the second would hide live business.
+                #
+                # The bug is specific to ADOPTED positions, and they
+                # have a signature -- entry_time is None, because the
+                # bot never saw the fill. A trade it opened itself
+                # always carries one. So the guard applies only where
+                # the fault lives.
+                if values.get("entry_time") is not None:
+                    try:
+                        conn.execute(insert(self.trades).values(**values))
+                    except IntegrityError:
+                        return False
+                    return True
+
+                same_fill = conn.execute(
+                    select(self.trades.c.id).where(
+                        (self.trades.c.symbol == symbol)
+                        & (self.trades.c.direction == direction)
+                        & (self.trades.c.entry_price == values["entry_price"])
+                        & (self.trades.c.exit_price == values["exit_price"])
+                        & (self.trades.c.qty == values["qty"])
+                    ).limit(1)
+                ).first()
+                if same_fill is not None:
+                    return False
                 try:
                     conn.execute(insert(self.trades).values(**values))
                 except IntegrityError:

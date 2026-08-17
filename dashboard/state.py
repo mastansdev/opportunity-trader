@@ -630,7 +630,46 @@ class DashboardState:
                 # position already exists.
                 engine=engine,
                 security_id_of=getattr(master_loader, "security_id", None),
-                adopt_with_stops=True)
+                # ---- WATCH ONLY. 17 August 2026. ----
+                #
+                #     "corona, deepakfert, deepakntr, sbin, solarinds
+                #      are my long positions in dhan"
+                #
+                # Those first three are in data/trade_memory.db as
+                # CLOSED trades -- trailing-stop exits on 5 and 6
+                # August, with losses written down. He still holds
+                # them. ALERT_ONLY_MODE was on, so no order was ever
+                # sent: the bot decided to exit, recorded the loss in
+                # its permanent memory, and nothing happened at Dhan.
+                # Each was recorded TWICE, re-adopted once per process
+                # start, double-counting Rs 27,309.
+                #
+                # This flag was set True on 5 August, for a sentence he
+                # meant at the time -- "my goal is to stop manual
+                # trading & let the bot trade". He reversed it on the
+                # 6th: "i told you too not track my old positions",
+                # which added skip_symbols=_pre_existing. The flag
+                # stayed on and only guarded what was open at STARTUP.
+                #
+                # core/broker_sync.py then grew an alert_only guard,
+                # after adoption "sold all three out from under him".
+                # That guard is real and it is not enough: it is tied
+                # to the switch, so the day he arms the bot, adoption
+                # resumes and it manages positions it did not open,
+                # with a trailing stop calibrated for entries it chose.
+                #
+                # Asked directly on 17 August, he chose: watch only,
+                # never manage or exit. So this is False regardless of
+                # the switch. The positions still appear in the book
+                # for book-keeping and still raise the "no stop at
+                # Dhan" warning -- they simply get no stop from the
+                # bot and no management.
+                #
+                # A DASHBOARD SHOULD NOT HAVE BEEN DOING THIS ANYWAY.
+                # This is the display layer, and it was the only place
+                # in the repo that turned adoption on -- broker_sync's
+                # own default is False.
+                adopt_with_stops=False)
         except Exception as exc:                           # noqa: BLE001
             warn(f"[SYNC] Not available: {exc}")
             self.broker_sync = None
