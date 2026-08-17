@@ -1658,6 +1658,33 @@ def main():
         dashboard_state, engine.trade_controller, master_loader
     )
     _print_dashboard_banner()
+
+    # ---- THE PHONE. 17 August 2026. ----
+    #
+    #     "our bot needs telegram command center with alerting user
+    #      about the opportunities & commands to buy,sell,exitall"
+    #
+    # A SECOND FRONT DOOR, NOT A SECOND ORDER PATH. Every command ends
+    # at the same trade_controller the dashboard BUY button calls, so
+    # ALERT_ONLY_MODE, the daily loss cap and every entry gate still
+    # apply -- core/telegram_desk.py never builds an order and never
+    # speaks to Dhan.
+    #
+    # It is also the least important thing in this process: start()
+    # returns False and says why if the token or chat id is missing,
+    # and the poll runs on a daemon thread that cannot delay a tick.
+    telegram_desk = None
+    try:
+        from core.telegram_desk import TelegramDesk
+        telegram_desk = TelegramDesk(
+            controller=engine.trade_controller,
+            state=dashboard_state,
+            engine=engine,
+            master_loader=master_loader)
+        telegram_desk.start()
+    except Exception as exc:                               # noqa: BLE001
+        warn(f"[TG] Telegram desk not started ({exc}). Everything else "
+             f"is unaffected.")
     dashboard_state.refresh()  # panels fill in; the port is already open
 
     feed, feed_thread = start_feed()
