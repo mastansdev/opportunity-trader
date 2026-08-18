@@ -78,11 +78,33 @@ CONFIRM_SECONDS = 60
 # 25 seconds when the market is quiet.
 POLL_SECONDS = 25
 
+# ---- THE PHONE IS NOT THE LOG. 18 August 2026. ----
+#
+# The Engine's alert notes ran 200-360 A DAY from 31 July to 12 August
+# -- 311 on the 11th alone. That is the correct volume for a log file
+# and it is an unusable volume for a phone: an alert he swipes away
+# unread is worse than no alert, because he stops looking at the ones
+# that matter.
+#
+# So this is a hard daily ceiling, not a preference. When it is hit he
+# is told once that it was hit and where the rest are, which is the
+# one thing a silent cap must never do -- go silent without saying so.
+PUSH_MAX_PER_DAY = 25
+
+# A sizing refusal ("the stop is 140 away, a single share risks more
+# than the Rs 1,500 budget") is a REASON THE BOT DID NOTHING. It
+# belongs on the board's refusal list, not on his phone -- he asked to
+# be told what to buy, and a stream of near-misses buries that.
+PUSH_SKIP_KINDS = ("stop-too-wide",)
+
 _HELP = """*Opportunity Trader*
 
 `STATUS`      bot on/off, positions, day P&L
 `POSITIONS`   what is open, with stops
 `PNL`         today, closed only
+`TOP`         what the bot likes right now
+`ALERTS`      every alert raised today
+`FUNDS`       MTF buying power left
 `WHY SYM`     which gate refused it, live
 `OPP`         what each opportunity family is worth
 
@@ -160,6 +182,10 @@ class TelegramDesk:
         self._thread = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        # Daily push ceiling -- see PUSH_MAX_PER_DAY. Keyed by date so
+        # a bot left running over midnight starts the new day at zero.
+        self._push_day = None
+        self._pushed = 0
 
     # ---------------- outbound ----------------
 
@@ -182,6 +208,94 @@ class TelegramDesk:
                      f"target {plan.get('target')}`")
         text += f"\n\n`BUY {symbol}` to take it"
         return send(text)
+
+    # ---- THE LAST MILE. 18 August 2026. ----
+    #
+    #     "why i didn't get any alerts to buy stocks in telegram ?
+    #      i want to see the bot alerts me by stock name & reason to
+    #      buy"
+    #
+    # The alerts were being MADE. core/engine.py._manual_alert has
+    # written one for every pick since 31 July -- 2,652 of them -- and
+    # each went to the log and the board and stopped there. Nothing
+    # joined that funnel to this file, so a working sender and a
+    # working alert never met.
+    #
+    # push() is that join, and it is deliberately the dumbest code in
+    # this file: it decides WHETHER to send, and wraps an envelope
+    # round what the Engine already wrote. It computes no price, no
+    # quantity, no stop and no reason. The sentence on his phone is
+    # the sentence on the board, character for character -- a second
+    # copy that could drift from the first is exactly how a dashboard
+    # and an alert end up disagreeing about the same trade.
+
+    #: Header and the useful verb, per alert kind. An unrecognised
+    #: kind is still SENT: a note the Engine thought worth writing is
+    #: never dropped here merely because this table has not heard of
+    #: it yet.
+    HEADS = {
+        "ranked-buy": ("OPPORTUNITY", "BUY"),
+        "TRAIL": ("YOUR POSITION", "SELL"),
+        "HELD": ("YOUR POSITION", "SELL"),
+        "NEWS": ("NEWS ON A HOLDING", "SELL"),
+    }
+
+    def push(self, note):
+        """Forward one Engine alert note to his phone. Never raises.
+
+        `note` is the dict the Engine already built and already
+        showed: {"symbol", "kind", "message", "at"}.
+        """
+        try:
+            if not isinstance(note, dict):
+                return False
+            kind = str(note.get("kind") or "")
+            symbol = str(note.get("symbol") or "").upper()
+            message = str(note.get("message") or "").strip()
+            if not message or kind in PUSH_SKIP_KINDS:
+                return False
+            if not available():
+                return False
+            if not self._budget_allows():
+                return False
+            return bool(send(self._card(symbol, kind, message)))
+        except Exception as exc:                            # noqa: BLE001
+            diagnostic(f"[TG] push failed: {type(exc).__name__}")
+            return False
+
+    def _card(self, symbol, kind, message):
+        """The envelope. What is inside it is untouched."""
+        head, verb = self.HEADS.get(kind, (None, None))
+        if head is None:
+            head = ("OPPORTUNITY" if kind.startswith("alert-only")
+                    else "ALERT")
+            verb = "BUY" if head == "OPPORTUNITY" else "SELL"
+        card = f"*{head} -- {symbol}*\n{message}"
+        if symbol and symbol != "?":
+            card += f"\n\n`{verb} {symbol}`   _(then_ `YES`_)_"
+        return card
+
+    def _budget_allows(self):
+        """One counter, reset by date. It says so once when it stops.
+
+        A cap that goes quiet without announcing itself is the same
+        failure as no alert at all, dressed as a working one.
+        """
+        today = datetime.now().strftime("%Y-%m-%d")
+        with self._lock:
+            if self._push_day != today:
+                self._push_day = today
+                self._pushed = 0
+            self._pushed += 1
+            n = self._pushed
+        if n <= PUSH_MAX_PER_DAY:
+            return True
+        if n == PUSH_MAX_PER_DAY + 1:
+            # Outside the lock deliberately -- send() is a network call.
+            send(f"_That is {PUSH_MAX_PER_DAY} alerts today, the daily "
+                 f"cap. Anything further is on the board and in the "
+                 f"log -- nothing is hidden from the bot itself._")
+        return False
 
     # ---------------- inbound ----------------
 
@@ -226,10 +340,22 @@ class TelegramDesk:
                 return self._status()
             if verb in ("POSITIONS", "POS"):
                 return self._positions()
+            if verb in ("TOP", "PICKS"):
+                return self._top()
+            if verb in ("ALERTS", "ALERT"):
+                return self._alerts()
+            if verb in ("FUNDS", "MARGIN", "CAPITAL"):
+                return self._funds()
             if verb == "PNL":
                 return self._pnl()
             if verb == "WHY":
                 return self._why(arg)
+            # _HELP has advertised OPP since this file was written and
+            # handle() has never had a branch for it -- so it answered
+            # "Unknown command `OPP`" to a command its own help text
+            # told him to send. Found 18 Aug while wiring push().
+            if verb in ("OPP", "OPPORTUNITY"):
+                return self._opportunities()
             if verb in ("ON", "OFF"):
                 return self._arm(verb == "ON")
             if verb in ("BUY", "SELL", "EXITALL"):
@@ -241,10 +367,84 @@ class TelegramDesk:
 
     # ---------------- the confirm step ----------------
 
+    def _ltp(self, symbol):
+        """Last price for a symbol, from the board's own snapshot.
+
+        No price is computed here and no feed is read -- this only
+        finds the number the board is already showing.
+        """
+        snap = self._snapshot()
+        pools = [(snap.get("ranked") or {}).get("rows") or [],
+                 snap.get("movers") or [],
+                 (snap.get("shortlist") or {}).get("rows") or []]
+        for pool in pools:
+            for row in pool:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("symbol") or "").upper() != symbol:
+                    continue
+                for key in ("ltp", "price", "cmp", "last_price"):
+                    try:
+                        got = float(row.get(key))
+                    except (TypeError, ValueError):
+                        continue
+                    if got > 0:
+                        return got
+        held = (snap.get("open_positions") or {}).get(symbol) or {}
+        for key in ("ltp", "current_price", "entry_price"):
+            try:
+                got = float(held.get(key))
+            except (TypeError, ValueError):
+                continue
+            if got > 0:
+                return got
+        return None
+
+    def _mtf_check(self, symbol):
+        """Can he buy this ON MARGIN at Dhan? (verdict, sentence).
+
+        ==========================================================
+            "BY SEEING THAT ALERT I'LL GIVE COMMAND BUY X SHARES IN
+             MTF (INCASE NON-MTF - NO BUY)"
+                                -- operator, 18 August 2026
+        ==========================================================
+
+        THREE ANSWERS, NOT TWO. True, False, and None for "could not
+        be asked" -- paper mode, no margin book, no live price yet.
+        None is NOT eligibility: it is reported in the quote in those
+        words, so he decides with the gap visible. The standing rule
+        on this project is NEVER ASSUME, and an unasked question read
+        as a pass is precisely that.
+
+        The question is asked by dashboard/state.py's resolver, which
+        asks core/mtf_margin.py, which asks DHAN. Nothing here keeps a
+        list of MTF scrips: a second copy would go stale the first
+        time Dhan changed the list, and it would go stale silently.
+        """
+        resolver = (getattr(self.state, "mtf_for", None)
+                    or getattr(self.state, "_mtf_for", None))
+        if resolver is None:
+            return None, "MTF not checked (no board attached)"
+        price = self._ltp(symbol)
+        if not price:
+            return None, "MTF not checked (no live price on the board yet)"
+        try:
+            got = resolver(symbol, {"ltp": price})
+        except Exception as exc:                            # noqa: BLE001
+            diagnostic(f"[TG] MTF check failed: {type(exc).__name__}")
+            return None, "MTF not checked (the margin call failed)"
+        if got is None:
+            return None, "MTF not checked (broker not connected)"
+        if not got.get("eligible"):
+            return False, "Dhan does not margin this scrip -- cash only"
+        lev = got.get("leverage")
+        return True, (f"MTF {lev}x" if lev else "MTF eligible")
+
     def _quote(self, verb, symbol, qty):
         """Say what will happen and wait. Places nothing."""
         if verb != "EXITALL" and not symbol:
             return f"`{verb} SYMBOL` -- which stock?"
+        mtf_note = ""
         if verb == "BUY" and symbol and self.master_loader is not None:
             try:
                 known = set(self.master_loader.all_symbols())
@@ -253,6 +453,16 @@ class TelegramDesk:
                             f"Nothing sent.")
             except Exception:                               # noqa: BLE001
                 pass
+        if verb == "BUY" and symbol:
+            # HIS RULE, ENFORCED BEFORE THE QUOTE IS OFFERED. Refusing
+            # here rather than at the confirm step means a cash-only
+            # name never gets a YES to type against it.
+            allowed, note = self._mtf_check(symbol)
+            if allowed is False:
+                return (f"*{symbol}* -- NO BUY.\n{note}.\n\n"
+                        f"_Your rule, 18 Aug: if it is not MTF, it is "
+                        f"not bought._")
+            mtf_note = f"\n_{note}._"
         want = None
         if qty:
             try:
@@ -270,8 +480,8 @@ class TelegramDesk:
                     f"market.{note}\n\nReply `YES` within "
                     f"{CONFIRM_SECONDS}s.")
         size = f" x{want}" if want else " (bot default size)"
-        return (f"*{verb} {symbol}*{size}{note}\n\nReply `YES` within "
-                f"{CONFIRM_SECONDS}s.")
+        return (f"*{verb} {symbol}*{size}{mtf_note}{note}\n\nReply `YES` "
+                f"within {CONFIRM_SECONDS}s.")
 
     @staticmethod
     def _reach():
@@ -386,6 +596,67 @@ class TelegramDesk:
                          f"{str(c.get('exit_reason') or '')[:16]}`")
         return "\n".join(lines)
 
+    def _top(self):
+        """What the bot likes RIGHT NOW, ranked.
+
+        An alert only fires the moment a pick appears. This is the
+        same list on demand, so he is not limited to whatever arrived
+        while he happened to be looking at his phone.
+        """
+        rows = ((self._snapshot().get("ranked") or {}).get("rows") or [])
+        if not rows:
+            return "Nothing on the board -- no pick has passed the gates."
+        lines = ["*What the bot likes now*"]
+        for row in rows[:8]:
+            why = str(row.get("why") or row.get("mechanism") or "")[:90]
+            lines.append(f"`{str(row.get('symbol'))[:12]:<12} "
+                         f"{row.get('ltp', '?')}`\n{why}")
+        return "\n".join(lines)
+
+    def _alerts(self):
+        """Every alert raised today, newest first.
+
+        Including the ones the daily push cap held back -- the cap
+        limits what is PUSHED, never what he can ask for.
+        """
+        rows = self._snapshot().get("alerts") or []
+        if not rows:
+            return "No alerts raised today."
+        lines = [f"*{len(rows)} alerts today*"]
+        for row in rows[:15]:
+            if not isinstance(row, dict):
+                continue
+            lines.append(f"`{row.get('at', '')}` "
+                         f"*{row.get('symbol', '?')}*  "
+                         f"{str(row.get('message') or '')[:110]}")
+        return "\n".join(lines)
+
+    def _funds(self):
+        """What is left to deploy, and how much is already at work.
+
+            "bot must self learn & evaluate the funds usage based on
+             stock underlying strength"    -- operator, 18 August 2026
+
+        The evaluating is not done here and is not done yet. This
+        reports what trading/portfolio.py already computes, so the
+        number he plans against is the number the sizing uses.
+        """
+        cap = self._snapshot().get("capital") or {}
+        if not cap:
+            return "Capital not readable -- the broker may not be connected."
+
+        def _rs(key):
+            try:
+                return f"Rs {float(cap.get(key)):,.0f}"
+            except (TypeError, ValueError):
+                return "?"
+
+        return (f"*Funds*\n"
+                f"`buying power   {_rs('available_buying_power'):>14}`\n"
+                f"`deployed       {_rs('deployed_capital'):>14}`\n"
+                f"`margin used    {_rs('used_margin'):>14}`\n"
+                f"`realised today {_rs('realized_pnl'):>14}`")
+
     def _why(self, symbol):
         """Which gate refused it -- the same answer /api/why gives."""
         if not symbol:
@@ -406,6 +677,19 @@ class TelegramDesk:
             return f"*{symbol}* refused:\n{why}"
         return (f"*{symbol}* did not reach the ranker today -- it did not "
                 f"move enough to be looked at, or no tick arrived.")
+
+    def _opportunities(self):
+        """What each opportunity family has actually been worth.
+
+        core/opportunity.py measured it against trade_memory and the
+        price history; this only carries the answer. Nothing is
+        recomputed and no family is ranked here.
+        """
+        try:
+            from core import opportunity
+            return f"*Opportunity families*{chr(10)}{opportunity.verdict()}"
+        except Exception as exc:                            # noqa: BLE001
+            return f"Could not read the opportunity memory ({exc})."
 
     def _arm(self, on):
         if self.engine is None:

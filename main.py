@@ -1682,6 +1682,20 @@ def main():
             engine=engine,
             master_loader=master_loader)
         telegram_desk.start()
+        # ---- AND THE ALERTS GO OUT OF IT. 18 August 2026. ----
+        #
+        #     "why i didn't get any alerts to buy stocks in telegram ?"
+        #
+        # Because of this one missing line. The desk could send since
+        # yesterday and the Engine has been writing buy alerts since
+        # 31 July, and nothing introduced them. TIINDIA, NEOGEN, PCBL
+        # and ACE were all alerted this morning -- to a log file.
+        #
+        # This is an assignment and not a subscription on purpose:
+        # there is exactly ONE listener, so an alert cannot be sent
+        # twice, and setting it here rather than inside the Engine
+        # keeps core/engine.py with no knowledge that Telegram exists.
+        engine.on_alert = telegram_desk.push
     except Exception as exc:                               # noqa: BLE001
         warn(f"[TG] Telegram desk not started ({exc}). Everything else "
              f"is unaffected.")

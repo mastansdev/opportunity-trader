@@ -622,6 +622,20 @@ class Engine:
         self.manual_alerts = []
         self._manual_alerts_seen = set()
 
+        # ---- WHERE THOSE NOTES GO NEXT. 18 August 2026. ----
+        #
+        #     "why i didn't get any alerts to buy stocks in telegram?"
+        #
+        # Because this list was the end of the road. Between 31 July
+        # and this morning the bot wrote 2,652 of these notes -- every
+        # one reached a log file and the board, and not one reached
+        # him. The alert was never missing; the last mile was.
+        #
+        # main.py sets this to core/telegram_desk.py's push(). None is
+        # the correct default and must stay it: the Engine has to run
+        # identically with no phone attached, and no test may need one.
+        self.on_alert = None
+
         # Slot rotation, switched on 2026-07-29 for the two paper
         # sessions before live. Counted and capped -- see config's
         # ROTATION_MAX_PER_DAY.
@@ -3687,6 +3701,29 @@ class Engine:
         })
         del self.manual_alerts[:-MANUAL_ALERT_HISTORY]
         decision(f"[YOUR TRADE] {message}")
+        self._push_alert(self.manual_alerts[-1])
+
+    def _push_alert(self, note):
+        """Hand a finished note to whatever is listening.
+
+        Order matters: the note is appended and logged BEFORE this
+        runs, so a phone that is off, unconfigured or unreachable
+        costs him nothing he had before -- the board and the log are
+        already written by the time this is called.
+
+        Wrapped because this runs on the trading loop. A Telegram
+        timeout must never delay a tick, and must never turn a
+        recorded alert into an exception on the entry path.
+        """
+        sink = getattr(self, "on_alert", None)
+        if sink is None:
+            return
+        try:
+            sink(dict(note))
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[ALERT] {note.get('symbol')} could not be "
+                       f"forwarded ({type(exc).__name__}). It is on the "
+                       f"board and in the log.")
 
     def export_session_counters(self):
         """Per-day counters that must survive a mid-session restart.
