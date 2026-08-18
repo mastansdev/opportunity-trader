@@ -61,7 +61,7 @@
    "symbol": "^FVX"
   },
   "dxy": {
-   "last": 99.669,
+   "last": 99.664,
    "currency": "USD",
    "market_state": null,
    "change_pct": 0.03,
@@ -71,80 +71,80 @@
    "symbol": "DX-Y.NYB"
   },
   "crude": {
-   "last": 84.55,
+   "last": 84.33,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 0.06,
+   "change_pct": -0.2,
    "previous": 84.5,
    "label": "Crude oil",
    "group": "ENERGY",
    "symbol": "CL=F"
   },
   "natgas": {
-   "last": 2.712,
+   "last": 2.708,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 0.82,
+   "change_pct": 0.67,
    "previous": 2.69,
    "label": "Natural gas",
    "group": "ENERGY",
    "symbol": "NG=F"
   },
   "gold": {
-   "last": 4447.0,
+   "last": 4444.9,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 0.66,
+   "change_pct": 0.61,
    "previous": 4417.8,
    "label": "Gold",
    "group": "METALS",
    "symbol": "GC=F"
   },
   "silver": {
-   "last": 64.975,
+   "last": 65.04,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -1.73,
+   "change_pct": -1.63,
    "previous": 66.121,
    "label": "Silver",
    "group": "METALS",
    "symbol": "SI=F"
   },
   "copper": {
-   "last": 6.525,
+   "last": 6.524,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -1.2,
+   "change_pct": -1.21,
    "previous": 6.604,
    "label": "Copper",
    "group": "METALS",
    "symbol": "HG=F"
   },
   "ftse": {
-   "last": 10714.62,
+   "last": 10707.04,
    "currency": "GBP",
    "market_state": null,
-   "change_pct": -0.33,
+   "change_pct": -0.4,
    "previous": 10750.1,
    "label": "FTSE 100",
    "group": "EUROPE",
    "symbol": "^FTSE"
   },
   "dax": {
-   "last": 26174.16,
+   "last": 26194.07,
    "currency": "EUR",
    "market_state": null,
-   "change_pct": -1.01,
+   "change_pct": -0.93,
    "previous": 26440.31,
    "label": "DAX",
    "group": "EUROPE",
    "symbol": "^GDAXI"
   },
   "stoxx": {
-   "last": 6483.41,
+   "last": 6486.1,
    "currency": "EUR",
    "market_state": null,
-   "change_pct": -0.72,
+   "change_pct": -0.68,
    "previous": 6530.45,
    "label": "Euro Stoxx 50",
    "group": "EUROPE",
@@ -161,10 +161,10 @@
    "symbol": "^N225"
   },
   "hangseng": {
-   "last": 25482.55,
+   "last": 25471.15,
    "currency": "HKD",
    "market_state": null,
-   "change_pct": 1.46,
+   "change_pct": 1.41,
    "previous": 25116.85,
    "label": "Hang Seng",
    "group": "ASIA",
@@ -191,27 +191,27 @@
    "symbol": "INR=X"
   },
   "eurusd": {
-   "last": 1.1575,
+   "last": 1.1577,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 0.01,
+   "change_pct": 0.03,
    "previous": 1.1574,
    "label": "EUR / USD",
    "group": "FX",
    "symbol": "EURUSD=X"
   },
   "usdjpy": {
-   "last": 159.721,
+   "last": 159.688,
    "currency": "JPY",
    "market_state": null,
-   "change_pct": 0.31,
+   "change_pct": 0.29,
    "previous": 159.223,
    "label": "USD / JPY",
    "group": "FX",
    "symbol": "JPY=X"
   }
  },
- "fetched_at": "2026-08-18 13:49:21",
- "last_success_at": "2026-08-18 13:49:21",
+ "fetched_at": "2026-08-18 14:10:16",
+ "last_success_at": "2026-08-18 14:10:16",
  "failed": []
 }

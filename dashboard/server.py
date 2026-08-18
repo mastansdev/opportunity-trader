@@ -783,6 +783,24 @@ def build_app(dashboard_state, trade_controller, master_loader,
             warn(f"[TAG] {tag} failed: {exc}")
             return {"tag": tag, "exact": [], "like": [], "error": str(exc)}
 
+    @app.get("/api/score")
+    def signal_score():
+        """What actually happened after every signal the bot recorded.
+
+        ---- THE MEASUREMENT THAT WAS NEVER TAKEN. 18 Aug 2026. ----
+
+        13,333 signals carrying `taken` and `refused_why`, 51 of them
+        taken, and no column for what the price did next. This reads
+        it back. Slow on purpose -- it walks 19M minute candles -- so
+        it is a page he opens, never something the snapshot waits on.
+        """
+        try:
+            from core import signal_journal
+            return signal_journal.report()
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[SCORE] failed: {exc}")
+            return {"available": False, "why": str(exc)}
+
     @app.get("/api/stock/{symbol}")
     def stock_card(symbol: str):  # noqa: D401  (see _json_safe above)
         """Everything the bot knows about one stock.

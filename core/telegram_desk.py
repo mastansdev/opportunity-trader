@@ -108,6 +108,7 @@ _HELP = """*Opportunity Trader*
 `WHY SYM`     which gate refused it, live
 `OPP`         what each opportunity family is worth
 `SIDES X`     who gains and who loses when X rises
+`SCORE`       what refused signals actually did next
 
 `BUY SYM [qty]`   quoted, needs YES
 `SELL SYM`        quoted, needs YES
@@ -187,6 +188,8 @@ class TelegramDesk:
         # a bot left running over midnight starts the new day at zero.
         self._push_day = None
         self._pushed = 0
+        # SCORE walks 19M candles. Once per session is enough.
+        self._score_cache = None
 
     # ---------------- outbound ----------------
 
@@ -382,6 +385,8 @@ class TelegramDesk:
                 return self._opportunities()
             if verb in ("SIDES", "SIDE"):
                 return self._sides(" ".join(words[1:]).upper())
+            if verb in ("SCORE", "SCORED"):
+                return self._score()
             if verb in ("ON", "OFF"):
                 return self._arm(verb == "ON")
             if verb in ("BUY", "SELL", "EXITALL"):
@@ -768,6 +773,47 @@ class TelegramDesk:
                 f"_a name here makes the commodity itself -- the map "
                 f"cannot tell a producer from a converter, so it does "
                 f"not guess._")
+
+    def _score(self):
+        """What the refused signals actually did next.
+
+        core/signal_journal.py walks 19M minute candles to answer
+        this; it takes about a minute, so the answer is cached for the
+        session rather than recomputed per message. Nothing is
+        calculated in this file.
+        """
+        try:
+            from core import signal_journal
+            if self._score_cache is None:
+                self._score_cache = signal_journal.report()
+            got = self._score_cache
+        except Exception as exc:                            # noqa: BLE001
+            return f"Could not score the journal ({exc})."
+        if not got.get("available"):
+            return str(got.get("why") or "Nothing scorable yet.")
+
+        o = got["overall"]
+        ev, no = got["evidence"]["with"], got["evidence"]["without"]
+
+        def _n(v):
+            return "?" if v is None else v
+
+        return (f"*Signals scored: {o['n']:,}*\n"
+                f"_{got['resolutions']['minute']:,} at minute "
+                f"resolution, {got['resolutions']['daily']:,} daily "
+                f"(daily cannot say whether the stop came first)._\n"
+                f"\n`avg best move   {_n(o['avg_mfe_pct']):>7}%`\n"
+                f"`avg worst move  {_n(o['avg_mae_pct']):>7}%`\n"
+                f"`stopped first   {_n(o['stopped_first_pct']):>7}%`\n"
+                f"`up at close     {_n(o['up_at_close_pct']):>7}%`\n"
+                f"\n*With evidence vs without*\n"
+                f"`close   {_n(ev['avg_close_pct']):>7}%  vs "
+                f"{_n(no['avg_close_pct']):>7}%`\n"
+                f"`best    {_n(ev['avg_mfe_pct']):>7}%  vs "
+                f"{_n(no['avg_mfe_pct']):>7}%`\n"
+                f"`stopped {_n(ev['stopped_first_pct']):>7}%  vs "
+                f"{_n(no['stopped_first_pct']):>7}%`\n"
+                f"_n={ev['n']:,} vs {no['n']:,}_")
 
     def _arm(self, on):
         if self.engine is None:
