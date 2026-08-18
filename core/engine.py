@@ -1495,6 +1495,34 @@ class Engine:
         out["reason_summary"] = ", ".join(parts)[:160] or None
         return out
 
+    def _alert_evidence(self, symbol):
+        """The EVIDENCE behind this break, as a readable clause.
+
+            "stocks raising with underlying evidence = news / results /
+             orders / anything that supports with volume must have
+             added advantage rather than normal breakout stocks"
+                                -- operator, 18 August 2026
+
+        Returns "" when there is nothing to add, so the sentence reads
+        the same as before for anything this cannot enrich. Never
+        raises and never blocks: an alert with no evidence line is
+        worse than one with it, and both are far better than an
+        exception on the trading loop.
+
+        Nothing is computed here. _capture_reason() has gathered this
+        since 28 July -- to STAMP on the position afterwards for
+        core/trade_memory.py -- and the alert has been discarding it
+        and printing the mechanism name instead.
+        """
+        try:
+            got = self._capture_reason(symbol) or {}
+        except Exception:                                  # noqa: BLE001
+            return ""
+        summary = str(got.get("reason_summary") or "").strip()
+        if not summary:
+            return "  [PRICE ONLY -- no event behind it]"
+        return f"  [EVIDENCE: {summary}]"
+
     def _no_reason_refusal(self, symbol):
         """Why this stock has no event behind it today, or None if it
         has one.
@@ -3257,13 +3285,33 @@ class Engine:
             why_not = ("the bot is not trading" if self.alert_only else
                        "bot trading is ON for the ranked list only -- "
                        "breakout entries are not armed")
+            # ---- SHOW THE EVIDENCE, NOT JUST THE MECHANISM. ----
+            #      18 August 2026.
+            #
+            #     "stocks raising with underlying evidence =
+            #      news/results/orders/anything that supports with
+            #      volume must have added advantage rather than normal
+            #      breakout stocks."
+            #
+            # He was reading alerts that said only
+            # STRUCTURAL_LONG_BREAKOUT -- SHRINGARMS at 229.36 was the
+            # one that prompted this -- and could not tell an
+            # evidence-backed break from a bare level cross.
+            #
+            # The evidence was ALREADY GATHERED. _no_reason_refusal()
+            # runs on this path and refuses a stock with no event
+            # behind it, so anything reaching here HAS one --
+            # _capture_reason() knows what it is and the alert threw
+            # it away, printing the mechanism instead. The name of the
+            # pattern is not the reason to buy.
             self._manual_alert(
                 symbol, f"alert-only-{direction}",
                 f"{symbol} {direction} would have been entered at "
                 f"{closed_candle['close']:.2f} "
                 f"(qty {qty}, stop {stop_seed:.2f}"
                 f"{f', target {target:.2f}' if target else ''}) -- "
-                f"{entry_reason}. ALERT ONLY: {why_not}. "
+                f"{entry_reason}{self._alert_evidence(symbol)}. "
+                f"ALERT ONLY: {why_not}. "
                 f"Use the dashboard BUY if you want it."
             )
             if self.signal_journal is not None:

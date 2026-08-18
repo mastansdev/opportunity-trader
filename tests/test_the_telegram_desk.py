@@ -607,3 +607,67 @@ def test_they_all_survive_a_board_that_is_not_there(desk):
     first snapshot, and a crash there would kill the poll thread."""
     for verb in ("TOP", "ALERTS", "FUNDS"):
         assert desk.handle(verb, ME)
+
+# ---------------------------------------------------------------
+# EVIDENCE AND PRICE-ONLY MUST NOT LOOK THE SAME
+# ---------------------------------------------------------------
+#
+#     "stocks raising with underlying evidence = news/results/orders/
+#      anything that supports with volume must have added advantage
+#      rather than normal breakout stocks.
+#      ex - alert recvd = OPPORTUNITY -- SHRINGARMS ...
+#      STRUCTURALLONGBREAKOUT"      -- operator, 18 August 2026
+#
+# He is triaging these one at a time on a phone. A break standing on a
+# filing and a break standing on nothing arrived under the same word,
+# in the same shape, and the only distinguishing text was the name of
+# the pattern -- which is not a reason to buy anything.
+
+
+def test_an_evidence_backed_break_says_so_in_the_header(desk, sent):
+    desk.push({"symbol": "TIINDIA", "kind": "alert-only-LONG",
+               "message": "TIINDIA LONG would have been entered at 2888.8 "
+                          "-- STRUCTURAL_LONG_BREAKOUT  "
+                          "[EVIDENCE: results:STRONG, order_win]"})
+    assert "EVIDENCE" in sent[0]["text"].split(chr(10))[0]
+
+
+def test_a_price_only_break_announces_its_own_weakness(desk, sent):
+    """THE SHRINGARMS CASE."""
+    desk.push({"symbol": "SHRINGARMS", "kind": "alert-only-LONG",
+               "message": "SHRINGARMS LONG would have been entered at "
+                          "229.36 (qty 326, stop 223.63) -- "
+                          "STRUCTURAL_LONG_BREAKOUT  "
+                          "[PRICE ONLY -- no event behind it]"})
+    head = sent[0]["text"].split(chr(10))[0]
+    assert "no evidence" in head.lower()
+
+
+def test_the_two_headers_are_actually_different(desk, sent):
+    """If both render the same the change bought nothing."""
+    desk.push({"symbol": "A", "kind": "alert-only-LONG",
+               "message": "A -- x  [EVIDENCE: filing]"})
+    desk.push({"symbol": "B", "kind": "alert-only-LONG",
+               "message": "B -- x  [PRICE ONLY -- no event behind it]"})
+    first = sent[0]["text"].split(chr(10))[0]
+    second = sent[1]["text"].split(chr(10))[0]
+    assert first != second
+
+
+def test_the_desk_never_decides_which_one_it_is(desk, sent):
+    """core/engine.py stamps the message; this file only READS the
+    stamp. A second opinion about what counts as evidence is a second
+    rule to keep in sync, and it would drift."""
+    desk.push({"symbol": "C", "kind": "alert-only-LONG",
+               "message": "C -- no stamp at all"})
+    assert "OPPORTUNITY" in sent[0]["text"].split(chr(10))[0]
+
+
+def test_the_engine_stamps_every_structural_alert():
+    src = (ROOT / "core" / "engine.py").read_text(encoding="utf-8")
+    assert "_alert_evidence" in src
+    body = src[src.find("def _alert_evidence"):]
+    body = body[:body.find("def _no_reason_refusal")]
+    assert "_capture_reason" in body, (
+        "the evidence must come from the one place that gathers it")
+    assert "PRICE ONLY" in body and "EVIDENCE:" in body

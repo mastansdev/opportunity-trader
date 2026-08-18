@@ -271,6 +271,29 @@ class TelegramDesk:
             head = ("OPPORTUNITY" if kind.startswith("alert-only")
                     else "ALERT")
             verb = "BUY" if head == "OPPORTUNITY" else "SELL"
+
+        # ---- THE TWO KINDS MUST NOT LOOK THE SAME. 18 Aug 2026. ----
+        #
+        #     "stocks raising with underlying evidence =
+        #      news/results/orders/anything that supports with volume
+        #      must have added advantage rather than normal breakout
+        #      stocks."
+        #
+        # SHRINGARMS at 229.36 was the alert that prompted it: a bare
+        # STRUCTURAL_LONG_BREAKOUT, indistinguishable on the phone
+        # from one standing on a filing. core/engine.py now stamps
+        # [EVIDENCE: ...] or [PRICE ONLY ...] on the sentence, and
+        # this only reads the stamp -- it never decides which one a
+        # stock deserves.
+        #
+        # The header is where he triages, so the header is where the
+        # difference goes. He asked for evidence to carry an
+        # ADVANTAGE; the honest form of that in a message he reads one
+        # at a time is that the weaker kind announces itself.
+        if "[PRICE ONLY" in message:
+            head = "BREAKOUT (no evidence)"
+        elif "[EVIDENCE:" in message:
+            head = "OPPORTUNITY + EVIDENCE"
         card = f"*{head} -- {symbol}*\n{message}"
         if symbol and symbol != "?":
             card += f"\n\n`{verb} {symbol}`   _(then_ `YES`_)_"
