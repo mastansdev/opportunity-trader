@@ -165,3 +165,95 @@ def test_the_source_still_carries_the_fail_closed_reasoning():
     src = inspect.getsource(auto_entry)
     assert "FAIL CLOSED" in src, (
         "the fail-closed comment is gone -- check the behaviour is too")
+
+# ---------------------------------------------------------------
+# A SEAT YOU ARE NOT USING CANNOT RUN OUT
+# ---------------------------------------------------------------
+#
+# 18 August 2026. core/broker_funds.py stopped reading the paper purse
+# out of config and started asking Dhan. Correct -- and it very nearly
+# produced a silent, all-day alert blackout on the morning after he
+# asked why alerts never reached his phone.
+#
+# Engine._position_ceiling() is cash-sized: (capital - Rs 1,00,000) /
+# Rs 30,000. On the frozen constant of Rs 4,31,116 that was 5 seats.
+# On his REAL free cash of Rs 84,518 -- his own manual trades were
+# holding Rs 1.2 lakh of the account -- it is 0. refuse_reason then
+# evaluates `len(held) >= max_positions` as `0 >= 0` and refuses every
+# pick of the day with a sentence about a book that holds nothing.
+#
+# In ALERT_ONLY the bot enters nothing, so it occupies no seat.
+
+
+class _Alerting(_Engine):
+    def __init__(self):
+        super().__init__()
+        self.alert_only = True
+        self.alerts = []
+
+    def _manual_alert(self, symbol, kind, message):
+        self.alerts.append((symbol, kind, message))
+
+
+def _alert_run(engine, max_positions, held=None):
+    return auto_entry.take(
+        [_row()], engine, now=datetime(2026, 8, 18, 11, 0),
+        security_id_of=lambda s: "1", held=held or set(),
+        max_positions=max_positions,
+        alert=engine._manual_alert, enter=lambda *a, **k: None)
+
+
+def test_a_zero_seat_book_still_alerts():
+    """THE BLACKOUT THIS PREVENTS."""
+    engine = _Alerting()
+    _alert_run(engine, max_positions=0)
+    assert engine.alerts, (
+        "cash ran low and he stopped being told about opportunities")
+
+
+def test_a_full_book_still_alerts():
+    engine = _Alerting()
+    _alert_run(engine, max_positions=1, held={"SOMETHINGELSE"})
+    assert engine.alerts
+
+
+def test_it_still_places_nothing_while_alert_only():
+    engine = _Alerting()
+    placed = []
+    auto_entry.take([_row()], engine, now=datetime(2026, 8, 18, 11, 0),
+                    security_id_of=lambda s: "1", held=set(),
+                    max_positions=0, alert=engine._manual_alert,
+                    enter=lambda *a, **k: placed.append(a[0]))
+    assert placed == [], "ALERT_ONLY placed an order"
+
+
+def test_the_entry_path_still_respects_the_seat_count():
+    """The capacity rule is untouched where it actually matters. If
+    this ever passes an entry through on a zero ceiling, the change
+    stopped being about alerts."""
+    engine = _Engine()          # alert_only False -- the entry path
+    sent, _ = _take(engine, max_positions=0)
+    assert sent == [], "a full book let a real entry through"
+
+
+def test_a_bad_pick_is_still_silenced_in_alert_only():
+    """Only the CAPACITY question is set aside. A refusal about the
+    TRADE must still stop the alert, or the phone fills with picks the
+    bot itself rejected."""
+    engine = _Alerting()
+    row = _row()
+    row["plan"] = {"ok": False, "why": "no tradeable plan"}
+    auto_entry.take([row], engine, now=datetime(2026, 8, 18, 11, 0),
+                    security_id_of=lambda s: "1", held=set(),
+                    max_positions=5, alert=engine._manual_alert,
+                    enter=lambda *a, **k: None)
+    assert engine.alerts == []
+
+
+def test_already_held_is_still_silenced_in_alert_only():
+    engine = _Alerting()
+    auto_entry.take([_row()], engine, now=datetime(2026, 8, 18, 11, 0),
+                    security_id_of=lambda s: "1", held={"TESTCO"},
+                    max_positions=5, alert=engine._manual_alert,
+                    enter=lambda *a, **k: None)
+    assert engine.alerts == []

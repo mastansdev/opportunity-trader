@@ -573,12 +573,41 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
         [r for r in (rows or []) if isinstance(r, dict)],
         key=lambda r: -(_num(r.get("score")) or 0.0))
 
+    # ---- A SEAT YOU ARE NOT USING CANNOT RUN OUT. 18 Aug 2026. ----
+    #
+    # core/broker_funds.py now sizes the book from the REAL Dhan
+    # balance instead of a constant. That is right, and it had a
+    # consequence that would have looked exactly like a broken alert
+    # system on the morning after he asked why alerts never arrived.
+    #
+    # Engine._position_ceiling() is cash-sized: (capital - Rs 1 lakh)
+    # / Rs 30,000. On the frozen figure of Rs 4,31,116 that was 5
+    # seats. On his real free cash of Rs 84,518 -- after HIS OWN
+    # manual trades took Rs 1.2 lakh of the account -- it is 0, and
+    # refuse_reason then reads `len(held) >= max_positions` as
+    # `0 >= 0` and refuses EVERY pick. Zero alerts, all day, with a
+    # sentence about a book that holds nothing.
+    #
+    # In ALERT_ONLY the bot enters nothing, so it occupies no seat and
+    # cannot be out of them. The capacity question belongs to the
+    # ENTRY path, and this hands it only to the entry path. Every
+    # other refusal -- no reason, fading, already held, under the
+    # Rs 50 floor, the daily loss cap, the engine's own risk layer --
+    # is untouched and still silences the alert, because those are
+    # statements about the TRADE and not about the bot's wallet.
+    #
+    #     "as of now all alerts must be in telegram & after my
+    #      confirmation only they need to executed"
+    #
+    # He is the one taking it. His capacity is not this number.
+    seats = None if alert_only else max_positions
+
     for row in rows:
         if not isinstance(row, dict):
             continue
         symbol = str(row.get("symbol") or "").upper()
         why = refuse_reason(row, engine, now=now, held=held,
-                            max_positions=max_positions)
+                            max_positions=seats)
         if why:
             out.append({"symbol": symbol, "taken": False, "why": why})
             continue

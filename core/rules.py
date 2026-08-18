@@ -284,6 +284,39 @@ def is_a_reason(text):
 # move is over -- this is the "is it still an opportunity" test.
 FADED_FROM_HIGH = 0.5
 
+# ==========================================================
+#  A BREAKOUT MAKES THE HIGH. IT DOES NOT RETURN TO IT.
+# ==========================================================
+#
+#     "bot alert system unable to identify the difference of fresh
+#      breakout or fall backs ... this stock had made high 8300 rs &
+#      fell to current levels. MAKE SURE THE BOT LEARN ABOUT THESE
+#      BREAKOUTS."
+#                                 -- operator, 18 August 2026
+#
+# NAVINFLUOR, 12:30 that day. The alert read STRUCTURAL_LONG_BREAKOUT
+# at 8240. The day's numbers:
+#
+#     open 8155   HIGH 8300   low 8151   ltp 8247   +1.18%
+#
+# 8240 is 0.72% BELOW a high the stock had already printed. The move
+# had happened and come back; the alert called it a breakout.
+#
+# WHY IT PASSED. The structural path measures the break against the
+# ORB -- the 09:15-09:30 opening range, NAVINFLUOR's being
+# high 8230 / low 8151. That range is fixed at 09:30 and never moves
+# again, so ANY later re-cross of 8230 reads as a fresh break of it,
+# including the third one, including the one after the real move has
+# already failed. _is_still_trending() was the only thing standing in
+# the way and it asks a different question -- position inside the day
+# range, generous at 0.65 -- which a 0.72% pullback clears.
+#
+# This is the missing question, asked directly: is this close AT the
+# day's extreme, or under one that is already history? A breakout
+# candle closes within a whisker of the high it just made. 0.72% is
+# not a whisker; it is a stock that went there and came back.
+BREAKOUT_MAX_OFF_HIGH_PCT = 0.25
+
 
 # ==========================================================
 #  SIZE OF THE POND

@@ -3853,3 +3853,130 @@ def test_arming_the_breakout_explicitly_lets_it_trade_again():
     engine.process_tick("TCS", "1", 112.5, _t(9, 32, 0))
     assert "TCS" in engine.open_positions, (
         "armed explicitly, the breakout must still work")
+
+# ---------------------------------------------------------------
+# A BREAKOUT MAKES THE HIGH. IT DOES NOT RETURN TO IT.
+# ---------------------------------------------------------------
+#
+#     "bot alert system unable to identify the difference of fresh
+#      breakout or fall backs . just now alert triggered =
+#      NAVINFLUOR LONG would have been entered at 8240.00 ... but this
+#      stock had made high 8300 rs & fell to current levels.
+#      MAKE SURE THE BOT LEARN ABOUT THESE BREAKOUTS."
+#                                 -- operator, 18 August 2026, 12:30
+#
+# The real numbers off the board that minute:
+#
+#     open 8155   HIGH 8300   low 8151   ltp 8247   +1.18%
+#     ORB (09:15-09:30)  high 8230  low 8151
+#
+# The structural path measures the break against the ORB, and the ORB
+# is FIXED AT 09:30. So a re-cross of 8230 at 12:30 -- after the stock
+# had run to 8300 and come back -- read as a fresh break of it.
+#
+# _is_still_trending() was the only gate in the way and it answers a
+# different question: position inside the day range, generous at 0.65.
+# NAVINFLUOR sat at (8240-8151)/(8300-8151) = 0.60 of its range and
+# 0.72% under its high. The range test is not able to say "this high
+# is already history"; that is what these tests pin.
+
+from core import tick_ohlc as _tick_ohlc
+
+
+def _breakout_engine():
+    engine = _engine()
+    _tick_ohlc.reset()
+    return engine
+
+
+def test_the_navinfluor_alert_is_refused():
+    """THE EXACT CASE HE SENT, with his numbers."""
+    engine = _breakout_engine()
+    _tick_ohlc.remember("NAVINFLUOR", {
+        "open": 8155.0, "high": 8300.0, "low": 8151.0, "close": 8151.0,
+        "LTP": 8247.0})
+    assert engine._is_at_the_days_extreme(
+        "NAVINFLUOR", "LONG", {"close": 8240.0}) is False
+    _tick_ohlc.reset()
+
+
+def test_a_close_that_makes_the_high_is_allowed():
+    """The control. Without it a gate that always refuses would pass
+    the test above and take the whole lane down with it."""
+    engine = _breakout_engine()
+    _tick_ohlc.remember("FRESH", {"open": 100.0, "high": 108.0,
+                                  "low": 99.0, "close": 99.0, "LTP": 108.0})
+    assert engine._is_at_the_days_extreme(
+        "FRESH", "LONG", {"close": 108.0}) is True
+    _tick_ohlc.reset()
+
+
+def test_a_close_a_whisker_under_the_high_is_still_a_breakout():
+    """A breakout candle rarely closes exactly on its own high. 0.1%
+    is the wick; 0.72% is a stock that went there and came back."""
+    engine = _breakout_engine()
+    _tick_ohlc.remember("WICK", {"open": 100.0, "high": 108.0,
+                                 "low": 99.0, "close": 99.0, "LTP": 107.9})
+    assert engine._is_at_the_days_extreme(
+        "WICK", "LONG", {"close": 107.9}) is True
+    _tick_ohlc.reset()
+
+
+def test_the_short_side_is_mirrored_against_the_low():
+    engine = _breakout_engine()
+    _tick_ohlc.remember("DOWN", {"open": 100.0, "high": 101.0,
+                                 "low": 92.0, "close": 100.0, "LTP": 95.0})
+    assert engine._is_at_the_days_extreme(
+        "DOWN", "SHORT", {"close": 95.0}) is False
+    assert engine._is_at_the_days_extreme(
+        "DOWN", "SHORT", {"close": 92.05}) is True
+    _tick_ohlc.reset()
+
+
+def test_it_fails_OPEN_when_the_feed_has_told_it_nothing():
+    """A missing reading is not a refusal -- same posture as every
+    other gate on this path. A gate that refuses on absent data would
+    silence the whole lane the first morning a tick was late."""
+    engine = _breakout_engine()
+    assert engine._is_at_the_days_extreme(
+        "NEVERSEEN", "LONG", {"close": 100.0}) is True
+    _tick_ohlc.remember("ZERO", {"open": 0, "high": 0, "low": 0, "close": 0})
+    assert engine._is_at_the_days_extreme(
+        "ZERO", "LONG", {"close": 100.0}) is True
+    assert engine._is_at_the_days_extreme("X", "LONG", None) is True
+    assert engine._is_at_the_days_extreme("X", "LONG", {"close": None}) is True
+    _tick_ohlc.reset()
+
+
+def test_the_refusal_is_recorded_where_he_can_read_it():
+    """A silent skip is indistinguishable from a bot that never saw
+    the stock, and he asked to be able to tell the two apart."""
+    engine = _breakout_engine()
+    _tick_ohlc.remember("NAVINFLUOR", {"open": 8155.0, "high": 8300.0,
+                                       "low": 8151.0, "close": 8151.0})
+    engine._is_at_the_days_extreme("NAVINFLUOR", "LONG", {"close": 8240.0})
+    blocks = engine.export_entry_blocks() or {}
+    said = str(blocks)
+    assert "8300" in said and "not a fresh breakout" in said
+    _tick_ohlc.reset()
+
+
+def test_the_gate_reads_the_feed_not_the_opening_range():
+    """The ORB is fixed at 09:30 and is precisely what made a stale
+    level look fresh. If this gate ever starts asking orb_engine, the
+    bug is back."""
+    import inspect
+    from core.engine import Engine
+    body = inspect.getsource(Engine._is_at_the_days_extreme)
+    code = chr(10).join(ln for ln in body.splitlines()
+                        if not ln.lstrip().startswith("#"))
+    code = code.split(chr(34) * 3)[0] + code.split(chr(34) * 3)[-1]
+    assert "orb" not in code.lower()
+    assert "tick_ohlc" in code
+
+
+def test_the_threshold_lives_in_the_rules_file():
+    from core import rules
+    assert hasattr(rules, "BREAKOUT_MAX_OFF_HIGH_PCT")
+    assert 0 < rules.BREAKOUT_MAX_OFF_HIGH_PCT < 1.0, (
+        "a limit this loose stops telling a breakout from a pullback")

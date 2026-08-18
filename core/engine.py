@@ -115,7 +115,8 @@ from core.atr import compute_atr
 # core/rules.py still holds -- twelve replayed days were measured at
 # 1,500 and the selector has no proven edge yet, so raising size before
 # there is an edge only loses money faster.
-from core.rules import RISK_PER_TRADE_RS
+from core import tick_ohlc
+from core.rules import RISK_PER_TRADE_RS, BREAKOUT_MAX_OFF_HIGH_PCT
 from core.orb_engine import OrbEngine, EARLY_ORB_END_T, ORB_WINDOW_END_T
 from core.candle_engine import CandleEngine
 from core.strategy import Strategy
@@ -2073,6 +2074,68 @@ class Engine:
             return position >= STILL_TRENDING_MIN_POSITION
         return position <= (1.0 - STILL_TRENDING_MIN_POSITION)
 
+    def _is_at_the_days_extreme(self, symbol, direction, closed_candle):
+        """Is this close MAKING today's high, or sitting under one the
+        stock already printed and walked back from?
+
+        ==========================================================
+            "bot alert system unable to identify the difference of
+             fresh breakout or fall backs"
+                                -- operator, 18 August 2026
+        ==========================================================
+
+        THE DIFFERENCE FROM _is_still_trending(). That one asks where
+        price sits inside the day RANGE and is deliberately generous
+        (0.65) -- it is a "has it rolled over" check. This asks a
+        narrower question that a range position cannot answer: a stock
+        can sit in the top third of its range and still be a full
+        percent under a high it made an hour ago. NAVINFLUOR was at
+        0.60 of its range and 0.72% off its high, and 0.72% off the
+        high is what he objected to.
+
+        THE HIGH COMES FROM THE FEED, not from the ORB and not from
+        the circuit poller. core/tick_ohlc.py carries Dhan's own
+        day OHLC and is updated on every tick, so it cannot lag the
+        candle being judged. The ORB range is fixed at 09:30 by
+        definition and is exactly what made a stale level look fresh.
+
+        FAILS OPEN. No tick data, no high, a zero high -- allow, and
+        let the gates that CAN answer decide. A missing reading is not
+        a refusal, the same posture as every other gate on this path.
+        """
+        if not closed_candle:
+            return True
+        try:
+            close = float(closed_candle.get("close") or 0)
+        except (TypeError, ValueError):
+            return True
+        if close <= 0:
+            return True
+
+        row = tick_ohlc.of(symbol) or {}
+        extreme_key = "high" if direction == LONG else "low"
+        try:
+            extreme = float(row.get(extreme_key) or 0)
+        except (TypeError, ValueError):
+            return True
+        if extreme <= 0:
+            return True
+
+        off = abs((close - extreme) / extreme) * 100.0
+        if off <= BREAKOUT_MAX_OFF_HIGH_PCT:
+            return True
+
+        # Said out loud, once per symbol per direction, because a
+        # silent skip here is indistinguishable from a bot that never
+        # saw the stock -- and he asked to be able to tell.
+        self._block_entry(
+            symbol, direction,
+            f"not a fresh breakout -- {close:.2f} is {off:.2f}% below "
+            f"today's {extreme_key} of {extreme:.2f}, which it has "
+            f"already made and come back from (limit "
+            f"{BREAKOUT_MAX_OFF_HIGH_PCT}%)")
+        return False
+
     def _is_exhausted(self, symbol):
         """
         Has TODAY'S move already been spent?
@@ -3013,6 +3076,13 @@ class Engine:
         # "% moved" ceiling, which blocked the day's best trend by
         # construction. See _is_still_trending().
         if not self._is_still_trending(symbol, direction):
+            return
+
+        # ---- AND IS IT MAKING THE HIGH, OR RETURNING TO IT? ----
+        #      18 August 2026. See core/rules.BREAKOUT_MAX_OFF_HIGH_PCT
+        #      for NAVINFLUOR, the alert that produced this gate.
+        if not self._is_at_the_days_extreme(symbol, direction,
+                                            closed_candle):
             return
 
         # SECTOR / THEME STRENGTH (2026-07-25). Ride what the market is
