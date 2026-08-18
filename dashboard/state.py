@@ -874,6 +874,17 @@ class DashboardState:
             # "Refresh now" in review mode cannot clear the banner.
             "session_ended": self._session_ended,
             "capital": self._build_capital(open_positions),
+            # ---- THE NUMBER ON THE SCREEN NEEDS A DATE. 18 Aug 2026 ----
+            #
+            #     "IT IS STILL SHOWING FUNDS OF LAST CONNECTION TIME
+            #      AS 431116 RS"
+            #
+            # "capital" above is the BOOK's purse. This is what DHAN
+            # says, and when it was last asked. They are different
+            # questions and were being answered by one number, which
+            # is how a constant from 9 August passed for a live
+            # balance for nine days.
+            "broker_funds": self._safe_broker_funds(),
             "advances": breadth["advances"],
             "declines": breadth["declines"],
             "unchanged": breadth["unchanged"],
@@ -5642,6 +5653,19 @@ class DashboardState:
             if str(row.get("symbol") or "").upper() == symbol:
                 return row.get("change_pct")
         return None
+
+    def _safe_broker_funds(self):
+        """What Dhan last said, and when. Never raises, never calls out.
+
+        core/broker_funds.py does the asking -- on startup and on the
+        heartbeat. This only reports the answer it already has, so
+        building a snapshot can never block on the network.
+        """
+        try:
+            from core import broker_funds
+            return broker_funds.last_read()
+        except Exception:                                  # noqa: BLE001
+            return {"balance": None, "at": None, "source": None}
 
     def _mtf_for(self, symbol, row=None):
         """Can he buy this ON MTF, and at what leverage?

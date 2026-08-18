@@ -1952,6 +1952,27 @@ def main():
                 # so this is exactly the right rhythm for it.
                 sector_monitor.refresh()
 
+                # ---- ASK DHAN AGAIN. 18 August 2026. ----
+                #
+                #     "BOT IS NOT CHECKING THE DHAN ACCOUNT. WHY?"
+                #
+                # Reading the balance ONCE at startup is still "not
+                # checking" by 14:00 -- and he trades from the Dhan app
+                # himself during the session, so the figure moves
+                # without this process doing anything at all.
+                #
+                # This updates the DISPLAY, not the book's purse. The
+                # sizing capital is fixed at open deliberately, so a
+                # position cannot change size underneath itself
+                # mid-session. Reporting and sizing are separate here
+                # on purpose and stay separate.
+                try:
+                    broker_funds.refresh(dhan_rest_client)
+                except Exception as exc:                   # noqa: BLE001
+                    diagnostic(f"[FUNDS] Could not refresh the balance "
+                               f"({type(exc).__name__}). The last good "
+                               f"reading stands, with its own timestamp.")
+
                 # Same cadence as the heartbeat -- cheap, and bounds
                 # how much state a crash could lose to ~60s instead
                 # of the whole session.

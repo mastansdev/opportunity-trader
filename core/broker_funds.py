@@ -49,6 +49,8 @@ Author : H&M Opportunity Trader
 ==========================================================
 """
 
+from datetime import datetime
+
 from config import PAPER_STARTING_CAPITAL, TRADING_MODE
 from core.logger import decision, warn
 
@@ -85,6 +87,7 @@ def read_balance(dhan_client):
     if not isinstance(body, dict):
         warn(f"[FUNDS] Dhan replied in an unexpected shape: {str(body)[:120]}")
         return None
+    _LAST["sod"] = _num(body.get("sodLimit"))
     for key in BALANCE_KEYS:
         if key in body:
             value = _num(body[key])
@@ -121,17 +124,82 @@ def read_balance(dhan_client):
     return None
 
 
+# The last balance actually obtained from Dhan, and WHEN. Published so
+# a screen can date the number instead of implying it is live.
+_LAST = {"balance": None, "at": None, "source": None, "sod": None}
+
+
+def last_read():
+    """{"balance", "at", "source", "sod"} -- a copy, never the dict."""
+    return dict(_LAST)
+
+
+def refresh(dhan_client):
+    """Ask Dhan again, in ANY mode, and remember when. Never raises.
+
+    ---- 431,116 WAS A CONSTANT. 18 August 2026. ----
+
+        "BOT IS NOT CHECKING THE DHAN ACCOUNT. WHY? IT IS STILL
+         SHOWING FUNDS OF LAST CONNECTION TIME AS 431116 RS."
+
+    He was right twice over. PAPER never called the broker at all --
+    documented, deliberate -- and config.PAPER_STARTING_CAPITAL had
+    been set to 431,116 on 9 August under the comment "THE PAPER PURSE
+    MUST MATCH THE REAL ONE". It matched, on 9 August. Nine days later
+    Dhan said 67,648 and the board still said 431,116, in a figure
+    that looked measured because it was not round.
+
+    A frozen number that LOOKS live is worse than an obviously fake
+    one: 10,00,000 announces itself as imaginary, 4,31,116 does not.
+    """
+    balance = read_balance(dhan_client)
+    if balance is None:
+        return None
+    _LAST.update({"balance": float(balance),
+                  "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                  "source": "dhan"})
+    return float(balance)
+
+
 def starting_capital(dhan_client=None, mode=None):
     """What Portfolio should open the day with.
 
-    PAPER returns the config figure and never touches the network.
     LIVE returns the broker's balance and raises if it cannot get one.
+
+    PAPER now ASKS TOO, and uses the answer. That is the change of 18
+    August: config.PAPER_STARTING_CAPITAL becomes the FALLBACK, not
+    the source. It is what the 9 August comment on that constant
+    already said out loud --
+
+        "Rs 10 lakh of imaginary money sizes positions he could never
+         actually take and hands back a P&L he could never actually
+         earn. A paper week is only worth reading if the constraints
+         are real."
+
+    -- implemented by asking rather than by pasting. Nothing about
+    LIVE trading is switched on by this: it is one authenticated READ,
+    the same call the LIVE path has always made, and no order path is
+    touched. If the broker cannot answer, PAPER still starts -- on the
+    config figure, and SAYING so, because a paper session that refuses
+    to start over an expired token helps nobody.
     """
     live = str(mode if mode is not None else TRADING_MODE).upper() == "LIVE"
 
     if not live:
-        decision(f"[FUNDS] PAPER -- simulated purse of "
-                 f"Rs {PAPER_STARTING_CAPITAL:,.2f}. No broker involved.")
+        balance = refresh(dhan_client)
+        if balance is not None:
+            decision(f"[FUNDS] PAPER -- purse sized from the REAL Dhan "
+                     f"balance: Rs {balance:,.2f} (read "
+                     f"{_LAST['at']}). config.PAPER_STARTING_CAPITAL "
+                     f"(Rs {PAPER_STARTING_CAPITAL:,.2f}) is the "
+                     f"fallback only.")
+            return float(balance)
+        _LAST.update({"balance": float(PAPER_STARTING_CAPITAL),
+                      "at": None, "source": "config"})
+        warn(f"[FUNDS] PAPER -- Dhan did not answer, so the purse is "
+             f"config.PAPER_STARTING_CAPITAL, Rs "
+             f"{PAPER_STARTING_CAPITAL:,.2f}. THIS IS A CONSTANT, not "
+             f"your balance. Check with py tools/dhan_account_check.py")
         return float(PAPER_STARTING_CAPITAL)
 
     balance = read_balance(dhan_client)
@@ -145,6 +213,9 @@ def starting_capital(dhan_client=None, mode=None):
             "py tools/dhan_account_check.py"
         )
 
+    _LAST.update({"balance": float(balance),
+                  "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                  "source": "dhan"})
     decision(f"[FUNDS] LIVE -- Rs {balance:,.2f} available at Dhan. "
              f"This, not config, is the book's capital today.")
     if balance <= 0:

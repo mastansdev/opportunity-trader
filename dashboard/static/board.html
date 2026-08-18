@@ -233,6 +233,16 @@ SERVED ALONGSIDE, NOT INSTEAD
          another permanent chip to stop reading. -->
     <span id="aispend" style="font-size:12px;padding:2px 9px;
           border-radius:7px;display:none;" title=""></span>
+    <!-- ---- A BALANCE WITH NO READ-TIME IS A RUMOUR. 18 Aug 2026 ----
+         "BOT IS NOT CHECKING THE DHAN ACCOUNT. WHY? IT IS STILL
+          SHOWING FUNDS OF LAST CONNECTION TIME AS 431116 RS"
+         Correct, twice: PAPER mode never called the broker, and
+         config.PAPER_STARTING_CAPITAL had been pinned at 431,116
+         since 9 August. Dhan said 67,648. This chip carries the
+         READ TIME in its tooltip and turns amber the moment the
+         figure is a config constant rather than an answer. -->
+    <span id="funds" style="font-size:12px;padding:2px 9px;
+          border-radius:7px;display:none;" title=""></span>
     <!-- ---- THE OTHER SCREEN. 13 August 2026. ----
          "if we want we can open the full right? or like tabs dashboard?"
          Yes. Two screens now, not four: this board for TRADING and
@@ -1009,6 +1019,29 @@ function draw(s){
       aiEl.title = (ai.by_purpose || [])
         .map(p => `${p.purpose}: ${p.calls} calls, Rs ${p.rs}`)
         .join("\n") || "no calls yet this month";
+    }
+  }
+
+  // The broker balance, with the time it was read. A funds figure
+  // with no timestamp is exactly what let a 9 August constant pass
+  // for a live balance for nine days.
+  const bf = s.broker_funds || {};
+  const bfEl = $("funds");
+  if (bfEl) {
+    if (bf.balance == null) {
+      bfEl.style.display = "none";
+    } else {
+      const stale = bf.source !== "dhan";
+      bfEl.style.display = "";
+      bfEl.style.background = stale ? "var(--warn-bg)" : "transparent";
+      bfEl.style.color = stale ? "var(--warn-fg)" : "var(--muted)";
+      bfEl.textContent = `Dhan Rs ${Number(bf.balance).toLocaleString("en-IN")}`
+        + (stale ? " — CONFIG, not your balance" : "");
+      bfEl.title = stale
+        ? "config.PAPER_STARTING_CAPITAL. Dhan did not answer."
+        : `read from Dhan at ${bf.at}`
+          + (bf.sod ? `
+start of day limit: Rs ${bf.sod}` : "");
     }
   }
 

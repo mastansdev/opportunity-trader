@@ -641,21 +641,32 @@ class TelegramDesk:
         reports what trading/portfolio.py already computes, so the
         number he plans against is the number the sizing uses.
         """
-        cap = self._snapshot().get("capital") or {}
+        snap = self._snapshot()
+        cap = snap.get("capital") or {}
         if not cap:
             return "Capital not readable -- the broker may not be connected."
 
-        def _rs(key):
+        def _rs(source, key):
             try:
-                return f"Rs {float(cap.get(key)):,.0f}"
+                return f"Rs {float(source.get(key)):,.0f}"
             except (TypeError, ValueError):
                 return "?"
 
-        return (f"*Funds*\n"
-                f"`buying power   {_rs('available_buying_power'):>14}`\n"
-                f"`deployed       {_rs('deployed_capital'):>14}`\n"
-                f"`margin used    {_rs('used_margin'):>14}`\n"
-                f"`realised today {_rs('realized_pnl'):>14}`")
+        # DHAN FIRST, AND DATED. 18 Aug 2026: the board showed a
+        # config constant from 9 August as though it were the live
+        # balance. A funds figure with no read-time attached is the
+        # thing that made that possible.
+        broker = snap.get("broker_funds") or {}
+        head = "*Funds*"
+        if broker.get("balance") is not None:
+            when = broker.get("at")
+            head += (f"\n`at Dhan       {_rs(broker, 'balance'):>14}`"
+                     f"\n_{'read ' + when if when else 'from config -- NOT your balance'}_")
+        return (f"{head}\n"
+                f"`buying power   {_rs(cap, 'available_buying_power'):>14}`\n"
+                f"`deployed       {_rs(cap, 'deployed_capital'):>14}`\n"
+                f"`margin used    {_rs(cap, 'used_margin'):>14}`\n"
+                f"`realised today {_rs(cap, 'realized_pnl'):>14}`")
 
     def _why(self, symbol):
         """Which gate refused it -- the same answer /api/why gives."""

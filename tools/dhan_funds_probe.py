@@ -89,10 +89,44 @@ def _describe(response):
     return "  ".join(out)
 
 
+def _live_token():
+    """The token main.py ACTUALLY uses, not the one in .env.
+
+    ---- THIS TOOL WAS DIAGNOSING ITSELF. 18 August 2026. ----
+
+        "BOT IS NOT CHECKING THE DHAN ACCOUNT. WHY?"
+
+    Both probes built their client from DHAN_ACCESS_TOKEN, the static
+    value in .env. main.py has not used that as its FIRST choice since
+    core/dhan_auth.py arrived: it mints over TOTP, caches the result in
+    data/dhan_token.json, and only falls back to .env --
+
+        dhan_token = dhan_auth.access_token() or DHAN_ACCESS_TOKEN
+
+    So with a healthy minted token in the cache, twenty hours from
+    expiry, and a long-dead one in .env, these tools reported
+
+        DH-901 Invalid_Authentication -- invalid or expired
+
+    about a bot that was reading MTF margins off Dhan in the next
+    window. This file's own docstring records the last time a wrong
+    guess had him regenerate a working token for nothing; it was then
+    doing the same thing in code.
+
+    access_token() reads the cache and mints only when it must, so
+    calling it from a diagnostic costs no quota.
+    """
+    try:
+        from core import dhan_auth
+        return dhan_auth.access_token() or DHAN_ACCESS_TOKEN
+    except Exception:                                      # noqa: BLE001
+        return DHAN_ACCESS_TOKEN
+
+
 def _ask(use_proxy):
     from dhanhq import DhanContext, dhanhq as DhanRestClient
 
-    client = DhanRestClient(DhanContext(DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN))
+    client = DhanRestClient(DhanContext(DHAN_CLIENT_ID, _live_token()))
     if use_proxy:
         if not ORDER_PROXY:
             return "ORDER_PROXY is not configured -- nothing to test"

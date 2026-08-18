@@ -23,10 +23,14 @@ Author : H&M Opportunity Trader
 ==========================================================
 """
 
+import pathlib
+
 import pytest
 
 from config import PAPER_STARTING_CAPITAL
 from core.broker_funds import read_balance, starting_capital
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class Dhan:
@@ -114,14 +118,35 @@ def test_paper_uses_the_config_purse():
         PAPER_STARTING_CAPITAL)
 
 
-def test_paper_never_calls_the_broker():
-    """A paper session must work with no token, no network and no
-    account. Calling Dhan to seed a simulation would make PAPER depend
-    on the very thing it exists to avoid."""
-    dhan = Dhan({"data": {"availabelBalance": 999999.0}})
-    assert starting_capital(dhan, mode="PAPER") == float(
-        PAPER_STARTING_CAPITAL)
-    assert dhan.calls == 0
+def test_paper_still_starts_with_no_broker_at_all():
+    """---- THIS TEST CHANGED ON 18 AUGUST 2026. READ WHY. ----
+
+    It used to assert `dhan.calls == 0` -- that PAPER never calls the
+    broker -- with this reasoning, which was sound:
+
+        "A paper session must work with no token, no network and no
+         account. Calling Dhan to seed a simulation would make PAPER
+         depend on the very thing it exists to avoid."
+
+    The operator asked for the opposite, in these words:
+
+        "BOT IS NOT CHECKING THE DHAN ACCOUNT. WHY? IT IS STILL
+         SHOWING FUNDS OF LAST CONNECTION TIME AS 431116 RS."
+
+    And the cost of the old rule was real: with no way to ask, the
+    paper purse was a constant someone had pasted into config on
+    9 August, and it read 431,116 while Dhan held 67,648.
+
+    THE GUARANTEE THAT MATTERED SURVIVES INTACT, and this test now
+    pins that instead: a paper session still starts with no token, no
+    network and no account -- it just starts on a figure that is
+    LABELLED config rather than one pretending to be a balance.
+    """
+    from core import broker_funds
+
+    assert starting_capital(None, mode="PAPER") == float(
+        PAPER_STARTING_CAPITAL), "PAPER could not start without a broker"
+    assert broker_funds.last_read()["source"] == "config"
 
 
 # ---------------------------------------------------------------
@@ -155,3 +180,138 @@ def test_the_dhan_client_is_built_once():
         source = handle.read()
     stripped = "\n".join(line.split("#")[0] for line in source.splitlines())
     assert stripped.count("dhan_context = DhanContext(") == 1
+
+# ---------------------------------------------------------------
+# 431,116 WAS A CONSTANT
+# ---------------------------------------------------------------
+#
+#     "BOT IS NOT CHECKING THE DHAN ACCOUNT. WHY? IT IS STILL SHOWING
+#      FUNDS OF LAST CONNECTION TIME AS 431116 RS."
+#                                 -- operator, 18 August 2026
+#
+# He was right twice.
+#
+#   1. PAPER never called the broker. Documented, deliberate, and it
+#      meant the answer could not change.
+#   2. config.PAPER_STARTING_CAPITAL had been set to 431,116.0 on
+#      9 August under the comment "THE PAPER PURSE MUST MATCH THE REAL
+#      ONE". It matched on 9 August. On 18 August Dhan said 67,648.21
+#      and the board still said 431,116.
+#
+# A frozen number that LOOKS live is worse than an obviously fake one.
+# 10,00,000 announces itself as imaginary. 4,31,116 does not.
+#
+# So PAPER now ASKS, and config is the fallback -- which is what that
+# 9 August comment already said, implemented by asking rather than by
+# pasting. And every reading carries the time it was taken.
+
+
+class _Dhan:
+    def __init__(self, balance=67648.21, sod=214746.88, fail=False):
+        self.balance, self.sod, self.fail = balance, sod, fail
+        self.calls = 0
+
+    def get_fund_limits(self):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("DH-901 Invalid_Authentication")
+        return {"status": "success",
+                "data": {"availabelBalance": self.balance,
+                         "sodLimit": self.sod}}
+
+
+def test_paper_now_asks_dhan_instead_of_reading_config():
+    from core import broker_funds
+    client = _Dhan()
+    got = broker_funds.starting_capital(client, mode="PAPER")
+    assert client.calls == 1, "PAPER did not ask the broker at all"
+    assert got == pytest.approx(67648.21)
+
+
+def test_the_config_figure_is_the_fallback_not_the_source():
+    from config import PAPER_STARTING_CAPITAL
+    from core import broker_funds
+    got = broker_funds.starting_capital(_Dhan(fail=True), mode="PAPER")
+    assert got == pytest.approx(float(PAPER_STARTING_CAPITAL))
+
+
+def test_a_config_fallback_is_labelled_as_config_not_as_a_balance():
+    """The whole failure was a constant that looked like a reading."""
+    from core import broker_funds
+    broker_funds.starting_capital(_Dhan(fail=True), mode="PAPER")
+    assert broker_funds.last_read()["source"] == "config"
+    assert broker_funds.last_read()["at"] is None, (
+        "a config constant was stamped with a read-time it never had")
+
+
+def test_a_real_reading_carries_the_time_it_was_taken():
+    from core import broker_funds
+    broker_funds.starting_capital(_Dhan(), mode="PAPER")
+    got = broker_funds.last_read()
+    assert got["source"] == "dhan"
+    assert got["at"], "a balance with no read-time is how this happened"
+    assert got["balance"] == pytest.approx(67648.21)
+
+
+def test_refresh_can_be_called_again_and_moves_the_number():
+    """Reading once at startup is still 'not checking' by 14:00."""
+    from core import broker_funds
+    client = _Dhan()
+    broker_funds.refresh(client)
+    client.balance = 51000.0
+    assert broker_funds.refresh(client) == pytest.approx(51000.0)
+    assert broker_funds.last_read()["balance"] == pytest.approx(51000.0)
+
+
+def test_a_failed_refresh_never_overwrites_a_good_reading():
+    """Losing the token must not silently blank the last real answer."""
+    from core import broker_funds
+    broker_funds.refresh(_Dhan())
+    good = broker_funds.last_read()
+    assert broker_funds.refresh(_Dhan(fail=True)) is None
+    assert broker_funds.last_read() == good
+
+
+def test_live_still_refuses_rather_than_falling_back():
+    """Unchanged, and it must stay unchanged: a LIVE book sized on
+    imaginary money approves positions the account cannot pay for."""
+    from core import broker_funds
+    with pytest.raises(RuntimeError):
+        broker_funds.starting_capital(_Dhan(fail=True), mode="LIVE")
+
+
+def test_last_read_hands_back_a_copy():
+    from core import broker_funds
+    broker_funds.refresh(_Dhan())
+    got = broker_funds.last_read()
+    got["balance"] = 1
+    assert broker_funds.last_read()["balance"] != 1
+
+
+def test_the_bot_keeps_asking_during_the_session():
+    src = (ROOT / "main.py").read_text(encoding="utf-8")
+    code = chr(10).join(ln for ln in src.splitlines()
+                        if not ln.lstrip().startswith("#"))
+    assert "broker_funds.refresh(" in code, (
+        "the balance is read once at startup and never again")
+
+
+def test_the_screen_gets_the_reading_and_its_timestamp():
+    src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
+    assert '"broker_funds"' in src
+    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
+        encoding="utf-8")
+    assert 'id="funds"' in page
+    assert "s.broker_funds" in page
+    assert "bf.at" in page, "the chip shows a balance with no read-time"
+
+
+def test_the_diagnostics_use_the_token_main_actually_uses():
+    """Both probes built their client from DHAN_ACCESS_TOKEN in .env
+    while main.py mints over TOTP, so they reported DH-901 about a bot
+    that was talking to Dhan perfectly well."""
+    for name in ("dhan_funds_probe.py", "dhan_account_check.py"):
+        src = (ROOT / "tools" / name).read_text(encoding="utf-8")
+        code = chr(10).join(ln for ln in src.splitlines()
+                            if not ln.lstrip().startswith("#"))
+        assert "_live_token()" in code, f"{name} still trusts only .env"
