@@ -107,6 +107,7 @@ _HELP = """*Opportunity Trader*
 `FUNDS`       MTF buying power left
 `WHY SYM`     which gate refused it, live
 `OPP`         what each opportunity family is worth
+`SIDES X`     who gains and who loses when X rises
 
 `BUY SYM [qty]`   quoted, needs YES
 `SELL SYM`        quoted, needs YES
@@ -356,6 +357,8 @@ class TelegramDesk:
             # told him to send. Found 18 Aug while wiring push().
             if verb in ("OPP", "OPPORTUNITY"):
                 return self._opportunities()
+            if verb in ("SIDES", "SIDE"):
+                return self._sides(" ".join(words[1:]).upper())
             if verb in ("ON", "OFF"):
                 return self._arm(verb == "ON")
             if verb in ("BUY", "SELL", "EXITALL"):
@@ -701,6 +704,47 @@ class TelegramDesk:
             return f"*Opportunity families*{chr(10)}{opportunity.verdict()}"
         except Exception as exc:                            # noqa: BLE001
             return f"Could not read the opportunity memory ({exc})."
+
+    def _sides(self, commodity):
+        """Who is HELPED and who is HURT when this commodity rises.
+
+            "COPPER COMPANIES WOULD BE IN FOCUS -- LME COPPER ONE-DAY
+             SPREAD HITS $110"          -- the screenshot he sent
+
+        71 names carry COPPER in the master and one of them is a
+        producer. This is the answer that headline actually needs.
+        core/sector_map.py decides; nothing is worked out here.
+        """
+        if not commodity:
+            return "`SIDES COPPER` -- which commodity?"
+        try:
+            from core import sector_map
+            got = sector_map.sides(commodity)
+        except Exception as exc:                            # noqa: BLE001
+            return f"Could not read the map ({exc})."
+        counts = got.get("counts") or {}
+        if not any(counts.values()):
+            return (f"Nothing carries *{commodity}*. Try a fragment -- "
+                    f"the master spells some of these its own way.")
+
+        def _names(key, limit=12):
+            rows = got.get(key) or []
+            if not rows:
+                return "_none_"
+            out = ", ".join(r["symbol"] for r in rows[:limit])
+            return out + (f" _+{len(rows) - limit} more_"
+                          if len(rows) > limit else "")
+
+        return (f"*{commodity} rises*\n"
+                f"HELPED ({counts.get('producers', 0)}): "
+                f"{_names('producers')}\n\n"
+                f"HURT ({counts.get('consumers', 0)}): "
+                f"{_names('consumers')}\n\n"
+                f"CANNOT SAY ({counts.get('unknown', 0)}): "
+                f"{_names('unknown')}\n"
+                f"_a name here makes the commodity itself -- the map "
+                f"cannot tell a producer from a converter, so it does "
+                f"not guess._")
 
     def _arm(self, on):
         if self.engine is None:

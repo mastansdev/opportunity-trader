@@ -767,8 +767,17 @@ def build_app(dashboard_state, trade_controller, master_loader,
         """
         try:
             from core import sector_map
+            # ---- A TAG WITHOUT A DIRECTION IS A COIN FLIP. 18 Aug ----
+            #
+            #     "bot needs to know which companies are positive &
+            #      negative . as of now there is no distinction"
+            #
+            # 71 symbols carry COPPER and exactly ONE of them is
+            # helped when copper rises. `exact` alone handed him all
+            # 71, liquid names first, which are the wrong 70.
             return {"tag": str(tag or "").upper(),
                     "exact": sector_map.carrying(tag),
+                    "sides": sector_map.sides(tag),
                     "like": sector_map.like(tag)}
         except Exception as exc:                           # noqa: BLE001
             warn(f"[TAG] {tag} failed: {exc}")

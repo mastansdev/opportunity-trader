@@ -267,3 +267,95 @@ def test_the_live_path_actually_passes_todays_date():
     Without it the newest reason would win whenever it happened."""
     src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
     assert 'on_date=datetime.now().strftime("%Y-%m-%d")' in src
+
+# ---------------------------------------------------------------
+# WHICH SIDE OF THE COMMODITY IS THIS COMPANY ON?
+# ---------------------------------------------------------------
+#
+#     "THE PURPOSE OF BRAIN MEMORY IS NOT FULLY PREPARED ... bot needs
+#      to know which companies are positive & negative . as of now
+#      there is no distinction between them"
+#                                 -- operator, 18 August 2026,
+#                                    with a screenshot: "COPPER
+#                                    COMPANIES WOULD BE IN FOCUS --
+#                                    LME COPPER ONE-DAY SPREAD HITS
+#                                    $110, THE HIGHEST SINCE 2021"
+#
+# The file proves him right against itself. 71 symbols carry
+# COMMODITY_EXPOSURE = COPPER, and by BUSINESS_TYPE they are
+# 67 MANUFACTURER, 3 EPC, 1 MINING. On a copper spike exactly one of
+# those 71 is helped. carrying("COPPER") handed him all 71 with the
+# liquid ones first -- and the liquid ones are the wrong 70.
+#
+# A tag says a company TOUCHES a commodity. It never said which END of
+# it the company stands on, and a direction-free link is not an
+# opportunity, it is a coin flip wearing a reason.
+
+
+def test_the_copper_producer_is_told_apart_from_the_cable_makers():
+    """HIS EXAMPLE, END TO END."""
+    got = sector_map.sides("COPPER")
+    producers = {r["symbol"] for r in got["producers"]}
+    consumers = {r["symbol"] for r in got["consumers"]}
+    assert "HINDCOPPER" in producers, "the one name copper helps"
+    assert {"POLYCAB", "KEI"} <= consumers, (
+        "cable makers BUY copper -- a spike is a cost, not a catalyst")
+    assert not (producers & consumers), "a company on both sides"
+
+
+def test_it_refuses_to_guess_where_the_data_cannot_say():
+    """HINDALCO is the reason UNKNOWN exists. BUSINESS_TYPE is
+    MANUFACTURER and CORE BUSINESS reads 'MANUFACTURES ALUMINIUM AND
+    COPPER PRODUCTS'. It is a smelter -- a producer -- and nothing in
+    the master says so. Calling it a CONSUMER because the word
+    MANUFACTURES appears would be a confident wrong answer."""
+    got = sector_map.stance("HINDALCO", "COPPER")
+    assert got["stance"] == "UNKNOWN"
+    assert got["why"], "an UNKNOWN he cannot interrogate is not useful"
+
+
+def test_unknown_is_never_quietly_folded_into_either_side():
+    got = sector_map.sides("COPPER")
+    unknown = {r["symbol"] for r in got["unknown"]}
+    assert "HINDALCO" in unknown
+    assert got["counts"]["unknown"] == len(got["unknown"])
+
+
+def test_a_company_with_no_exposure_gets_no_verdict():
+    """Silence, not a CONSUMER by default. Defaulting would put every
+    stock in the market on the wrong side of every commodity."""
+    assert sector_map.stance("HINDCOPPER", "PALM OIL") is None
+    assert sector_map.stance("NOTALISTEDCO", "COPPER") is None
+    assert sector_map.stance("HINDCOPPER", "") is None
+
+
+def test_every_side_carries_the_reason_it_was_put_there():
+    """He has to be able to argue with it. A bucket with no reason is
+    a rule nobody can check."""
+    got = sector_map.sides("COPPER")
+    for key in ("producers", "consumers", "unknown"):
+        for row in got[key]:
+            assert row.get("why"), f"{row['symbol']} has no reason"
+
+
+def test_it_works_for_a_commodity_that_is_not_copper():
+    """One worked example is a coincidence."""
+    got = sector_map.sides("STEEL")
+    assert got["counts"]["consumers"] > 100, (
+        "steel is an input for most of the board and should say so")
+    assert got["counts"]["producers"] >= 1
+
+
+def test_a_commodity_nobody_carries_answers_empty_not_broken():
+    got = sector_map.sides("UNOBTAINIUM")
+    assert got["counts"] == {"producers": 0, "consumers": 0, "unknown": 0}
+    assert sector_map.sides("")["counts"]["producers"] == 0
+
+
+def test_the_split_reaches_the_screen_and_the_phone():
+    src = (ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
+    assert '"sides": sector_map.sides(tag)' in src, (
+        "/api/tag still answers with a direction-free list")
+    desk = (ROOT / "core" / "telegram_desk.py").read_text(encoding="utf-8")
+    assert "def _sides" in desk
+    assert "SIDES" in desk

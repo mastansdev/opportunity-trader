@@ -425,3 +425,163 @@ def tag_counts(column=None, path=MASTER_CSV):
     return {c: sorted(((t, len(s)) for t, s in index.get(c, {}).items()),
                       key=lambda r: -r[1])
             for c in wanted}
+
+# ==========================================================
+#  WHICH SIDE OF THE COMMODITY IS THIS COMPANY ON?
+# ==========================================================
+#
+#     "THE PURPOSE OF BRAIN MEMORY IS NOT FULLY PREPARED ... bot needs
+#      to know which companies are positive & negative . as of now
+#      there is no distinction between them"
+#                                 -- operator, 18 August 2026,
+#                                    with a screenshot reading
+#                                    "COPPER COMPANIES WOULD BE IN
+#                                     FOCUS -- LME COPPER ONE-DAY
+#                                     SPREAD HITS $110"
+#
+# He is right, and the file proves it against itself. 71 symbols carry
+# COMMODITY_EXPOSURE = COPPER:
+#
+#     67  MANUFACTURER        POLYCAB, KEI, CROMPTON, HAVELLS...
+#      3  EPC / CONTRACTOR
+#      1  MINING              HINDCOPPER
+#
+# On a copper spike exactly ONE of those 71 is helped. For the other
+# 70 copper is an INPUT COST and the news is a headwind. carrying()
+# would have handed him all 71 as "copper names", and the 70 wrong
+# ones sit at the top because they are the liquid ones.
+#
+# A tag says a company TOUCHES a commodity. It has never said which
+# END of it the company stands on, and a direction-free link is not
+# an opportunity -- it is a coin flip wearing a reason.
+#
+# THREE ANSWERS, AND THE THIRD IS THE IMPORTANT ONE
+# -------------------------------------------------
+# PRODUCER, CONSUMER, and UNKNOWN. HINDALCO is why UNKNOWN exists: it
+# is BUSINESS_TYPE=MANUFACTURER and its CORE BUSINESS reads
+# "MANUFACTURES ALUMINIUM AND COPPER PRODUCTS". It is in fact a
+# smelter -- a producer -- and nothing in this file says so. Calling
+# it a CONSUMER because the word MANUFACTURES appears would be a
+# confident wrong answer on a Rs 2 lakh account, which is worse than
+# no answer.
+#
+# So the rule is deliberately narrow: when the company's stated
+# PRODUCT IS THE COMMODITY ITSELF, this refuses to guess. When the
+# product is something else made OUT of it -- wires, cables, fans,
+# conductors -- the commodity is an input and the company is a
+# consumer. That distinction is readable in the data we already have
+# and needs no new source.
+
+#: BUSINESS_TYPE values that produce what they are exposed to.
+PRODUCER_TYPES = ("MINING",)
+
+#: BUSINESS_TYPE values that buy their inputs.
+CONSUMER_TYPES = ("MANUFACTURER", "EPC / CONTRACTOR", "DISTRIBUTOR")
+
+#: Verbs in CORE BUSINESS that mean "we bring this out of the ground
+#: or out of a furnace", checked before BUSINESS_TYPE because the text
+#: is about THIS company and the type is a bucket.
+PRODUCER_VERBS = ("MINING", "MINES ", "MINER", "PRODUCTION OF",
+                  "PRODUCES", "SMELT", "REFINER", "REFINES",
+                  "REFINING", "EXTRACTS", "EXTRACTION", "EXPLORATION")
+
+PRODUCER, CONSUMER, UNKNOWN = "PRODUCER", "CONSUMER", "UNKNOWN"
+
+
+def _row_of(symbol, path=MASTER_CSV):
+    sym = str(symbol or "").strip().upper()
+    for row in _rows(path):
+        if str(row.get("SYMBOL") or "").strip().upper() == sym:
+            return row
+    return None
+
+
+def stance(symbol, commodity, path=MASTER_CSV):
+    """Which side of `commodity` is `symbol` on?
+
+    Returns {"symbol", "commodity", "stance", "why"} or None when the
+    company carries no exposure to it at all. `stance` is one of
+    PRODUCER / CONSUMER / UNKNOWN.
+
+    UNKNOWN is a real answer and is never quietly folded into either
+    of the other two -- see the note above about HINDALCO.
+    """
+    want = str(commodity or "").strip().upper()
+    row = _row_of(symbol, path)
+    if not want or row is None:
+        return None
+
+    exposure = str(row.get("COMMODITY_EXPOSURE") or "").upper()
+    if want not in exposure:
+        return None
+
+    sym = str(row.get("SYMBOL") or "").strip().upper()
+    core = str(row.get("CORE BUSINESS") or "").upper()
+    btype = str(row.get("BUSINESS_TYPE") or "").strip().upper()
+
+    def _out(verdict, why):
+        return {"symbol": sym, "commodity": want,
+                "stance": verdict, "why": why}
+
+    if any(verb in core for verb in PRODUCER_VERBS):
+        return _out(PRODUCER, f"its own description says '{core[:60]}'")
+    if btype in PRODUCER_TYPES:
+        return _out(PRODUCER, f"BUSINESS_TYPE is {btype}")
+
+    if btype in CONSUMER_TYPES:
+        # Does it make the METAL, or something out of the metal? If
+        # the commodity's own name is what it says it makes, this
+        # cannot tell a smelter from a converter, and says so.
+        if want in core:
+            return _out(UNKNOWN,
+                        f"it makes {want.lower()} itself -- this file "
+                        f"cannot tell a producer from a converter")
+        return _out(CONSUMER, f"{btype.lower()} -- {want.lower()} is an "
+                              f"input cost")
+
+    return _out(UNKNOWN, f"BUSINESS_TYPE is "
+                         f"{btype or 'blank'} -- not enough to say")
+
+
+def sides(commodity, path=MASTER_CSV):
+    """Split every company exposed to `commodity` by which side it is on.
+
+    {"commodity", "producers", "consumers", "unknown", "counts"} --
+    the answer his screenshot needed. A rising price is a tailwind for
+    `producers` and a headwind for `consumers`; `unknown` is shown and
+    never silently assigned.
+    """
+    want = str(commodity or "").strip().upper()
+    out = {"commodity": want, "producers": [], "consumers": [],
+           "unknown": []}
+    found = []
+    if not want:
+        return dict(out, counts={"producers": 0, "consumers": 0,
+                                 "unknown": 0})
+    # carrying() returns [{"column", "tag", "symbols"}] -- a LIST, one
+    # group per axis the tag was found on, because STEEL is both a
+    # commodity and a theme. Checked against the function rather than
+    # written from memory; a .get("symbols") on a list raises, and
+    # every method name guessed from memory in this project has been
+    # wrong.
+    seen = set()
+    for group in carrying(want, path=path):
+        for symbol in group.get("symbols") or []:
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            found.append(symbol)
+
+    for symbol in found:
+        got = stance(symbol, want, path=path)
+        if got is None:
+            continue
+        bucket = {PRODUCER: "producers", CONSUMER: "consumers"}.get(
+            got["stance"], "unknown")
+        out[bucket].append({"symbol": got["symbol"], "why": got["why"]})
+    for key in ("producers", "consumers", "unknown"):
+        out[key].sort(key=lambda r: r["symbol"])
+    out["counts"] = {k: len(out[k])
+                     for k in ("producers", "consumers", "unknown")}
+    return out
+
