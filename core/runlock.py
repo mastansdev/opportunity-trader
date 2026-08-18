@@ -41,6 +41,28 @@ from core.logger import diagnostic, warn
 
 LOCK_PATH = os.path.join("data", "telegram_reader.lock")
 
+
+def _path(path):
+    """Resolve the lock location at CALL time, not at import.
+
+    Every public function below takes path=None rather than
+    path=LOCK_PATH. A default argument is bound once, when the def
+    runs, so
+
+        monkeypatch.setattr(runlock, "LOCK_PATH", tmp)
+
+    would change the module attribute and change nothing about what
+    these functions actually open.
+
+    That matters because this lock is not decoration: tools/collector
+    .py REFUSES TO START while another process holds it, so a test run
+    that took the real one could lock him out of his own collector.
+    The full suite did exactly that on 18 August and the data-folder
+    guard caught it. Identical fix to core/single_instance.py, two
+    days earlier, for identical reasons.
+    """
+    return LOCK_PATH if path is None else path
+
 # Beyond this a lock is assumed to belong to a process that is gone.
 # A weekend backlog is 40-60 minutes of real work, so the window has to
 # be comfortably longer than the longest honest run.
@@ -74,7 +96,8 @@ def _age(path):
         return None
 
 
-def release_if_mine(path=LOCK_PATH):
+def release_if_mine(path=None):
+    path = _path(path)
     """Drop the lock, but only if this process is the one holding it.
 
     ---- 3 August 2026 ----
@@ -105,7 +128,8 @@ def release_if_mine(path=LOCK_PATH):
         return False
 
 
-def held_by_another(path=LOCK_PATH):
+def held_by_another(path=None):
+    path = _path(path)
     """(True, description) when a live reader is already running.
 
     Fails OPEN. If the lock cannot be read for any reason the answer is
@@ -167,7 +191,8 @@ class TelegramReaderLock:
     reader, not to become a third way the first one can fail.
     """
 
-    def __init__(self, who, path=LOCK_PATH):
+    def __init__(self, who, path=None):
+        path = _path(path)
         self.who = who
         self.path = path
         self.taken = False

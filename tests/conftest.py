@@ -292,6 +292,36 @@ def _never_touch_the_live_bot_lock(tmp_path, monkeypatch):
                         str(tmp_path / "main_bot.lock"))
 
 
+@pytest.fixture(autouse=True)
+def _never_touch_the_live_telegram_lock(tmp_path, monkeypatch):
+    """No test may take the REAL Telegram reader lock.
+
+    ---- CAUGHT BY THE LITTER GUARD. 18 August 2026. ----
+
+    The full suite left data/telegram_reader.lock behind. That file is
+    not litter: core/runlock.py uses it so only one reader talks to
+    Telegram at a time, and tools/collector.py REFUSES TO START while
+    another process holds it.
+
+    So a test run could lock him out of his own collector -- the same
+    shape as the bot lock on 16 August, which could lock him out of
+    main.py. Both were written with a module-level default:
+
+        def held_by_another(path=LOCK_PATH)
+
+    and a default argument is bound once, at import, so patching the
+    module attribute alone would change nothing. runlock is patched
+    here AND its functions read the attribute per call.
+
+    Third store this suite has had to be fenced away from, after
+    data/dhan_token.json and data/main_bot.lock.
+    """
+    from core import runlock
+
+    monkeypatch.setattr(runlock, "LOCK_PATH",
+                        str(tmp_path / "telegram_reader.lock"))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _no_test_may_litter_the_live_data_folder():
     """Nothing in this suite may CREATE a file in data/.

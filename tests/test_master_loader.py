@@ -318,3 +318,56 @@ def test_the_live_file_has_a_series_for_every_tradeable_row():
     assert not missing, (
         f"{len(missing)} tradeable row(s) have no SERIES, so the T2T "
         f"gate cannot see them: {missing[:10]}")
+
+
+# ---------------------------------------------------------------
+# THE NIGHTLY CHAIN UNDOES MANUAL DECISIONS
+# ---------------------------------------------------------------
+#
+# 18 August 2026. tools/nightly.py's discover/classify steps rewrote
+# data/master_stocks.csv overnight: 48 new listings, and two decisions
+# quietly reverted with them.
+#
+#   SERIES was dropped from all 1,313 tradeable rows, so the T2T gate
+#   went blind -- fail-open, the safe direction, and guarding nothing.
+#
+#   KEL went back to SUBSCRIBE=YES. It was set NO days earlier because
+#   it is NOT ON NSE AT ALL and its security id 18708 belongs to
+#   VISDEM TECHNOSYS -- a different, live company. Tradeable again,
+#   pointing at somebody else's stock.
+#
+# Neither was noticed by a human. Both were caught by tests, which is
+# the only reason this note exists. The rule below is the durable one:
+# it does not name KEL, it states the invariant that made KEL wrong.
+
+def test_no_tradeable_symbol_is_unknown_to_dhan():
+    """If the bot may buy it, Dhan must know it as an NSE equity.
+
+    tools/verify_master_database.py already fetches the live scrip
+    master and writes what it could not find into
+    data/scrip_verified.json. A name in that list is one the bot
+    cannot identify -- and an unidentifiable symbol with a security id
+    is the worst shape there is, because the id still resolves to
+    SOMETHING.
+    """
+    import json
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    proof = root / "data" / "scrip_verified.json"
+    if not proof.exists():
+        pytest.skip("no verification proof yet -- run "
+                    "py tools/verify_master_database.py")
+    missing = set(json.loads(proof.read_text(encoding="utf-8"))
+                  .get("not_found") or [])
+    if not missing:
+        return
+
+    loader = MasterLoader()
+    loader.load()
+    tradeable = missing & set(loader.all_symbols())
+    assert not tradeable, (
+        f"{sorted(tradeable)} are SUBSCRIBE=YES and Dhan's live master "
+        f"has no NSE equity for them. Their security ids still resolve "
+        f"to something -- KEL's 18708 is VISDEM TECHNOSYS. Mark them "
+        f"NO, or the bot can order a company nobody chose.")

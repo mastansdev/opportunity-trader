@@ -1,24 +1,10 @@
 {
- "verified_at": "2026-08-17 22:55:15",
- "checked": 1854,
+ "verified_at": "2026-08-18 07:27:28",
+ "checked": 1866,
  "source": "https://images.dhan.co/api-data/api-scrip-master.csv",
- "mismatches": [
-  "CHEMFAB: master 2815, Dhan 2799",
-  "IFBAGRO: master 9300, Dhan 1482",
-  "SIGMAADV: master 14797, Dhan 14793",
-  "BALCO: master 24882, Dhan 24879",
-  "SUBEXLTD: master 959, Dhan 967",
-  "ZIMLAB: master 12412, Dhan 12384",
-  "NIRAJ: master 261, Dhan 255",
-  "BSHSL: master 812, Dhan 809",
-  "E2ERAIL: master 760534, Dhan 760531",
-  "VISACHROME: master 13298, Dhan 13295",
-  "LAXMIINDIA: master 758865, Dhan 758863",
-  "AARTISURF: master 19233, Dhan 19263",
-  "SIGACHI: master 6664, Dhan 6663"
- ],
+ "mismatches": [],
  "not_found": [
   "KEL"
  ],
- "clean": false
+ "clean": true
 }
