@@ -740,6 +740,15 @@ def main():
     # fresh swaps and re-announced every filing it had already
     # reported.
     engine.load_session_counters(state_store.load_session_counters())
+    # SAY WHAT WAS RESTORED. A restart that silently re-announces
+    # yesterday's -- or this morning's -- picks looks like the bot
+    # finding them again, which is how "random alerts at random
+    # prices" happened on 19 August. If this line reads 0 after a
+    # mid-session restart, the persistence above is broken.
+    _seen_again = len(getattr(engine, "_manual_alerts_seen", ()) or ())
+    if _seen_again:
+        decision(f"[ALERTS] {_seen_again} already announced today -- "
+                 f"they will not be sent again.")
     if (saved_orb_ranges or saved_positions or saved_trailing_stops
             or saved_portfolio or saved_entry_blocks or saved_momentum_universe):
         if saved_momentum_universe:
@@ -1988,6 +1997,31 @@ def main():
                 # Same cadence as the heartbeat -- cheap, and bounds
                 # how much state a crash could lose to ~60s instead
                 # of the whole session.
+                # ---- ALERTS MUST SURVIVE A RESTART. 19 Aug 2026 ----
+                #
+                #     "all were given at random prices as today
+                #      multiple restarts happened & the 1st time
+                #      alerts may be gives opportunity rather than
+                #      raise - fall back & random entry"
+                #
+                # He is exactly right. _manual_alerts_seen is what
+                # stops the same stock being announced twice, and it
+                # was written ONLY by the shutdown save. Every kill
+                # -9, every crash, every restart lost it -- and the
+                # saved file proved it: session_counters was {}.
+                #
+                # So on 19 August MGL was announced at 09:31 at
+                # 1156.30 and again at 11:01 at 1151.90, RAILTEL at
+                # 09:30 and again at 11:02 and 11:06 across two
+                # processes. The FIRST alert is the opportunity; a
+                # re-announcement an hour later is the same idea at a
+                # price the move has already left behind, and nothing
+                # on the card said it was a repeat.
+                #
+                # Written on the heartbeat now, so the set survives
+                # whatever ends the process. state_store.load()
+                # refuses a file not dated today, so it cannot leak
+                # into tomorrow.
                 state_store.save(
                     engine.orb_engine.export_state(),
                     engine.export_positions(),
@@ -1996,6 +2030,8 @@ def main():
                     engine.export_entry_blocks(),
                     momentum_universe.export_state(),
                     orb_unreliable=market_data.export_orb_unreliable(),
+                    session_counters=engine.export_session_counters(),
+                    closed_positions=list(engine.closed_positions),
                 )
 
             time.sleep(1)
