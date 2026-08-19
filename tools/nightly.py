@@ -90,6 +90,32 @@ STEPS = [
     # Straight after "history" because it reads what history writes. If
     # the bhavcopy is not out yet, verify_picks says so and this chain
     # carries on; nothing below depends on it.
+    # ---- THE STORE THE BOT LEARNS FROM HAD NO WRITER. 19 Aug 2026 ----
+    #
+    #     "next build - complete the missing history_candles.db -
+    #      fix it completely"
+    #
+    # data/history_candles.db stopped on 31 JULY and nothing noticed
+    # for nineteen days. The reason was not a crash: its only writer is
+    # tools/fetch_history.py, a command somebody has to remember to
+    # type. core/liquidity.py had even written it down -- "not the live
+    # session, not the nightly" -- and that sentence was a description,
+    # not a plan.
+    #
+    # The cost was not theoretical. On 18 August core/signal_journal.py
+    # could score 1,355 of 12,036 recorded signals at minute resolution
+    # and the other 10,681 only at daily, which cannot say whether a
+    # stop was hit BEFORE the high. Every measurement this bot makes
+    # about its own decisions was blunted by a missing cron line.
+    #
+    # --days 5 with dedup ON CONFLICT DO NOTHING: cheap every night,
+    # and it closes a gap by itself if the chain misses a run or two.
+    ("intraday", "Store today's 1-minute bars",
+     ["tools/fetch_history.py", "--days", "5", "--intraday-only"],
+     "the minute store is the only thing that can say whether a stop "
+     "was hit before the high. Without it every outcome the bot "
+     "measures about itself is a guess with a good average."),
+
     ("score", "Score today's picks against today's closes",
      ["tools/verify_picks.py"],
      "the whole point of Phase 1. Without it the bot records 27 picks "

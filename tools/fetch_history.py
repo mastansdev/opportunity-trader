@@ -87,6 +87,36 @@ HISTORY_DB = "sqlite:///data/history_candles.db"
 CALENDAR_PER_TRADING_DAY = 1.45
 
 
+
+def _live_token():
+    """The token main.py ACTUALLY uses, not the one sitting in .env.
+
+    ---- THE STORE STOPPED FILLING ON 31 JULY. 19 Aug 2026. ----
+
+        "next build - complete the missing history_candles.db - fix it
+         completely"
+
+    Two faults, and this is the second. main.py has not used
+    DHAN_ACCESS_TOKEN as its first choice since core/dhan_auth.py
+    arrived -- it mints over TOTP and caches in data/dhan_token.json:
+
+        dhan_token = dhan_auth.access_token() or DHAN_ACCESS_TOKEN
+
+    So this command, run today with a long-dead value in .env, would
+    have returned DH-901 Invalid_Authentication and looked like a
+    broken account. tools/dhan_funds_probe.py and
+    tools/dhan_account_check.py carried the identical bug and were
+    fixed on 18 August; this is the third and last caller.
+
+    access_token() reads the cache and mints only when it must.
+    """
+    try:
+        from core import dhan_auth
+        return dhan_auth.access_token() or DHAN_ACCESS_TOKEN
+    except Exception:                                       # noqa: BLE001
+        return DHAN_ACCESS_TOKEN
+
+
 def make_post(timeout=60):
     """A requests-backed POST with Dhan's auth headers. Kept behind a
     factory so core/history_fetch.py stays importable (and testable)
@@ -96,7 +126,7 @@ def make_post(timeout=60):
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "access-token": DHAN_ACCESS_TOKEN,
+        "access-token": _live_token(),
         "client-id": DHAN_CLIENT_ID,
     }
 
@@ -299,9 +329,10 @@ def main():
     if args.check:
         return show_state(CandleStore(url=HISTORY_DB), DailyStore())
 
-    if not DHAN_CLIENT_ID or not DHAN_ACCESS_TOKEN:
-        warn("DHAN_CLIENT_ID / DHAN_ACCESS_TOKEN not set. This command "
-             "needs the same credentials main.py uses.")
+    if not DHAN_CLIENT_ID or not _live_token():
+        warn("DHAN_CLIENT_ID / no usable access token. This command "
+             "needs the same credentials main.py uses -- check with "
+             "py tools/dhan_account_check.py")
         return 1
 
     return run(days=args.days,

@@ -51,6 +51,7 @@ Author : H&M Opportunity Trader
 
 import os
 import re
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
@@ -422,3 +423,277 @@ def default_memory():
     if _default is None:
         _default = StockMemory()
     return _default
+
+
+# ==========================================================
+#  THE EVENT LEDGER -- WHAT HAPPENED FROM THE UPDATE TO THE
+#  NEXT RESULT
+# ==========================================================
+#
+#     "bot needs to know day to day updates & memory must be updated -
+#      tracked whether stock performed from the update to next result.
+#      still user doing manual updates/data maintainance which is not
+#      ideal to do so bot must maintain the complete record from event
+#      date, price on that date to movement on the event date to next
+#      result date + guidance from the company."
+#                                 -- operator, 19 August 2026
+#
+# WHY NOTHING ALREADY DID THIS
+# ----------------------------
+# All three inputs were already on disk and no line of code joined
+# them:
+#
+#     data/stock_events.db      15,130 events, 1,727 symbols
+#     data/results_calendar.db   7,086 results dates
+#     data/daily_candles.db      1.1M daily bars, back to 2016
+#
+# core/outcomes.py measures the session AFTER an event. core/
+# opportunity.py measures a family's average next-session move. Both
+# answer "did the market react", and neither answers his question,
+# which is about a HOLDING PERIOD: an order win in May is a claim
+# about a quarter, and the quarter ends when the company next
+# reports. Judging it on the following morning's candle grades the
+# claim before the evidence exists.
+#
+# So this walks event -> next results date, which is the window the
+# company itself is judged over.
+#
+# WHAT IT DELIBERATELY DOES NOT DO
+# --------------------------------
+# It does not rank, gate, or feed the entry path. It is a RECORD -- he
+# asked to stop maintaining one by hand, not for another opinion. The
+# day a number here earns a trading rule, that rule gets written and
+# argued on its own, the same way core/opportunity.py's payoff tilt
+# was on 19 August.
+#
+# AN OPEN WINDOW IS NOT A ZERO. An event whose next results date has
+# not arrived is reported as still_open with the move so far, never
+# folded into a completed average. Half the value of this ledger is
+# knowing which claims are still unsettled.
+
+EVENTS_DB = os.path.join("data", "stock_events.db")
+RESULTS_DB = os.path.join("data", "results_calendar.db")
+DAILY_DB = os.path.join("data", "daily_candles.db")
+
+#: Event kinds that belong to a COMPANY and can be judged against its
+#: next print. MACRO, MARKET_ANSWER and AI_VERDICT are commentary or
+#: market-wide and are not this stock's claim to answer for.
+COMPANY_KINDS = ("ORDER", "RESULT", "REPORTED", "CONCALL", "NEWS",
+                 "EXPECTATION")
+
+#: Kinds that carry what management SAID rather than what it did --
+#: his "+ guidance from the company".
+GUIDANCE_KINDS = ("CONCALL", "EXPECTATION")
+
+
+def _read_only(path):
+    try:
+        if not os.path.exists(path):
+            return None
+        return sqlite3.connect("file:" + path + "?mode=ro", uri=True)
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def _day(value):
+    """The DATE part of whatever the store happened to write.
+
+    stock_events.db writes ISO timestamps with a zone
+    ("2026-08-19T02:57:47+00:00"); results_calendar.db writes plain
+    dates. Both are sliced to ten characters rather than parsed,
+    because a parse that raises on one row would drop a symbol's whole
+    history for a formatting reason.
+    """
+    text = str(value or "")
+    return text[:10] if len(text) >= 10 else ""
+
+
+def _closes_for(conn, symbol, since=None):
+    """[(date, close, prev_close)] oldest first, or []."""
+    if conn is None:
+        return []
+    sql = ("SELECT date, close, prev_close FROM daily_bars "
+           "WHERE symbol = ?")
+    params = [str(symbol or "").upper()]
+    if since:
+        sql += " AND date >= ?"
+        params.append(str(since))
+    sql += " ORDER BY date"
+    try:
+        return conn.execute(sql, params).fetchall()
+    except Exception:                                       # noqa: BLE001
+        return []
+
+
+def _close_on_or_after(closes, when):
+    """The first session on or after `when`. A filing on a Saturday is
+    answered by Monday, not discarded."""
+    for row in closes:
+        if str(row[0]) >= str(when):
+            return row
+    return None
+
+
+def _pct(now, then):
+    try:
+        now, then = float(now), float(then)
+    except (TypeError, ValueError):
+        return None
+    if then <= 0:
+        return None
+    return round((now - then) / then * 100.0, 2)
+
+
+def event_record(symbol, since=None, limit=None):
+    """Every company event for this stock, with what the price did.
+
+    Returns [] rather than raising, always. One row per event:
+
+        at                  the day it landed
+        kind, headline      what it was
+        price_on_event      that session's close
+        move_on_event_pct   that session's own move
+        next_results_date   the first results date AFTER it
+        move_to_results_pct event close -> results close
+        still_open          True when that print has not happened yet
+        move_since_pct      event close -> latest close, always filled
+        guidance            what management said, if anything was filed
+
+    `still_open` rows carry move_since_pct and no move_to_results_pct.
+    An unfinished window is not a zero and must never average as one.
+    """
+    symbol = str(symbol or "").upper()
+    if not symbol:
+        return []
+
+    events_conn = _read_only(EVENTS_DB)
+    results_conn = _read_only(RESULTS_DB)
+    daily_conn = _read_only(DAILY_DB)
+    try:
+        if events_conn is None:
+            return []
+
+        placeholders = ",".join("?" * len(COMPANY_KINDS))
+        sql = (f"SELECT at, kind, grade, value_cr, headline, detail "
+               f"FROM events WHERE symbol = ? "
+               f"AND kind IN ({placeholders})")
+        params = [symbol, *COMPANY_KINDS]
+        if since:
+            sql += " AND at >= ?"
+            params.append(str(since))
+        sql += " ORDER BY at"
+        try:
+            rows = events_conn.execute(sql, params).fetchall()
+        except Exception:                                   # noqa: BLE001
+            return []
+        if not rows:
+            return []
+
+        results_dates = []
+        if results_conn is not None:
+            try:
+                results_dates = [_day(r[0]) for r in results_conn.execute(
+                    "SELECT results_date FROM results_events "
+                    "WHERE symbol = ? ORDER BY results_date",
+                    (symbol,)).fetchall()]
+            except Exception:                               # noqa: BLE001
+                results_dates = []
+
+        closes = _closes_for(daily_conn, symbol)
+        latest = closes[-1] if closes else None
+
+        out = []
+        for at, kind, grade, value_cr, headline, detail in rows:
+            day = _day(at)
+            if not day:
+                continue
+            bar = _close_on_or_after(closes, day)
+            price = None if bar is None else bar[1]
+
+            record = {
+                "symbol": symbol,
+                "at": day,
+                "kind": kind,
+                "grade": grade,
+                "value_cr": value_cr,
+                "headline": (str(headline or "").strip() or None),
+                "price_on_event": price,
+                "move_on_event_pct": (None if bar is None
+                                      else _pct(bar[1], bar[2])),
+                "guidance": ((str(detail or "").strip() or None)
+                             if kind in GUIDANCE_KINDS else None),
+                "next_results_date": None,
+                "price_at_next_results": None,
+                "move_to_results_pct": None,
+                "sessions_to_results": None,
+                "still_open": True,
+                "move_since_pct": None,
+            }
+
+            if price is not None and latest is not None:
+                record["move_since_pct"] = _pct(latest[1], price)
+
+            nxt = next((d for d in results_dates if d > day), None)
+            if nxt:
+                after = _close_on_or_after(closes, nxt)
+                if after is not None and price is not None:
+                    record.update({
+                        "next_results_date": nxt,
+                        "price_at_next_results": after[1],
+                        "move_to_results_pct": _pct(after[1], price),
+                        "sessions_to_results": sum(
+                            1 for c in closes
+                            if day < str(c[0]) <= str(after[0])),
+                        "still_open": False,
+                    })
+                else:
+                    # The date is known and the bar is not -- the print
+                    # is scheduled but has not traded yet.
+                    record["next_results_date"] = nxt
+
+            out.append(record)
+
+        out.sort(key=lambda r: r["at"], reverse=True)
+        return out[:limit] if limit else out
+    finally:
+        for conn in (events_conn, results_conn, daily_conn):
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:                           # noqa: BLE001
+                    pass
+
+
+def track_record(symbol, since=None):
+    """Did this company's updates actually lead anywhere?
+
+    The summary his manual sheet was for. SETTLED windows only -- an
+    event still waiting on its next print is counted and reported
+    separately, never averaged in.
+    """
+    rows = event_record(symbol, since=since)
+    settled = [r for r in rows if not r["still_open"]
+               and r["move_to_results_pct"] is not None]
+    open_rows = [r for r in rows if r["still_open"]]
+    delivered = [r for r in settled if r["move_to_results_pct"] > 0]
+
+    by_kind = {}
+    for row in settled:
+        by_kind.setdefault(row["kind"], []).append(
+            row["move_to_results_pct"])
+
+    return {
+        "symbol": str(symbol or "").upper(),
+        "events": len(rows),
+        "settled": len(settled),
+        "still_open": len(open_rows),
+        "delivered": len(delivered),
+        "delivered_pct": (round(len(delivered) * 100.0 / len(settled), 1)
+                          if settled else None),
+        "avg_move_to_results_pct": (
+            round(sum(r["move_to_results_pct"] for r in settled)
+                  / len(settled), 2) if settled else None),
+        "by_kind": {k: {"n": len(v), "avg_pct": round(sum(v) / len(v), 2)}
+                    for k, v in sorted(by_kind.items())},
+        "latest": rows[0] if rows else None,
+    }

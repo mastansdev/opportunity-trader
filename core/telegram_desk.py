@@ -109,6 +109,7 @@ _HELP = """*Opportunity Trader*
 `OPP`         what each opportunity family is worth
 `SIDES X`     who gains and who loses when X rises
 `SCORE`       what refused signals actually did next
+`HISTORY SYM` every update and what it led to
 
 `BUY SYM [qty]`   quoted, needs YES
 `SELL SYM`        quoted, needs YES
@@ -387,6 +388,8 @@ class TelegramDesk:
                 return self._sides(" ".join(words[1:]).upper())
             if verb in ("SCORE", "SCORED"):
                 return self._score()
+            if verb in ("HISTORY", "HIST", "RECORD"):
+                return self._history(arg)
             if verb in ("ON", "OFF"):
                 return self._arm(verb == "ON")
             if verb in ("BUY", "SELL", "EXITALL"):
@@ -814,6 +817,52 @@ class TelegramDesk:
                 f"`stopped {_n(ev['stopped_first_pct']):>7}%  vs "
                 f"{_n(no['stopped_first_pct']):>7}%`\n"
                 f"_n={ev['n']:,} vs {no['n']:,}_")
+
+    def _history(self, symbol):
+        """This stock's own event record -- what each update led to.
+
+            "bot must maintain the complete record from event date,
+             price on that date to movement on the event date to next
+             result date"        -- operator, 19 August 2026
+
+        core/stock_memory.py joins the three stores and does the
+        arithmetic. Nothing is computed here.
+        """
+        if not symbol:
+            return "`HISTORY SYMBOL` -- which stock?"
+        try:
+            from core import stock_memory
+            got = stock_memory.track_record(symbol)
+            rows = stock_memory.event_record(symbol, limit=5)
+        except Exception as exc:                            # noqa: BLE001
+            return f"Could not read the ledger ({exc})."
+        if not got.get("events"):
+            return f"No company events recorded for *{symbol}*."
+
+        head = [f"*{symbol}* -- {got['events']} events"]
+        if got.get("settled"):
+            head.append(f"`settled {got['settled']}  delivered "
+                        f"{got.get('delivered_pct')}%  avg "
+                        f"{got.get('avg_move_to_results_pct')}%`")
+        if got.get("still_open"):
+            head.append(f"_{got['still_open']} still waiting on the "
+                        f"next print._")
+
+        for row in rows:
+            line = f"`{row['at']}` *{row['kind']}*"
+            if row.get("move_on_event_pct") is not None:
+                line += f"  {row['move_on_event_pct']:+.2f}% on the day"
+            if row.get("still_open"):
+                since = row.get("move_since_pct")
+                line += (f"\n   open, {since:+.2f}% since"
+                         if since is not None else "\n   open")
+            elif row.get("move_to_results_pct") is not None:
+                line += (f"\n   {row['move_to_results_pct']:+.2f}% to "
+                         f"results on {row['next_results_date']}")
+            if row.get("guidance"):
+                line += f"\n   _{str(row['guidance'])[:90]}_"
+            head.append(line)
+        return "\n".join(head)
 
     def _arm(self, on):
         if self.engine is None:

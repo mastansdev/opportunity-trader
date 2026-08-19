@@ -783,6 +783,28 @@ def build_app(dashboard_state, trade_controller, master_loader,
             warn(f"[TAG] {tag} failed: {exc}")
             return {"tag": tag, "exact": [], "like": [], "error": str(exc)}
 
+    @app.get("/api/history/{symbol}")
+    def event_history(symbol: str):
+        """Every company event for one stock and what it led to.
+
+        ---- HE WAS KEEPING THIS BY HAND. 19 August 2026. ----
+
+            "still user doing manual updates/data maintainance which
+             is not ideal to do so bot must maintain the complete
+             record"
+
+        All three stores were already on disk -- 15,130 events, 7,086
+        results dates, 1.1M daily bars -- and nothing joined them.
+        """
+        try:
+            from core import stock_memory
+            return {"symbol": str(symbol or "").upper(),
+                    "summary": stock_memory.track_record(symbol),
+                    "events": stock_memory.event_record(symbol)}
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[HISTORY] {symbol} failed: {exc}")
+            return {"symbol": symbol, "events": [], "error": str(exc)}
+
     @app.get("/api/score")
     def signal_score():
         """What actually happened after every signal the bot recorded.
