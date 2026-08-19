@@ -61,7 +61,7 @@
    "symbol": "^FVX"
   },
   "dxy": {
-   "last": 99.57,
+   "last": 99.566,
    "currency": "USD",
    "market_state": null,
    "change_pct": -0.07,
@@ -71,50 +71,50 @@
    "symbol": "DX-Y.NYB"
   },
   "crude": {
-   "last": 84.81,
+   "last": 84.82,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 0.37,
+   "change_pct": 0.38,
    "previous": 84.5,
    "label": "Crude oil",
    "group": "ENERGY",
    "symbol": "CL=F"
   },
   "natgas": {
-   "last": 2.781,
+   "last": 2.78,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 3.38,
+   "change_pct": 3.35,
    "previous": 2.69,
    "label": "Natural gas",
    "group": "ENERGY",
    "symbol": "NG=F"
   },
   "gold": {
-   "last": 4407.7,
+   "last": 4408.4,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -0.23,
+   "change_pct": -0.21,
    "previous": 4417.8,
    "label": "Gold",
    "group": "METALS",
    "symbol": "GC=F"
   },
   "silver": {
-   "last": 63.11,
+   "last": 63.06,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -4.55,
+   "change_pct": -4.63,
    "previous": 66.121,
    "label": "Silver",
    "group": "METALS",
    "symbol": "SI=F"
   },
   "copper": {
-   "last": 6.465,
+   "last": 6.4645,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -2.1,
+   "change_pct": -2.11,
    "previous": 6.604,
    "label": "Copper",
    "group": "METALS",
@@ -161,37 +161,37 @@
    "symbol": "^N225"
   },
   "hangseng": {
-   "last": 25470.91,
+   "last": 25519.37,
    "currency": "HKD",
    "market_state": null,
-   "change_pct": 0.07,
+   "change_pct": 0.26,
    "previous": 25453.23,
    "label": "Hang Seng",
    "group": "ASIA",
    "symbol": "^HSI"
   },
   "shanghai": {
-   "last": 3920.825,
+   "last": 3915.381,
    "currency": "CNY",
    "market_state": null,
-   "change_pct": -1.74,
+   "change_pct": -1.88,
    "previous": 3990.304,
    "label": "Shanghai",
    "group": "ASIA",
    "symbol": "000001.SS"
   },
   "usdinr": {
-   "last": 95.67,
+   "last": 95.7275,
    "currency": "INR",
    "market_state": null,
-   "change_pct": -0.03,
+   "change_pct": 0.03,
    "previous": 95.6941,
    "label": "USD / INR",
    "group": "FX",
    "symbol": "INR=X"
   },
   "eurusd": {
-   "last": 1.1587,
+   "last": 1.1586,
    "currency": "USD",
    "market_state": null,
    "change_pct": 0.03,
@@ -201,17 +201,17 @@
    "symbol": "EURUSD=X"
   },
   "usdjpy": {
-   "last": 159.374,
+   "last": 159.408,
    "currency": "JPY",
    "market_state": null,
-   "change_pct": 0.02,
+   "change_pct": 0.04,
    "previous": 159.34,
    "label": "USD / JPY",
    "group": "FX",
    "symbol": "JPY=X"
   }
  },
- "fetched_at": "2026-08-19 08:54:19",
- "last_success_at": "2026-08-19 08:54:19",
+ "fetched_at": "2026-08-19 09:04:53",
+ "last_success_at": "2026-08-19 09:04:53",
  "failed": []
 }
