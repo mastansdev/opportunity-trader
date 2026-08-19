@@ -1397,6 +1397,34 @@ class Engine:
                "days_since_results": None, "had_reason": 0,
                "reason_summary": None}
         parts = []
+        # ---- TWO NEWS SOURCES, AND THE JOURNAL SAW THE THIN ONE ----
+        #      19 August 2026.
+        #
+        #     "fix the news_kind gap"
+        #
+        # 13,174 of 13,272 recorded signals carried no news_kind, so
+        # the whole "news predicts" half of his thesis was
+        # unmeasurable. The cause was not a missing feed -- it was two
+        # of them:
+        #
+        #   self.news_feed          RSS headlines, symbol-resolved
+        #   data/stock_events.db    the PRO Telegram channels,
+        #                           15,289 events across 1,727 symbols
+        #
+        # core/why_moving.py reads the SECOND to build the sentence on
+        # his alert. This function read only the FIRST. So on
+        # 19 August the RAILTEL alert quoted a Rs 166.80 crore EPFO
+        # work order -- straight out of stock_events -- while the row
+        # recorded for that same signal said news_kind = NULL.
+        #
+        # The alert and the record disagreed about whether the stock
+        # had news at all, which is the worst possible shape: the
+        # thing he reads says yes, and the thing that would prove it
+        # says no.
+        #
+        # RSS FIRST, still: it carries a stance the channels do not.
+        # The channel event fills in only when RSS has nothing, so
+        # nothing that already worked changes.
         try:
             if self.news_feed is not None:
                 item = self.news_feed.for_symbol(symbol)
@@ -1405,6 +1433,14 @@ class Engine:
                     parts.append(f"news:{item.get('kind')}")
         except Exception:                                  # noqa: BLE001
             pass
+
+        if out["news_kind"] is None:
+            # on_date is the caller's clock -- a replay of a past
+            # morning must not read events that had not happened yet.
+            channel = self._channel_event_kind(symbol, on_date)
+            if channel:
+                out["news_kind"] = channel
+                parts.append(f"news:{channel}")
         try:
             if self.announcements is not None:
                 filing = self.announcements.for_symbol(symbol)
@@ -1525,6 +1561,83 @@ class Engine:
         if not summary:
             return "  [PRICE ONLY -- no event behind it]"
         return f"  [EVIDENCE: {summary}]"
+
+    def _channel_event_kind(self, symbol, when=None):
+        """The PRO channel event behind this stock today, or None.
+
+        Reads data/stock_events.db through core/why_moving.py's own
+        cached reader -- the SAME path that builds the sentence on his
+        alert. One reader, one cache, one answer: a second lookup here
+        would drift from the alert within a week and the record would
+        contradict the message again.
+
+        ---- THE STORE IS UTC AND THE MARKET IS IST. ----
+
+        stock_events writes "2026-08-18T13:41:11+00:00". That is
+        19:11 IST on the 18th -- an EVENING filing, made after the
+        close, and it is precisely the kind that drives the next
+        morning. RAILTEL's Rs 166.80 crore EPFO order carried that
+        exact stamp and the 19 August alert quoted it.
+
+        So a same-calendar-day filter does not merely miss a few
+        events, it misses THE ONES THAT MATTER MOST -- everything
+        filed between the close and midnight UTC. The first version of
+        this method had that filter and returned None for RAILTEL on
+        the morning RAILTEL was the pick of the day.
+
+        The window is therefore the trading day PLUS everything from
+        the previous session's close onward, read in IST.
+
+        Anything older is excluded: an order win from three weeks ago
+        is not why this stock is breaking out this morning, and
+        stamping it on the signal would make the column look full
+        while meaning nothing.
+
+        Never raises. This runs on the tick path and a journal that
+        cannot be written is better than a tick that does not happen.
+        """
+        try:
+            from core.why_moving import _events_for
+
+            rows = _events_for(symbol) or []
+        except Exception:                                  # noqa: BLE001
+            return None
+
+        now = when or datetime.now()
+        if not isinstance(now, datetime):
+            try:
+                now = datetime.strptime(str(now)[:10], "%Y-%m-%d")
+            except Exception:                              # noqa: BLE001
+                now = datetime.now()
+        # From yesterday's close (15:30 IST) to now.
+        cutoff = (now - timedelta(days=1)).replace(
+            hour=15, minute=30, second=0, microsecond=0)
+
+        best = None
+        for row in rows:
+            try:
+                raw = str((row or {}).get("at") or "")
+                kind = str((row or {}).get("kind") or "").strip().upper()
+            except Exception:                              # noqa: BLE001
+                continue
+            if not kind or len(raw) < 19:
+                continue
+            try:
+                stamped = datetime.strptime(raw[:19], "%Y-%m-%dT%H:%M:%S")
+                if raw.endswith("+00:00") or raw.endswith("Z"):
+                    stamped += timedelta(hours=5, minutes=30)   # IST
+            except Exception:                              # noqa: BLE001
+                continue
+            if stamped < cutoff or stamped > now + timedelta(minutes=5):
+                continue
+            # MACRO is market-wide -- it is not this stock's news, and
+            # counting it would fill the column with the same word on
+            # every symbol that moved.
+            if kind in ("MACRO", "MARKET_ANSWER", "AI_VERDICT"):
+                continue
+            best = kind
+            break
+        return best
 
     def _no_reason_refusal(self, symbol):
         """Why this stock has no event behind it today, or None if it
