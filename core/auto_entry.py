@@ -344,7 +344,7 @@ except Exception:                                          # noqa: BLE001
     MIN_VOLUME_RATIO = 1.5
 
 
-def early_rows(movers, now=None, plan_of=None):
+def early_rows(movers, now=None, plan_of=None, evidence_of=None):
     """Row 1's candidates, ranked for the 09:20 lane.
 
     ---- WHY NOT core/ranker.py. 7 August 2026. ----
@@ -372,7 +372,49 @@ def early_rows(movers, now=None, plan_of=None):
         if not isinstance(mover, dict):
             continue
         symbol = str(mover.get("symbol") or "").upper()
-        if not _is_pre_graded(symbol):
+
+        # ---- THE DOOR ONLY OPENED FOR RESULTS. 18 August 2026. ----
+        #
+        #     "by knowing the underlying news = buy right? if we wait
+        #      for 09:30 to orb confirmation we may miss or never able
+        #      to enter into trade after a long run up ... in some
+        #      great events on the stock will not give the opportunity
+        #      to enter at all as stocks lock at circuits"
+        #
+        # This lane exists precisely to avoid that wait, and its
+        # admission test was _is_pre_graded() -- watchlist_builder's
+        # OVERNIGHT RESULTS GRADES and nothing else. An order win, a
+        # contract, a business update or a commodity headline filed at
+        # 20:00 was not a grade, so it fell through to the standard
+        # path and waited for the 09:30 range to complete and then to
+        # break. On a stock that opens and locks, that wait is not a
+        # delay, it is the whole trade.
+        #
+        # core/signal_journal.py measured the cost. Of every refusal
+        # bucket with enough cases, the BEST-performing one was
+        # "filed today, numbers not read yet" -- n=91, +0.25% at the
+        # close, +3.53% at its best, against +1.22% for stocks with no
+        # event at all. The bot's most profitable refusal was a stock
+        # whose news it had not finished reading.
+        #
+        # A GRADE STILL OUTRANKS RAW EVIDENCE, and deliberately: an
+        # overnight grade has been parsed, and a filing at 09:16 has
+        # only been noticed. Both get in; the parsed one sorts first.
+        #
+        # Every other gate below is UNCHANGED and applies to both --
+        # must be up on the day, must be making highs and not falling
+        # back, must have volume behind it. Widening the door does not
+        # widen the room.
+        graded = _is_pre_graded(symbol)
+        evidence = None
+        if not graded and evidence_of is not None:
+            try:
+                evidence = evidence_of(symbol)
+            except Exception as exc:                       # noqa: BLE001
+                _broke("evidence_of (the early lane sees results only)",
+                       exc)
+                evidence = None
+        if not graded and not evidence:
             continue
         grade = str(((_graded_cache.get("map") or {}).get(symbol)
                      or {}).get("grade") or "").upper()
@@ -397,11 +439,19 @@ def early_rows(movers, now=None, plan_of=None):
         if not _volume_supports(mover):
             continue
 
+        if graded:
+            base, why = ((10.0 if grade == "EXCELLENT" else 5.0),
+                         f"{grade} result, bought at the open before the "
+                         f"move widened the stop")
+        else:
+            # Below every graded row on purpose -- see the note above.
+            base = 4.0
+            why = (f"{str(evidence)[:90]} -- taken at the open rather "
+                   f"than waiting for the 09:30 range")
         row = {"symbol": symbol, "action": "BUY", "ltp": mover.get("ltp"),
-               "score": (10.0 if grade == "EXCELLENT" else 5.0) + change,
-               "why": f"{grade} result, bought at the open before the "
-                      f"move widened the stop",
-               "result_tag": grade, "early": True}
+               "score": base + change, "why": why,
+               "result_tag": grade or "EVENT", "early": True,
+               "early_source": "grade" if graded else "evidence"}
         if plan_of is not None:
             row["plan"] = plan_of(mover)
         out.append(row)

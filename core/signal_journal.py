@@ -481,11 +481,17 @@ def _rows_for(conn, sql, params=()):
 
 def score(db_path=DB_PATH, candles_db=CANDLES_DB, daily_db=DAILY_DB,
           limit=None, stop_pct=SCORE_STOP_PCT,
-          target_pct=SCORE_TARGET_PCT):
+          target_pct=SCORE_TARGET_PCT, stop_pct_of=None):
     """Score every signal that can be scored. A list of dicts.
 
     Reads by DATE, not by signal: one query per session rather than
     13,333 of them against a nineteen-million-row table.
+
+    `stop_pct_of` is callable(symbol) -> percent, so a stop rule can
+    be measured against the same signals before it is wired to money.
+    That is the whole point of this file: the flat 2.5% and a
+    volatility-scaled stop are two claims, and they can be run over
+    identical history rather than argued about.
     """
     journal = _ro(db_path)
     if journal is None:
@@ -537,8 +543,16 @@ def score(db_path=DB_PATH, candles_db=CANDLES_DB, daily_db=DAILY_DB,
                 # candle would score the bot on a move it had already
                 # seen when it decided, which is not a prediction.
                 after = [c for c in minutes[sym] if str(c[0]) > seen]
+            this_stop = stop_pct
+            if stop_pct_of is not None:
+                try:
+                    asked = stop_pct_of(sym)
+                except Exception:                          # noqa: BLE001
+                    asked = None
+                if asked:
+                    this_stop = float(asked)
             got = score_row(row, minutes=after, daily=daily.get(sym),
-                            stop_pct=stop_pct, target_pct=target_pct)
+                            stop_pct=this_stop, target_pct=target_pct)
             if got is not None:
                 scored.append(got)
 

@@ -63,6 +63,7 @@ from config import (
     MANUAL_ALERT_HISTORY, ENABLE_BOT_TRAILING_STOP, MANUAL_TEST_QTY,
     ALERT_ONLY_MODE,
     HARD_STOP_FROM_ENTRY_PCT, VOLUME_WINDOW_CANDLES,
+    VOLATILITY_SCALED_STOP, DAILY_ATR_STOP_MULT,
     VOLUME_REQUIRED_FOR_ENTRY, ROTATION_MAX_PER_DAY,
     CIRCUIT_RULE_DIRECTION_AWARE,
     TOP_N_MOMENTUM_MODE, FIXED_TARGET_RS, FIXED_STOP_LOSS_RS,
@@ -98,7 +99,7 @@ from config import (
     ENABLE_VOLUME_FILTER, VOLUME_SURGE_MULT, VOLUME_AVG_CANDLES,
     MIN_VOLUME_CANDLES,
 )
-from core.atr import compute_atr
+from core.atr import compute_atr, daily_atr_pct
 # ---- ONE RISK BUDGET, NOT TWO. 12 August 2026. ----
 #
 # This was `RISK_PER_TRADE_RS` off config.py, which says 2,000.
@@ -116,7 +117,9 @@ from core.atr import compute_atr
 # 1,500 and the selector has no proven edge yet, so raising size before
 # there is an edge only loses money faster.
 from core import tick_ohlc
-from core.rules import RISK_PER_TRADE_RS, BREAKOUT_MAX_OFF_HIGH_PCT
+from core.rules import (RISK_PER_TRADE_RS, BREAKOUT_MAX_OFF_HIGH_PCT,
+                        MIN_STOP_DISTANCE_PCT as STOP_FLOOR_PCT,
+                        MAX_STOP_DISTANCE_PCT as STOP_CEILING_PCT)
 from core.orb_engine import OrbEngine, EARLY_ORB_END_T, ORB_WINDOW_END_T
 from core.candle_engine import CandleEngine
 from core.strategy import Strategy
@@ -2102,6 +2105,40 @@ class Engine:
             return position >= STILL_TRENDING_MIN_POSITION
         return position <= (1.0 - STILL_TRENDING_MIN_POSITION)
 
+    def _hard_stop_pct(self, symbol):
+        """How far below entry this stock's stop belongs, as a FRACTION.
+
+        core/atr.daily_atr_pct() measures the stock's ordinary daily
+        range from the bhavcopy store the nightly chain already fills
+        -- no network call, nothing on the tick path.
+
+        Bounded by core/rules.py at both ends. A stock whose daily
+        range reads 0.2% must not be given a 0.24% stop, and one
+        reading 9% must not be given a 10.8% one.
+
+        ---- TWO CONSTANTS SHARE A NAME AND DISAGREE ON UNITS ----
+        config.MIN_STOP_DISTANCE_PCT is 0.01, a FRACTION.
+        core/rules.MIN_STOP_DISTANCE_PCT is 0.75, a PERCENT.
+        They are imported here under different names on purpose --
+        reading rules' 0.75 as a fraction would put the floor at 75%
+        of price, which is not a stop, it is a donation.
+
+        Falls back to HARD_STOP_FROM_ENTRY_PCT when the range cannot
+        be measured. A stop derived from a volatility nobody measured
+        is worse than an honestly flat one.
+        """
+        if not VOLATILITY_SCALED_STOP:
+            return HARD_STOP_FROM_ENTRY_PCT
+        try:
+            daily = daily_atr_pct(symbol)
+        except Exception:                                  # noqa: BLE001
+            daily = None
+        if not daily or daily <= 0:
+            return HARD_STOP_FROM_ENTRY_PCT
+        wanted = DAILY_ATR_STOP_MULT * float(daily)
+        wanted = max(STOP_FLOOR_PCT, min(STOP_CEILING_PCT, wanted))
+        return wanted / 100.0
+
     def _is_at_the_days_extreme(self, symbol, direction, closed_candle):
         """Is this close MAKING today's high, or sitting under one the
         stock already printed and walked back from?
@@ -3596,6 +3633,21 @@ class Engine:
             raw_stop_distance = ATR_STOP_MULTIPLIER * atr
             min_stop_distance = MIN_STOP_DISTANCE_PCT * entry_price
             stop_distance = max(raw_stop_distance, min_stop_distance)
+        elif VOLATILITY_SCALED_STOP:
+            # ---- ONE WIDTH FOR 1,312 STOCKS. 18 August 2026. ----
+            #
+            #     "do not fix the 2.5% for every stock"
+            #
+            # Still a HARD stop -- it is placed once and never moves,
+            # exactly as the trail-free design requires. Only its
+            # WIDTH changed, from one number for every stock to this
+            # stock's own daily range. Those are two separate
+            # questions and ENABLE_BOT_TRAILING_STOP had been
+            # answering both since 29 July.
+            #
+            # Falls back to the flat number, not to a guess, whenever
+            # the daily store cannot answer. See _hard_stop_pct().
+            stop_distance = self._hard_stop_pct(symbol) * entry_price
         else:
             # 2026-07-29: with the trail gone this stop is the ONLY
             # thing protecting the trade, so it is the operator's own

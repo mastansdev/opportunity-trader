@@ -87,3 +87,135 @@ def compute_atr(candles, period):
         for i in range(1, len(window))
     ]
     return sum(true_ranges) / len(true_ranges)
+
+
+# ==========================================================
+#  DAILY VOLATILITY -- THE STOP'S CORRECT UNIT
+# ==========================================================
+#
+#     "do not fix the 2.5% for every stock. as u suggested
+#      volatility-scaled stop may be best suited option"
+#                                 -- operator, 18 August 2026
+#
+# WHY THIS EXISTS SEPARATELY FROM compute_atr() ABOVE
+# ---------------------------------------------------
+# The engine already computes ATR -- on its own ONE-MINUTE candles,
+# because that is what core/candle_engine.py holds. Measured against
+# data/history_candles.db on 31 July:
+#
+#     symbol       1-min ATR(14)      0.8x stop      daily ATR(14)
+#     NAVINFLUOR      0.34%             0.27%           3.46%
+#     POLYCAB         0.23%             0.18%           1.79%
+#     ICIL            0.23%             0.19%           4.99%
+#     NEOGEN          0.62%             0.50%           4.14%
+#
+# So switching on the existing ATR stop path would have produced
+# stops of a fifth of a percent -- TEN TIMES TIGHTER than the flat
+# 2.5% it was meant to improve on, stopped out by the spread. The
+# machinery was right and the timeframe was wrong, and nothing in the
+# code said which timeframe it assumed.
+#
+# A stop answers "has this idea failed", and an idea has not failed
+# because the stock moved less than it moves on an ordinary day. That
+# is a DAILY question, so it is measured on daily bars.
+#
+# NO NETWORK, NO LIVE DEPENDENCY. This reads the bhavcopy store the
+# nightly chain already fills. If the store cannot answer, the caller
+# is told None and falls back to the flat number -- an entry must
+# never wait on a database.
+
+import os
+import sqlite3
+
+DAILY_DB = os.path.join("data", "daily_candles.db")
+
+#: Bars behind the reading. 14 sessions is three trading weeks -- long
+#: enough to survive one quiet day, short enough to notice that a
+#: stock has woken up.
+DAILY_ATR_PERIOD = 14
+
+#: Nothing may be read from fewer than this. A two-bar "ATR" on a
+#: freshly listed stock is a number, not a measurement.
+MIN_DAILY_BARS = 10
+
+_CACHE = {}
+
+
+def reset_daily_cache():
+    """Drop the per-session cache. For tests and for a new day."""
+    _CACHE.clear()
+
+
+def daily_atr_pct(symbol, db_path=DAILY_DB, period=DAILY_ATR_PERIOD,
+                  as_of=None):
+    """This stock's ordinary daily range, as a % of its price.
+
+    Returns None when it cannot be measured -- never a default, never
+    a zero. A caller that gets None must fall back to a rule it can
+    name, because a stop derived from a made-up volatility is worse
+    than an honestly flat one.
+
+    Cached per (symbol, as_of): the answer changes once a day, and the
+    entry path may ask several times a minute.
+    """
+    key = (str(symbol or "").upper(), str(as_of or ""), period)
+    if not key[0]:
+        return None
+    if key in _CACHE:
+        return _CACHE[key]
+
+    value = None
+    conn = None
+    try:
+        if os.path.exists(db_path):
+            conn = sqlite3.connect("file:" + db_path + "?mode=ro", uri=True)
+            sql = ("SELECT high, low, close FROM daily_bars "
+                   "WHERE symbol = ?")
+            params = [key[0]]
+            if as_of:
+                # Bounded so a replay of a past morning cannot read a
+                # volatility that had not happened yet.
+                sql += " AND date <= ?"
+                params.append(str(as_of))
+            sql += " ORDER BY date DESC LIMIT ?"
+            params.append(period + 1)
+            rows = conn.execute(sql, params).fetchall()
+            value = _atr_pct_from(rows)
+    except Exception:                                       # noqa: BLE001
+        value = None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:                               # noqa: BLE001
+                pass
+
+    _CACHE[key] = value
+    return value
+
+
+def _atr_pct_from(rows):
+    """rows are NEWEST first, each (high, low, close)."""
+    if not rows or len(rows) < MIN_DAILY_BARS:
+        return None
+    bars = list(rows)[::-1]                 # oldest first
+    ranges = []
+    for previous, current in zip(bars, bars[1:]):
+        try:
+            high, low = float(current[0]), float(current[1])
+            prev_close = float(previous[2])
+        except (TypeError, ValueError):
+            continue
+        if high <= 0 or low <= 0:
+            continue
+        ranges.append(max(high - low, abs(high - prev_close),
+                          abs(low - prev_close)))
+    if not ranges:
+        return None
+    try:
+        last_close = float(bars[-1][2])
+    except (TypeError, ValueError):
+        return None
+    if last_close <= 0:
+        return None
+    return (sum(ranges) / len(ranges)) / last_close * 100.0

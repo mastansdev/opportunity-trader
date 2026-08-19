@@ -26,6 +26,8 @@ Author : H&M Opportunity Trader
 """
 
 import os
+import pathlib
+import re
 
 import pytest
 
@@ -367,10 +369,56 @@ def _no_test_may_litter_the_live_data_folder():
         return {p for p in paths
                 if not p.endswith(("-wal", "-shm", "-journal"))}
 
+    # ---- IT BLAMED THE SUITE FOR THE OPERATOR'S OWN BOT. 19 Aug ----
+    #
+    # A 13-minute run reported:
+    #
+    #     the test suite CREATED files in the live data folder:
+    #     data	elegram_reader.lock
+    #
+    # It did not. The file read:
+    #
+    #     collector pid=17884 2026-08-19 07:19:33
+    #
+    # and pid 17884 was tools/collector.py, running on his machine the
+    # whole time. The suite takes minutes; anything he starts during
+    # one appears as "new" to a before/after snapshot.
+    #
+    # This nearly cost a real fix for a bug that was not there -- and
+    # the more expensive damage is to the guard itself, because a
+    # check that cries wolf is a check that gets skipped. So a new
+    # file is excused ONLY when it is a lock naming a pid that is
+    # ALIVE and is not this pytest process. A stale lock left behind
+    # by a test still fails the run, which is the case it was built
+    # for.
+    def _written_by_a_live_process(path):
+        if not path.endswith(".lock"):
+            return False
+        try:
+            text = pathlib.Path(path).read_text(encoding="utf-8")
+        except Exception:                                  # noqa: BLE001
+            return False
+        match = re.search(r"pid=(\d+)", text)
+        if not match:
+            return False
+        pid = int(match.group(1))
+        if pid == os.getpid():
+            return False              # this suite wrote it -- not excused
+        try:
+            import psutil
+            return psutil.pid_exists(pid)
+        except ImportError:
+            try:
+                os.kill(pid, 0)
+                return True
+            except (OSError, ProcessLookupError):
+                return False
+
     before = _real(glob.glob(os.path.join("data", "*")))
     yield
     after = _real(glob.glob(os.path.join("data", "*")))
-    new = sorted(n for n in (after - before))
+    new = sorted(n for n in (after - before)
+                 if not _written_by_a_live_process(n))
     assert not new, (
         "the test suite CREATED files in the live data folder: "
         + ", ".join(new)

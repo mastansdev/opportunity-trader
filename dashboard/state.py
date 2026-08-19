@@ -3194,7 +3194,8 @@ class DashboardState:
 
         try:
             rows = auto_entry.early_rows(movers, now=datetime.now(),
-                                          plan_of=_plan_of)
+                                          plan_of=_plan_of,
+                                          evidence_of=self._evidence_for)
         except Exception as exc:                           # noqa: BLE001
             warn(f"[EARLY] early_rows failed: {exc}")
             return {"available": False, "note": str(exc)}
@@ -5666,6 +5667,39 @@ class DashboardState:
             return broker_funds.last_read()
         except Exception:                                  # noqa: BLE001
             return {"balance": None, "at": None, "source": None}
+
+    def _evidence_for(self, symbol):
+        """A one-line reason this stock has news behind it, or None.
+
+        ---- THE 09:15 LANE ONLY OPENED FOR RESULTS. 18 Aug 2026. ----
+
+            "by knowing the underlying news = buy right? if we wait
+             for 09:30 to orb confirmation we may miss or never able
+             to enter into trade after a long run up"
+
+        core/engine.py._capture_reason() is the ONE place that knows
+        what is behind a stock this morning -- the news feed, the
+        announcements feed and the results grade. This hands that same
+        answer to core/auto_entry.early_rows(), which until today
+        could only see overnight results grades.
+
+        Injected rather than imported so auto_entry keeps no engine
+        reference, matching how mtf_of, plan_of and adv_of are already
+        passed into that module.
+
+        Never raises: an early lane that throws is an early lane that
+        silently becomes the old one.
+        """
+        try:
+            capture = getattr(self.engine, "_capture_reason", None)
+            if capture is None:
+                return None
+            got = capture(symbol) or {}
+        except Exception:                                  # noqa: BLE001
+            return None
+        if not got.get("had_reason"):
+            return None
+        return str(got.get("reason_summary") or "").strip() or None
 
     def _mtf_for(self, symbol, row=None):
         """Can he buy this ON MTF, and at what leverage?

@@ -1269,6 +1269,63 @@ ENABLE_BOT_TRAILING_STOP = False
 HARD_STOP_FROM_ENTRY_PCT = 0.025
 
 # ==========================================================
+# ONE STOP WIDTH FOR 1,312 DIFFERENT STOCKS  (18 Aug 2026)
+# ==========================================================
+#
+#     "do not fix the 2.5% for every stock. as u suggested
+#      volatility-scaled stop may be best suited option"
+#
+# HE IS RIGHT, AND THE JOURNAL AGREES. core/signal_journal.py scored
+# 12,036 recorded signals against the candles that followed them. At
+# the flat 2.5% above, the stop was hit BEFORE the move on:
+#
+#     46.3%  of signals carrying evidence (news/results/orders)
+#     27.8%  of signals carrying none
+#
+# Evidence-backed names move further in BOTH directions -- avg best
+# +1.73% against +1.25%, avg worst -3.01% against -2.20% -- so the
+# single number that is merely tight for a quiet stock is a
+# guaranteed exit on a live one. The bigger move was being collected
+# as a bigger loss.
+#
+# THE MACHINERY WAS ALREADY HERE AND POINTED AT THE WRONG CLOCK.
+# _atr_entry_sizing() has computed an ATR stop since 24 July, off the
+# engine's own ONE-MINUTE candles. Measured on 31 July:
+#
+#     symbol       1-min ATR   x0.8 stop     daily ATR
+#     NAVINFLUOR      0.34%       0.27%         3.46%
+#     POLYCAB         0.23%       0.18%         1.79%
+#     ICIL            0.23%       0.19%         4.99%
+#
+# Switching that on would have produced quarter-percent stops -- TEN
+# TIMES TIGHTER than the flat number it was meant to improve. A stop
+# answers "has this idea failed", and an idea has not failed because
+# a stock moved less than it moves on an ordinary day. That is a
+# DAILY question and it is now asked on daily bars.
+#
+# MEASURED BEFORE IT WAS ARMED, on identical signals and candles:
+#
+#     stop rule          evidence stopped   result    no-evid stopped
+#     flat 2.5% (old)          46.3%        -1.07%         27.8%
+#     daily ATR x0.8           44.4%        -0.91%         25.4%
+#     daily ATR x1.0           27.8%        -0.74%         11.4%
+#     daily ATR x1.2           18.5%        -0.36%          6.1%
+#
+# HONEST LIMITS. n=54 evidence signals at minute resolution, over two
+# sessions, because tools/collector.py stopped filling
+# data/history_candles.db on 31 July. And every variant is still
+# NEGATIVE: a wider stop cuts the loss, it does not manufacture a
+# profit. This is a demonstration that 2.5% is the wrong shape, not
+# that 1.2x ATR is a winning system.
+VOLATILITY_SCALED_STOP = True
+
+# Multiples of the stock's own ordinary daily range. Bounded by
+# core/rules.MIN_STOP_DISTANCE_PCT / MAX_STOP_DISTANCE_PCT (0.75% and
+# 6.0%), so no reading -- however strange -- can produce a stop that
+# is either meaningless or ruinous.
+DAILY_ATR_STOP_MULT = 1.2
+
+# ==========================================================
 # YOUR TRADES ARE YOURS  (2026-07-29, operator-found live)
 # ==========================================================
 # SMLMAH. The operator saw it locked at its UPPER circuit -- no
