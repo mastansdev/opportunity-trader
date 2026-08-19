@@ -145,6 +145,31 @@ def _trail_pct_for(symbol, has_event=False):
     wanted = max(TRAIL_MIN_PCT, min(TRAIL_MAX_PCT, wanted))
     return wanted / 100.0
 
+def trail_points(symbol, entry, has_event=False):
+    """How far below the peak this stock trails, IN RUPEES.
+
+        "TIME  SYMBOL BUY REASON QTY  ENTRY - TARGET -EXIT -
+         TRAILING POINTS"          -- operator, 19 August 2026
+
+    The alert quotes every other level in rupees, so the trail is
+    quoted in rupees too. A percentage on a card full of prices is one
+    unit conversion he should not have to do on a phone.
+
+    None when it cannot be worked out -- an absent number is better on
+    that card than a wrong one.
+    """
+    try:
+        entry = float(entry)
+    except (TypeError, ValueError):
+        return None
+    if entry <= 0:
+        return None
+    try:
+        return round(entry * _trail_pct_for(symbol, has_event), 2)
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 class TrailingStopEngine:
 
     def __init__(self, window=TRAILING_STOP_WINDOW_CANDLES):

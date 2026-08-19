@@ -155,54 +155,139 @@ def desk(monkeypatch):
     return d
 
 
-def _push(desk, symbol, score):
-    desk.push({"symbol": symbol, "kind": "ranked-buy",
-               "message": f"[score {score}] {symbol} BUY 10 @ 100 stop 97"})
+def _push(desk, symbol, score=None):
+    """A message shaped the way core/auto_entry.take() now builds one.
+
+    The first version of this helper injected "[score 30.7]" itself,
+    which take() had stopped doing -- so the test failed on a string
+    the fixture had put there. A double that drifts from the thing it
+    doubles tests nothing.
+    """
+    desk.push({"symbol": symbol, "kind": "ranked-buy", "at": "11:01:02",
+               "message": (f"{symbol} BUY -- up 4% on 6x volume"
+                           f"{chr(10)}qty 10{chr(10)}entry 100"
+                           f"{chr(10)}target 110{chr(10)}exit 97")})
     return desk.sent[-1]["text"]
 
 
-def test_the_alert_carries_the_score_the_ranker_sorted_by(desk):
-    assert "[score 30.7]" in _push(desk, "RAILTEL", 30.7)
+def test_the_card_shows_no_score_and_no_ranking(desk):
+    """---- THESE ASSERTIONS WERE INVERTED. 19 August 2026. ----
 
+    Earlier the same day the score went ON the card so he could tell a
+    strong pick from a weak one. He asked what use it was to a trader:
 
-def test_each_alert_says_where_it_stands(desk):
-    """A live stream cannot be sorted -- the 11:00 pick does not exist
-    when the 09:31 one is sent. Where it STANDS can be said, and that
-    is the difference between a list and a queue."""
-    assert "first pick" in _push(desk, "MGL", 25.6)
-    assert "BEST of 2" in _push(desk, "RAILTEL", 30.7)
-    assert "#3 of 3" in _push(desk, "KTKBANK", 5.5)
+        "i don't want to see ranking by bot"
+        "whats the use for trader on seeing the score ?"
 
-
-def test_the_best_so_far_is_marked_and_a_weak_one_is_not(desk):
-    best = _push(desk, "RAILTEL", 30.7)
-    weak = _push(desk, "KTKBANK", 5.5)
-    assert best.split(chr(10))[0].startswith("***")
-    assert not weak.split(chr(10))[0].startswith("***")
-
-
-def test_an_alert_with_no_score_is_left_exactly_as_it_was(desk):
-    """Structural breakouts are not ranked, so they carry no score and
-    must not be given a fake standing among ones that are."""
-    desk.push({"symbol": "GSFC", "kind": "alert-only-LONG",
-               "message": "GSFC LONG would have been entered at 164.10"})
-    text = desk.sent[-1]["text"]
-    assert "of" not in text.split(chr(10))[1]
+    None, yet -- it is an internal number on no scale, and nothing has
+    shown a higher one leads to a better outcome. The 8 August replay
+    pointed the other way. It rides on the routing record now, where
+    that question can be asked, and off the thing he reads at speed.
+    """
+    text = _push(desk, "RAILTEL", 30.7)
     assert "score" not in text.lower()
+    assert "BEST of" not in text
+    assert "#1 of" not in text
 
 
-def test_the_standing_resets_with_the_day(desk):
-    _push(desk, "A", 10.0)
-    desk._score_day = "1999-01-01"
-    assert "first pick" in _push(desk, "B", 1.0)
+def test_the_time_leads_the_card(desk):
+    """The first field he named. A card with no time cannot be told
+    from a repeat."""
+    desk.push({"symbol": "MGL", "kind": "ranked-buy", "at": "11:01:02",
+               "message": "MGL BUY -- a reason"})
+    assert desk.sent[-1]["text"].startswith("*11:01  MGL")
 
 
-def test_it_reads_the_score_back_rather_than_recomputing_it():
-    """The phone and the board must never disagree about which pick
-    was stronger."""
-    src = (ROOT / "core" / "telegram_desk.py").read_text(encoding="utf-8")
-    body = src[src.find("def _rank_today"):src.find("def _card")]
-    for banned in ("W_VOLUME", "score +=", "sector_lead"):
+def test_the_score_still_rides_on_the_routing_record():
+    """Off the card is not out of the system -- otherwise the question
+    "does a higher score pay" could never be answered."""
+    src = (ROOT / "core" / "auto_entry.py").read_text(encoding="utf-8")
+    assert src.count('"score": _num(row.get("score"))') >= 3, (
+        "a routing row is not carrying the score it was sorted by")
+
+
+# ---------------------------------------------------------------
+# THE CARD USES WHAT THE BOARD ALREADY KNOWS
+# ---------------------------------------------------------------
+#
+#     "why you are not using complete resources & expecting spoon
+#      feeding by me ?"           -- operator, 19 August 2026
+#
+# core/ranker.py puts about twenty-five computed facts on every row.
+# The alert carried the reason, a quantity and two prices.
+# core/tick_ohlc.pressure() -- the order book -- had been read by
+# NOTHING since it was written on 17 August.
+
+def _rich_row():
+    return {
+        "symbol": "BLACKBUCK", "ltp": 626.35, "score": 32.0,
+        "why": "up 6.4%, while Logistics is up 0.2%, 7.0x volume",
+        "moving": "7.0x volume, holding 82% of its range, up 5.3%",
+        "delivery": {"reading": "ACCUMULATION", "pct": 44.2, "avg": 42.2},
+        "pressure": {"buy": 120847.0, "sell": 130109.0, "ratio": 0.929,
+                     "above_atp": True},
+        "headroom_pct": 12.8, "at_circuit": False,
+        "mtf_leverage": 2.9, "adv_cr": 10.4,
+    }
+
+
+def test_the_card_carries_delivery_pressure_room_and_movement():
+    from core.auto_entry import _alert_lines
+    got = " | ".join(_alert_lines(_rich_row(), {"qty": 136}))
+    assert "delivery 44.2%" in got and "ACCUMULATION" in got
+    assert "book" in got
+    assert "82% of its range" in got
+    assert "12.8% to the circuit" in got
+    assert "MTF 2.9x" in got
+    assert "10.4cr" in got
+
+
+def test_a_reading_AGAINST_the_trade_is_printed_just_as_loudly():
+    """An alert that only lists reasons to buy is an advertisement.
+    BLACKBUCK's book had more sellers than buyers and the card says
+    so, in capitals."""
+    from core.auto_entry import _alert_lines
+    got = " | ".join(_alert_lines(_rich_row(), {"qty": 1}))
+    assert "SELLERS" in got
+
+
+def test_below_the_average_price_is_said_out_loud():
+    from core.auto_entry import _alert_lines
+    row = _rich_row()
+    row["pressure"] = {"ratio": 2.0, "above_atp": False}
+    got = " | ".join(_alert_lines(row, {"qty": 1}))
+    assert "BELOW" in got
+
+
+def test_a_stock_at_its_circuit_is_called_a_queue_not_a_trade():
+    from core.auto_entry import _alert_lines
+    row = _rich_row()
+    row["at_circuit"] = True
+    got = " | ".join(_alert_lines(row, {"qty": 1}))
+    assert "queue" in got
+
+
+def test_a_missing_fact_is_omitted_not_filled_with_a_zero():
+    """A dash on a card reads as a measurement. Silence does not."""
+    from core.auto_entry import _alert_lines
+    got = _alert_lines({"symbol": "X"}, {"qty": 1})
+    assert got == []
+
+
+def test_it_never_raises_on_a_malformed_row():
+    from core.auto_entry import _alert_lines
+    for row in ({"delivery": "not-a-dict"}, {"pressure": []},
+                {"pressure": {"ratio": 0}}, {"headroom_pct": "x"},
+                {"mtf_leverage": None}):
+        assert isinstance(_alert_lines(row, {}), list)
+
+
+def test_nothing_on_the_card_is_recomputed():
+    """Every number is lifted off the row the ranker built, so the
+    card and the board cannot disagree."""
+    src = (ROOT / "core" / "auto_entry.py").read_text(encoding="utf-8")
+    body = src[src.find("def _alert_lines"):src.find("def refuse_reason")]
+    for banned in ("adv(", "volume_ratio(", "daily_atr_pct(", "score +="):
         assert banned not in body
 
 

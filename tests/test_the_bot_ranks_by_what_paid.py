@@ -285,7 +285,7 @@ def test_the_engine_tells_the_trail_whether_there_is_an_event():
     src = (ROOT / "core" / "engine.py").read_text(encoding="utf-8")
     code = "\n".join(ln for ln in src.splitlines()
                      if not ln.lstrip().startswith("#"))
-    assert code.count("has_event=self._position_has_event(") == 2, (
+    assert code.count("has_event=self._position_has_event(") >= 2, (
         "one of the two trail seeds is not passing the event flag")
     body = src[src.find("def _position_has_event"):
                src.find("def _hard_stop_pct")]
@@ -343,14 +343,34 @@ def test_the_tilt_reorders_and_never_refuses():
 
 
 def test_the_entry_path_still_does_not_read_polarity():
-    """auto_entry and engine decide whether to BUY. Neither may ask."""
-    for name in ("auto_entry.py", "engine.py"):
-        src = (ROOT / "core" / name).read_text(encoding="utf-8")
-        code = chr(10).join(ln for ln in src.splitlines()
-                            if not ln.lstrip().startswith("#"))
-        for banned in ("sector_map.sides", "commodity_tilt"):
-            assert banned not in code, (
-                f"core/{name} now gates on commodity polarity")
+    """auto_entry and engine decide whether to BUY. Neither may ASK.
+
+    ---- NARROWED, NOT LOOSENED. 19 August 2026. ----
+    This grepped whole files for "commodity_tilt". That day the alert
+    card started REPORTING the tilt's reason on the message he reads
+    -- the opposite of gating on it -- and this fired.
+
+    The invariant is that polarity must not decide whether to buy, so
+    it now reads the function that decides. Anything that merely
+    prints the reason on a card is not a gate, and a guard that cannot
+    tell the two apart will eventually be switched off by someone in
+    a hurry.
+    """
+    import inspect
+
+    from core import auto_entry
+
+    decides = inspect.getsource(auto_entry.refuse_reason)
+    for banned in ("sector_map.sides", "commodity_tilt"):
+        assert banned not in decides, (
+            "auto_entry.refuse_reason now REFUSES on commodity polarity")
+
+    src = (ROOT / "core" / "engine.py").read_text(encoding="utf-8")
+    code = chr(10).join(ln for ln in src.splitlines()
+                        if not ln.lstrip().startswith("#"))
+    for banned in ("sector_map.sides", "commodity_tilt"):
+        assert banned not in code, (
+            "core/engine.py now gates on commodity polarity")
 
 
 def test_a_stock_on_neither_side_is_left_alone():

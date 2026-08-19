@@ -3760,8 +3760,22 @@ def test_alert_only_still_raises_an_alert_naming_the_stock():
     assert alerts, "the signal was dropped in silence"
     assert any(a.get("symbol") == "TCS" for a in alerts)
     text = " ".join(str(a.get("message", "")) for a in alerts)
-    assert "ALERT ONLY" in text
-    assert "would have been entered" in text
+    assert "ALERT ONLY" in text, "he cannot tell whether the bot acted"
+
+    # ---- THE WORDING CHANGED, THE MEANING DID NOT. 19 Aug 2026 ----
+    # This asserted "would have been entered". He asked for a fixed
+    # field order instead:
+    #
+    #     "TIME  SYMBOL BUY REASON QTY  ENTRY - TARGET - EXIT -
+    #      TRAILING POINTS"
+    #
+    # So the hypothetical is now carried by ALERT ONLY above, and what
+    # this test actually needs to guarantee is that the alert still
+    # names the price and the size it would have taken -- an alert
+    # without those is a notification, not a trade he can act on.
+    assert "entry" in text
+    assert "qty" in text
+    assert "exit" in text
 
 
 def test_alert_only_ignores_a_full_book():

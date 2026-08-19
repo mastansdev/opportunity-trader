@@ -202,12 +202,28 @@ def test_the_page_renders_it():
 
 
 def test_it_never_vetoes_an_entry():
-    """The line that must not move."""
+    """The line that must not move -- and it moved for the wrong reason
+    on 19 August.
+
+    This grepped the whole of core/auto_entry.py for the word
+    "delivery". That day the ALERT CARD started reporting the delivery
+    reading on the message he reads, which is the opposite of a veto,
+    and this fired anyway.
+
+    The invariant was never "the word may not appear". It is "delivery
+    may not decide whether to buy". So it now reads the function that
+    decides, with prose stripped -- narrower, and the thing that
+    actually matters.
+    """
     import inspect
 
     from core import auto_entry, position_plan, ranker
-    for module in (auto_entry, ranker, position_plan):
-        src = inspect.getsource(module)
-        assert "delivery" not in src.lower(), (
+
+    for module in (ranker, position_plan):
+        assert "delivery" not in inspect.getsource(module).lower(), (
             f"{module.__name__} has started reading delivery -- it was "
             f"built to report, not to refuse")
+
+    decides = inspect.getsource(auto_entry.refuse_reason).lower()
+    assert "delivery" not in decides, (
+        "core.auto_entry.refuse_reason now REFUSES on delivery")

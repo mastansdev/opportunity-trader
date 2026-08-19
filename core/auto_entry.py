@@ -459,6 +459,89 @@ def early_rows(movers, now=None, plan_of=None, evidence_of=None):
     return out
 
 
+def _alert_lines(row, plan):
+    """Everything the board already knows about this pick, on one card.
+
+    ---- IT WAS SENDING FOUR FACTS OUT OF TWENTY-FIVE. 19 Aug 2026 ----
+
+        "why you are not using complete resources & expecting spoon
+         feeding by me ?"                    -- operator
+
+    Fair. core/ranker.py puts delivery, order-book pressure, circuit
+    headroom, MTF leverage, average traded value, position in range
+    and distance off the high on EVERY row, and the alert carried the
+    reason, the quantity and two prices. The rest was computed, shown
+    on a screen he is not looking at, and dropped on the way to the
+    phone -- the order-book reading in core/tick_ohlc.py in
+    particular had been read by nothing since it was written on
+    17 August.
+
+    That module's guard greps for its own call signature, so this
+    docstring deliberately does not spell it out. The guard must stay
+    able to fail on real code, and prose that trips it is exactly how
+    a guard gets loosened for the wrong reason.
+
+    NOTHING HERE IS COMPUTED. Every number is lifted off the row the
+    ranker built, so the card and the board cannot disagree.
+
+    A LINE IS OMITTED WHEN ITS FACT IS MISSING, never filled with a
+    zero or a dash. And a reading that is AGAINST the trade is printed
+    exactly as loudly as one for it -- an alert that only lists
+    reasons to buy is an advertisement.
+    """
+    lines = []
+
+    # ---- CONVICTION: is real money behind this, or only price? ----
+    delivery = row.get("delivery") if isinstance(row.get("delivery"),
+                                                 dict) else None
+    if delivery and delivery.get("pct") is not None:
+        note = str(delivery.get("reading") or "").replace("_", " ")
+        avg = delivery.get("avg")
+        lines.append(f"delivery {delivery['pct']}%"
+                     + (f" vs {avg}% usual" if avg is not None else "")
+                     + (f" -- {note}" if note else ""))
+
+    book = row.get("pressure") if isinstance(row.get("pressure"),
+                                             dict) else None
+    if book and book.get("ratio") is not None:
+        ratio = book["ratio"]
+        side = (f"buyers {ratio:.1f}x" if ratio >= 1
+                else f"SELLERS {1 / ratio:.1f}x" if ratio > 0 else None)
+        if side:
+            above = book.get("above_atp")
+            lines.append(
+                f"book {side}"
+                + ("" if above is None
+                   else (" and above the day's average price" if above
+                         else " and BELOW the day's average price")))
+
+    moving = str(row.get("moving") or "").strip()
+    if moving:
+        lines.append(moving)
+
+    # ---- ROOM: can he actually get the size on, and get out? ----
+    room = []
+    head = _num(row.get("headroom_pct"))
+    if row.get("at_circuit"):
+        room.append("AT THE CIRCUIT -- a queue, not a trade")
+    elif head is not None:
+        room.append(f"{head:.1f}% to the circuit")
+    lev = _num(row.get("mtf_leverage"))
+    if lev is not None:
+        room.append(f"MTF {lev:.1f}x")
+    adv = _num(row.get("adv_cr"))
+    if adv is not None:
+        room.append(f"Rs {adv:.1f}cr traded on a normal day")
+    if room:
+        lines.append(" | ".join(room))
+
+    tilt_why = str(row.get("commodity_tilt_why") or "").strip()
+    if tilt_why:
+        lines.append(tilt_why)
+
+    return lines
+
+
 def refuse_reason(row, engine, now=None, held=None, max_positions=None):
     """Why this pick must NOT be taken, or None if it may be.
 
@@ -659,25 +742,51 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
         why = refuse_reason(row, engine, now=now, held=held,
                             max_positions=seats)
         if why:
-            out.append({"symbol": symbol, "taken": False, "why": why})
+            out.append({"symbol": symbol, "taken": False, "why": why,
+                        "score": _num(row.get("score"))})
             continue
 
         plan = row["plan"]
-        # ---- THE ONE NUMBER THE ALERT DROPPED. 19 Aug 2026. ----
+        # ---- HIS FORMAT, AND NO SCORE. 19 August 2026. ----
         #
-        #     "alerts are recving but random alerts i'm getting"
+        #     "i don't want to see ranking by bot. the format of alert
+        #      TIME  SYMBOL BUY REASON QTY  ENTRY - TARGET - EXIT -
+        #      TRAILING POINTS"
         #
-        # The ranker scores every row and this function SORTS BY IT --
-        # and then built a sentence that threw it away. So RAILTEL at
-        # 30.7 and KTKBANK at 5.5 arrived on his phone looking exactly
-        # alike, in whatever order the clock produced them. He could
-        # not tell the best setup of the day from the weakest, because
-        # the bot never told him.
-        _score = _num(row.get("score"))
-        detail = ((f"[score {_score:.1f}] " if _score is not None else "")
-                  + f"{symbol} BUY {plan['qty']} @ {row.get('ltp')} "
-                  f"stop {plan['stop']} target {plan.get('target')} "
-                  f"-- {row.get('why') or 'ranked setup'}")
+        # The score went on the card earlier the same day so he could
+        # tell a strong pick from a weak one. He asked what use it was
+        # to a trader, and the honest answer is none yet: it is an
+        # internal ranking number on no scale, and NOTHING has shown
+        # that a higher one leads to a better outcome. The 8 August
+        # replay pointed the other way -- the top-ranked three were
+        # the worst of the eleven.
+        #
+        # So it comes off the card and rides on the ROUTING record
+        # instead -- take()'s return, published on the snapshot -- so
+        # every pick's score and fate are stored together and the
+        # question "does a higher score lead to a better outcome" can
+        # actually be asked. A number he is asked to trust and cannot
+        # check is worse than no number.
+        #
+        # TRAILING POINTS in rupees, like every other level here. A
+        # percentage on a card full of prices is a conversion he
+        # should not be doing on a phone.
+        _trail = None
+        try:
+            from core.trailing_stop import trail_points
+            _trail = trail_points(symbol, row.get("ltp"),
+                                  has_event=bool(row.get("why")))
+        except Exception:                                  # noqa: BLE001
+            _trail = None
+
+        _context = _alert_lines(row, plan)
+        detail = (f"{symbol} BUY -- {row.get('why') or 'ranked setup'}"
+                  + ("\n\n" + "\n".join(_context) if _context else "")
+                  + f"\n\nqty {plan['qty']}"
+                  f"\nentry {row.get('ltp')}"
+                  f"\ntarget {plan.get('target')}"
+                  f"\nexit {plan['stop']}"
+                  + (f"\ntrailing {_trail}" if _trail else ""))
 
         # ---- ALERT_ONLY_MODE IS UNTOUCHED BY THIS CHANGE ----
         # Connecting the two halves and switching the safety off are
@@ -691,6 +800,7 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                 except Exception as exc:                   # noqa: BLE001
                     _broke("alert (he never saw this pick)", exc)
             out.append({"symbol": symbol, "taken": False,
+                        "score": _num(row.get("score")),
                         "why": "ALERT ONLY -- bot not trading, "
                                "operator decides"})
             continue
@@ -716,5 +826,6 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                         "why": f"the order path refused it ({exc})"})
             continue
         held.add(symbol)
-        out.append({"symbol": symbol, "taken": True, "why": detail})
+        out.append({"symbol": symbol, "taken": True, "why": detail,
+                    "score": _num(row.get("score"))})
     return out

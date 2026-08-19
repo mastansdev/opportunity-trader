@@ -196,10 +196,18 @@ def test_it_never_reaches_the_entry_path():
     for name in ("core/engine.py", "core/auto_entry.py", "core/ranker.py",
                  "core/position_plan.py", "core/exit_plan.py"):
         src = (ROOT / name).read_text(encoding="utf-8", errors="replace")
-        assert "tick_ohlc.pressure(" not in src, (
+        # PROSE IS NOT CODE. 19 August 2026: this fired because a
+        # COMMENT in core/auto_entry.py named tick_ohlc.pressure()
+        # while explaining that the alert card now REPORTS the book.
+        # Reporting is the opposite of deciding, and the guard could
+        # not tell -- the same miss this suite has had before.
+        code = chr(10).join(
+            ln for ln in src.splitlines()
+            if not ln.lstrip().startswith("#"))
+        assert "tick_ohlc.pressure(" not in code, (
             f"{name} reads the order-book skew. That may be right, but "
             f"it is a deliberate change, not a quiet one.")
-        assert "total_buy_quantity" not in src, name
+        assert "total_buy_quantity" not in code, name
 
 
 def test_the_module_still_says_it_only_records():

@@ -3364,15 +3364,35 @@ class Engine:
             # _capture_reason() knows what it is and the alert threw
             # it away, printing the mechanism instead. The name of the
             # pattern is not the reason to buy.
+            # ---- HIS FORMAT. 19 August 2026. ----
+            #     "TIME  SYMBOL BUY REASON QTY  ENTRY - TARGET -
+            #      EXIT - TRAILING POINTS"
+            # Two lanes reached his phone in two different shapes and
+            # he had to read each one differently. Same fields, same
+            # order, whichever lane found the stock.
+            _trail = None
+            try:
+                from core.trailing_stop import trail_points
+                _trail = trail_points(
+                    symbol, closed_candle["close"],
+                    has_event=self._position_has_event(symbol))
+            except Exception:                              # noqa: BLE001
+                _trail = None
             self._manual_alert(
                 symbol, f"alert-only-{direction}",
-                f"{symbol} {direction} would have been entered at "
-                f"{closed_candle['close']:.2f} "
-                f"(qty {qty}, stop {stop_seed:.2f}"
-                f"{f', target {target:.2f}' if target else ''}) -- "
-                f"{entry_reason}{self._alert_evidence(symbol)}. "
-                f"ALERT ONLY: {why_not}. "
-                f"Use the dashboard BUY if you want it."
+                f"{symbol} {direction} -- {entry_reason}"
+                f"{self._alert_evidence(symbol)}"
+                f"\nqty {qty}"
+                f"\nentry {closed_candle['close']:.2f}"
+                + (f"\ntarget {target:.2f}" if target else "")
+                + f"\nexit {stop_seed:.2f}"
+                + (f"\ntrailing {_trail}" if _trail else "")
+                # "ALERT ONLY" is the standing phrase across the
+                # logs, the board and every earlier alert. It is a
+                # safety statement -- the bot did NOT act -- and
+                # keeping the exact words costs one line and
+                # removes any doubt about which it is.
+                + f"\n_ALERT ONLY: {why_not}_"
             )
             if self.signal_journal is not None:
                 try:

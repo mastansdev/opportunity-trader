@@ -267,7 +267,8 @@ class TelegramDesk:
                 return False
             if not self._budget_allows():
                 return False
-            return bool(send(self._card(symbol, kind, message)))
+            return bool(send(self._card(symbol, kind, message,
+                                        note.get("at"))))
         except Exception as exc:                            # noqa: BLE001
             diagnostic(f"[TG] push failed: {type(exc).__name__}")
             return False
@@ -311,7 +312,7 @@ class TelegramDesk:
             return f"BEST of {total} so far today", True
         return f"#{place} of {total} today", False
 
-    def _card(self, symbol, kind, message):
+    def _card(self, symbol, kind, message, note_at=None):
         """The envelope. What is inside it is untouched."""
         head, verb = self.HEADS.get(kind, (None, None))
         if head is None:
@@ -341,12 +342,21 @@ class TelegramDesk:
             head = "BREAKOUT (no evidence)"
         elif "[EVIDENCE:" in message:
             head = "OPPORTUNITY + EVIDENCE"
-        standing, is_best = self._rank_today(message)
-        if is_best:
-            head = "** " + head
-        card = f"*{head} -- {symbol}*\n{message}"
-        if standing:
-            card += f"\n_{standing}_"
+        # ---- NO RANKING ON THE CARD. 19 August 2026. ----
+        #
+        #     "i don't want to see ranking by bot"
+        #     "whats the use for trader on seeing the score ?"
+        #
+        # None, yet. It is an internal number on no scale and nothing
+        # has shown that a higher one leads to a better outcome -- the
+        # 8 August replay pointed the other way. It is recorded in the
+        # journal now instead, where that question can be answered,
+        # and it is off the thing he reads at speed.
+        #
+        # The TIME leads, because that is the first field he named and
+        # a card without one cannot be told from a repeat.
+        when = str(note_at or datetime.now().strftime("%H:%M:%S"))[:5]
+        card = f"*{when}  {symbol}  {head}*\n{message}"
         if symbol and symbol != "?":
             card += f"\n\n`{verb} {symbol}`   _(then_ `YES`_)_"
         return card
