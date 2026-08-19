@@ -287,6 +287,32 @@ ENGINE_REQUIRE_REASON = True
 # this repo was taken under.
 RANK_BY_MEASURED_PAYOFF = True
 
+# ==========================================================
+#  THE SAME EVENT MOVES TWO STOCKS OPPOSITE WAYS
+# ==========================================================
+#
+#     "do the sector polarity build next"
+#                                 -- operator, 19 August 2026
+#
+# Crude rises: airline margins fall, oil producers' realisation
+# rises. core/sector_map.sides() has known which side a company is
+# on since 18 August and nothing on the ranking path asked it.
+#
+# Measured over a year of daily bars before arming -- next Indian
+# session, market median removed, signed by the commodity's move:
+#
+#     COPPER      producers +0.210  consumers +0.116  (84 days)
+#     CRUDE OIL   producers +0.115  consumers +0.000  (132 days)
+#     GOLD        producers +1.309  consumers +0.366  (75 days)
+#     SILVER      producers +0.261  consumers +0.085  (144 days)
+#     NATURAL GAS producers +0.006  consumers -0.031  (164 days)
+#
+# Five out of five in the same direction, which is the finding; one
+# commodity could be luck. The magnitude is small, so the tilt is
+# bounded [0.90, 1.10] and reorders a close call rather than creating
+# a trade.
+RANK_BY_COMMODITY_POLARITY = True
+
 
 def is_a_reason(text):
     """True when `text` is a mechanism a human could act on.

@@ -101,6 +101,7 @@ from core.rules import (
     RANKER_W_VOLUME as W_VOLUME,
     RANKER_W_MECHANISM as W_MECHANISM,
     RANKER_W_PERSISTENCE as W_PERSISTENCE,
+    RANK_BY_COMMODITY_POLARITY,
 )
 
 # Beating the sector by less than this is not leadership, it is
@@ -778,10 +779,49 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
         if state == "fading":
             score -= FADING_PENALTY
 
+        # ---- THE SAME EVENT, THE OPPOSITE TRANSMISSION. 19 Aug 2026 ----
+        #
+        # His own framework: crude rises, airline margins fall and
+        # airline stocks sell off, while oil producers' realisation
+        # rises and those stocks are bought. One event, two mechanisms,
+        # opposite signs -- and this scorer treated a cable maker and a
+        # copper miner identically on a copper day.
+        #
+        # Measured over a year before it was armed. Every session an
+        # instrument moved 1.5%+, the NEXT Indian session's move for
+        # every name carrying it, minus that session's market median,
+        # signed by the commodity's direction:
+        #
+        #     COPPER      producers +0.210  consumers +0.116
+        #     CRUDE OIL   producers +0.115  consumers +0.000
+        #     GOLD        producers +1.309  consumers +0.366
+        #     SILVER      producers +0.261  consumers +0.085
+        #     NATURAL GAS producers +0.006  consumers -0.031
+        #
+        # Five out of five in the same direction. The magnitude is
+        # SMALL -- around a tenth of a percent on the well-sampled
+        # series -- so the tilt is small too, bounded [0.90, 1.10] by
+        # core/sector_map.py. It reorders a close call. It cannot make
+        # a trade out of nothing, and it is off in one line.
+        tilt, tilt_why = 1.0, None
+        if RANK_BY_COMMODITY_POLARITY:
+            try:
+                from core import sector_map as _sector_map
+                tilt, tilt_why = _sector_map.commodity_tilt(symbol)
+            except Exception as exc:                       # noqa: BLE001
+                diagnostic(f"[RANK] commodity tilt skipped "
+                           f"({type(exc).__name__}).")
+                tilt, tilt_why = 1.0, None
+        if tilt != 1.0:
+            score *= tilt
+
         out.append(Candidate({
             "symbol": symbol,
             "action": side,
             "score": round(score, 2),
+            # Shown so a ranking he disagrees with can be taken apart.
+            "commodity_tilt": None if tilt == 1.0 else round(tilt, 3),
+            "commodity_tilt_why": tilt_why,
             "change_pct": move,
 
             # ---- THE PRICES HE ASKED FOR. 9 August 2026. ----

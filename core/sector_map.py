@@ -585,3 +585,173 @@ def sides(commodity, path=MASTER_CSV):
                      for k in ("producers", "consumers", "unknown")}
     return out
 
+
+# ==========================================================
+#  THE SAME EVENT, THE OPPOSITE TRANSMISSION
+# ==========================================================
+#
+#     "do the sector polarity build next"
+#                                 -- operator, 19 August 2026
+#
+# His own framework states the case better than a comment can: crude
+# oil rises, airline margins fall and airline stocks sell off, while
+# oil producers' realisation rises and those stocks are bought. One
+# event, two mechanisms, opposite signs. sides() above knows which
+# side of a commodity a company stands on. Until now nothing on the
+# ranking path asked it, so a copper spike scored a cable maker on
+# the same footing as a copper miner.
+#
+# MEASURED BEFORE IT WAS ARMED
+# ----------------------------
+# The claim is testable and it was tested first, over a year of daily
+# bars. Method: take every session an instrument moved 1.5% or more,
+# read the NEXT Indian session for every name carrying it, subtract
+# THAT SESSION'S MARKET MEDIAN, and sign the result by the direction
+# the commodity moved. A producer helped by a rise and helped by a
+# fall both count as +; the market's own move is removed, so what is
+# left is the transmission and not the tape.
+#
+#   commodity      days   prod n  prod exc   cons n  cons exc   spread
+#   COPPER           84       84    +0.210     4720    +0.116   +0.094
+#   CRUDE OIL       132     1320    +0.115     8224    +0.000   +0.115
+#   NATURAL GAS     164     1312    +0.006     2788    -0.031   +0.036
+#   GOLD             75      150    +1.309      683    +0.366   +0.943
+#   SILVER          144      432    +0.261     1004    +0.085   +0.176
+#
+# FIVE OUT OF FIVE POSITIVE, on five independent series. That
+# consistency is the finding; one commodity could be luck.
+#
+# WHAT THE NUMBERS DO NOT SAY, and the tilt is sized accordingly:
+#
+#   * the magnitude is SMALL. Around a tenth of a percent of excess
+#     on the two well-sampled series. Real, and nowhere near a trade
+#     on its own.
+#   * COPPER's producer column is ONE STOCK. HINDCOPPER is the only
+#     miner in the universe, so 84 observations are 84 days of one
+#     company, not a portfolio.
+#   * GOLD's +0.943 rests on two producers across 75 days. The
+#     largest number in the table is the least trustworthy one.
+#   * CRUDE OIL is the strongest evidence: 1,320 producer
+#     observations, and consumers sitting at exactly +0.000 -- the
+#     market-adjusted consumer response to crude is nothing at all,
+#     while producers get +0.115.
+#
+# So this TILTS, bounded to [TILT_FLOOR, TILT_CEILING], on one score.
+# It cannot veto a trade and it cannot conjure one, the same posture
+# core/opportunity.py's payoff weight was given on 19 August.
+
+#: A commodity has to move this much before its transmission is worth
+#: reading. A quarter-percent drift in copper is not an event and
+#: measuring against one only adds noise.
+COMMODITY_MOVE_PCT = 1.5
+
+#: How far a reading may push a score. The measured spread is around
+#: a tenth of a percent of excess; a larger swing than this would be
+#: asserting more than the table supports.
+TILT_FLOOR = 0.90
+TILT_CEILING = 1.10
+
+#: premarket key -> the tag this file indexes it under.
+COMMODITY_KEYS = {
+    "copper": "COPPER",
+    "crude": "CRUDE OIL",
+    "natgas": "NATURAL GAS",
+    "gold": "GOLD",
+    "silver": "SILVER",
+}
+
+_TILT_CACHE = {}
+
+
+def reset_tilt_cache():
+    _TILT_CACHE.clear()
+
+
+def commodities_that_moved(threshold_pct=COMMODITY_MOVE_PCT, on_date=None):
+    """{tag: change_pct} for the most recent session on record.
+
+    Reads core/premarket.py's series, which is filled by the same
+    morning refresh that draws the Global Markets panel. No network,
+    no live dependency: if the series is empty this returns {} and
+    every caller carries on exactly as it did before this file grew a
+    commodity opinion.
+    """
+    key = ("moved", threshold_pct, str(on_date or ""))
+    if key in _TILT_CACHE:
+        return _TILT_CACHE[key]
+
+    # ---- TODAY'S BAR IS STILL BEING WRITTEN. 19 August 2026. ----
+    #
+    # The series carries a row for the CURRENT day, and while the
+    # market is open that row is a partial session. Reading it would
+    # ask "what has copper done so far today" -- a different question
+    # from the one that was measured, which is what a commodity did
+    # over a COMPLETED session and what the Indian names then did on
+    # the next one.
+    #
+    # Caught the first time this ran: copper showed -0.22% and was
+    # ignored, while the completed 18 August bar was -1.84% and well
+    # over the threshold. A tilt built on half a day is a tilt that
+    # changes its mind at lunchtime.
+    from datetime import date as _date
+    cutoff = str(on_date) if on_date else _date.today().isoformat()
+
+    out = {}
+    try:
+        from core import premarket
+        for name, tag in COMMODITY_KEYS.items():
+            rows = [r for r in premarket.series(name)
+                    if str(r[0]) < cutoff]
+            if not rows:
+                continue
+            _day, _close, change = rows[-1]
+            if change is None:
+                continue
+            if abs(float(change)) >= threshold_pct:
+                out[tag] = float(change)
+    except Exception:                                       # noqa: BLE001
+        out = {}
+    _TILT_CACHE[key] = out
+    return out
+
+
+def commodity_tilt(symbol, on_date=None, path=MASTER_CSV):
+    """How much to lean on this stock, given what its inputs did.
+
+    Returns (multiplier, note). 1.0 and None mean "no opinion", which
+    is the answer whenever nothing moved, the stock carries no
+    commodity, or its side cannot be told -- and it leaves the score
+    exactly as it was.
+
+    A stock exposed to several moving commodities gets the SUM of
+    their leanings before bounding, because crude up and copper up is
+    two headwinds for a cable maker, not one.
+    """
+    moved = commodities_that_moved(on_date=on_date)
+    if not moved:
+        return 1.0, None
+
+    lean = 0.0
+    reasons = []
+    for tag, change in moved.items():
+        got = stance(symbol, tag, path=path)
+        if got is None or got["stance"] == UNKNOWN:
+            continue
+        # A PRODUCER is helped when its commodity rises and hurt when
+        # it falls. A CONSUMER is the mirror. The sign of the move
+        # carries that; the side only decides which way to read it.
+        direction = 1.0 if got["stance"] == PRODUCER else -1.0
+        step = direction * (1.0 if change > 0 else -1.0)
+        lean += step
+        reasons.append(f"{tag} {change:+.1f}% and it is a "
+                       f"{got['stance'].lower()}")
+    if not reasons:
+        return 1.0, None
+
+    # One clean tailwind takes the ceiling; one headwind the floor.
+    # Stacking more cannot push further -- the table does not support
+    # claiming that two commodities are twice as predictive as one.
+    span = (TILT_CEILING - 1.0) if lean > 0 else (1.0 - TILT_FLOOR)
+    tilt = 1.0 + max(-1.0, min(1.0, lean)) * span
+    tilt = max(TILT_FLOOR, min(TILT_CEILING, tilt))
+    return round(tilt, 4), "; ".join(reasons)

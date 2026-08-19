@@ -61,51 +61,51 @@
    "symbol": "^FVX"
   },
   "dxy": {
-   "last": 99.566,
+   "last": 99.572,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -0.07,
-   "previous": 99.64,
+   "change_pct": -0.08,
+   "previous": 99.65,
    "label": "Dollar index",
    "group": "RATES",
    "symbol": "DX-Y.NYB"
   },
   "crude": {
-   "last": 84.82,
+   "last": 84.75,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 0.38,
-   "previous": 84.5,
+   "change_pct": -0.22,
+   "previous": 84.94,
    "label": "Crude oil",
    "group": "ENERGY",
    "symbol": "CL=F"
   },
   "natgas": {
-   "last": 2.78,
+   "last": 2.778,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 3.35,
-   "previous": 2.69,
+   "change_pct": 0.07,
+   "previous": 2.776,
    "label": "Natural gas",
    "group": "ENERGY",
    "symbol": "NG=F"
   },
   "gold": {
-   "last": 4408.4,
+   "last": 4405.1,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -0.21,
-   "previous": 4417.8,
+   "change_pct": 0.9,
+   "previous": 4366.0,
    "label": "Gold",
    "group": "METALS",
    "symbol": "GC=F"
   },
   "silver": {
-   "last": 63.06,
+   "last": 63.02,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -4.63,
-   "previous": 66.121,
+   "change_pct": -1.44,
+   "previous": 63.941,
    "label": "Silver",
    "group": "METALS",
    "symbol": "SI=F"
@@ -114,8 +114,8 @@
    "last": 6.4645,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -2.11,
-   "previous": 6.604,
+   "change_pct": -0.28,
+   "previous": 6.4825,
    "label": "Copper",
    "group": "METALS",
    "symbol": "HG=F"
@@ -151,40 +151,40 @@
    "symbol": "^STOXX50E"
   },
   "nikkei": {
-   "last": 65724.25,
+   "last": 65589.26,
    "currency": "JPY",
    "market_state": null,
-   "change_pct": -2.57,
+   "change_pct": -2.77,
    "previous": 67460.73,
    "label": "Nikkei",
    "group": "ASIA",
    "symbol": "^N225"
   },
   "hangseng": {
-   "last": 25519.37,
+   "last": 25533.38,
    "currency": "HKD",
    "market_state": null,
-   "change_pct": 0.26,
+   "change_pct": 0.31,
    "previous": 25453.23,
    "label": "Hang Seng",
    "group": "ASIA",
    "symbol": "^HSI"
   },
   "shanghai": {
-   "last": 3915.381,
+   "last": 3912.171,
    "currency": "CNY",
    "market_state": null,
-   "change_pct": -1.88,
+   "change_pct": -1.96,
    "previous": 3990.304,
    "label": "Shanghai",
    "group": "ASIA",
    "symbol": "000001.SS"
   },
   "usdinr": {
-   "last": 95.7275,
+   "last": 95.74,
    "currency": "INR",
    "market_state": null,
-   "change_pct": 0.03,
+   "change_pct": 0.05,
    "previous": 95.6941,
    "label": "USD / INR",
    "group": "FX",
@@ -201,17 +201,17 @@
    "symbol": "EURUSD=X"
   },
   "usdjpy": {
-   "last": 159.408,
+   "last": 159.359,
    "currency": "JPY",
    "market_state": null,
-   "change_pct": 0.04,
+   "change_pct": 0.01,
    "previous": 159.34,
    "label": "USD / JPY",
    "group": "FX",
    "symbol": "JPY=X"
   }
  },
- "fetched_at": "2026-08-19 09:04:53",
- "last_success_at": "2026-08-19 09:04:53",
+ "fetched_at": "2026-08-19 09:57:21",
+ "last_success_at": "2026-08-19 09:57:21",
  "failed": []
 }

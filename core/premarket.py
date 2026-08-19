@@ -69,6 +69,7 @@ Author : H&M Opportunity Trader
 
 import json
 import os
+import sqlite3
 import threading
 import time
 from datetime import datetime
@@ -283,6 +284,14 @@ class PreMarket:
                 os.makedirs(directory, exist_ok=True)
             with open(self.store_path, "w", encoding="utf-8") as fh:
                 json.dump(data, fh, indent=1)
+            # ---- AND KEEP IT. 19 August 2026. ----
+            # This file is OVERWRITTEN every morning, so the bot has
+            # read the copper price daily for months and cannot say
+            # what copper did last Tuesday. Appending here rather than
+            # in a separate command, because the one store this repo
+            # let go stale -- data/history_candles.db, nineteen days
+            # -- was the one whose only writer was a human.
+            remember_quotes((data or {}).get("quotes"))
         except OSError as exc:
             warn(f"[PREMARKET] COULD NOT SAVE {self.store_path}: {exc}. The "
                  f"overnight numbers were collected but are NOT stored, so "
@@ -436,3 +445,255 @@ class PreMarket:
         if snap["failed"]:
             lines.append(f"  could not fetch: {', '.join(snap['failed'])}")
         return "\n".join(lines)
+
+
+# ==========================================================
+#  THE GLOBAL NUMBERS WERE READ DAILY AND KEPT FOR A DAY
+# ==========================================================
+#
+#     "do the sector polarity build next"
+#                                 -- operator, 19 August 2026
+#
+# THE PREREQUISITE NOBODY ASKED FOR, FOUND WHILE STARTING IT
+# ----------------------------------------------------------
+# His question is the crude-oil example from his own framework: the
+# same event moves airlines down and oil producers up, and the bot
+# should know which side a company is on. core/sector_map.sides()
+# answers the "which side" half.
+#
+# Answering "does that actually predict anything" needs the OTHER
+# half -- a history of commodity moves to test against. There was
+# none. data/premarket.json holds 21 instruments including crude,
+# copper, gold, silver and natural gas, and refresh() OVERWRITES it
+# every morning. The bot has read the copper price every day for
+# months and cannot say what copper did last Tuesday.
+#
+# Same shape as data/history_candles.db stopping on 31 July: a store
+# the reasoning depends on, with nobody keeping it. That one was
+# nineteen days stale. This one was never kept at all.
+#
+# So this appends every reading to a real series, and can recover the
+# past from Yahoo, which serves a year of daily bars on the same
+# endpoint refresh() already uses -- only the range differs.
+#
+# NO NEW STORE FILE FOR A NEW IDEA. This lives beside the fetcher
+# that produces the numbers, so the thing that reads them and the
+# thing that keeps them cannot drift apart.
+
+HISTORY_PATH = os.path.join("data", "global_history.db")
+
+HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS global_bars (
+    key         TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    close       REAL,
+    change_pct  REAL,
+    PRIMARY KEY (key, date)
+);
+CREATE INDEX IF NOT EXISTS ix_global_key ON global_bars (key);
+CREATE INDEX IF NOT EXISTS ix_global_date ON global_bars (date);
+"""
+
+#: Yahoo's chart endpoint, asked for a year instead of two days.
+#: refresh() uses the same URL with range=2d -- one endpoint, one
+#: parser, two windows.
+HISTORY_URL = ("https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+               "?range={range}&interval=1d")
+
+
+def _history_conn(path=HISTORY_PATH):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=10)
+    conn.executescript(HISTORY_SCHEMA)
+    conn.commit()
+    return conn
+
+
+def remember_quotes(quotes, on_date=None, path=HISTORY_PATH):
+    """Append today's readings to the series. Never raises.
+
+    Called from refresh() so the amnesia is cured going forward
+    without anybody having to remember a command -- the lesson of
+    data/history_candles.db, which had exactly one writer and it was
+    a human.
+
+    ON CONFLICT DO NOTHING: re-running a morning costs nothing, and a
+    backfilled bar is never overwritten by a live snapshot of the same
+    day.
+    """
+    if not quotes:
+        return 0
+    day = str(on_date or datetime.now().date().isoformat())[:10]
+    rows = []
+    for key, quote in (quotes or {}).items():
+        if not isinstance(quote, dict):
+            continue
+        last = quote.get("last")
+        if last is None:
+            continue
+        try:
+            rows.append((str(key), day, float(last),
+                         None if quote.get("change_pct") is None
+                         else float(quote["change_pct"])))
+        except (TypeError, ValueError):
+            continue
+    if not rows:
+        return 0
+    conn = None
+    try:
+        conn = _history_conn(path)
+        conn.executemany(
+            "INSERT INTO global_bars (key, date, close, change_pct) "
+            "VALUES (?,?,?,?) ON CONFLICT DO NOTHING", rows)
+        conn.commit()
+        return len(rows)
+    except Exception as exc:                                # noqa: BLE001
+        diagnostic(f"[GLOBAL] Could not store the series "
+                   f"({type(exc).__name__}). Today's reading still "
+                   f"reached data/premarket.json.")
+        return 0
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:                               # noqa: BLE001
+                pass
+
+
+def parse_yahoo_series(payload):
+    """[(date, close)] oldest first out of Yahoo's chart JSON.
+
+    Separate from parse_yahoo() above because that one answers "what
+    is it now" and throws the series away. Same payload, different
+    question.
+    """
+    out = []
+    try:
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        result = ((payload or {}).get("chart") or {}).get("result")
+        if not result:
+            return []
+        block = result[0]
+        stamps = block.get("timestamp") or []
+        closes = (((block.get("indicators") or {}).get("quote")
+                   or [{}])[0].get("close") or [])
+        for stamp, close in zip(stamps, closes):
+            if close is None:
+                continue
+            day = datetime.utcfromtimestamp(int(stamp)).date().isoformat()
+            out.append((day, float(close)))
+    except Exception:                                       # noqa: BLE001
+        return []
+    return out
+
+
+def backfill_history(fetcher=None, window="1y", keys=None,
+                     path=HISTORY_PATH):
+    """Recover the past from Yahoo. Returns bars written.
+
+    change_pct is computed from the series itself rather than taken
+    from a field, because a backfilled bar has no "previous close"
+    attached -- the previous bar IS the previous close.
+    """
+    if fetcher is None:
+        fetcher = requests_history_fetcher()
+    wanted = set(keys) if keys else None
+    written = 0
+    conn = None
+    try:
+        conn = _history_conn(path)
+        for key, symbol, _label, _group in SOURCES:
+            if wanted and key not in wanted:
+                continue
+            try:
+                series = parse_yahoo_series(fetcher(symbol, window))
+            except Exception as exc:                        # noqa: BLE001
+                warn(f"[GLOBAL] {key}: {type(exc).__name__}")
+                continue
+            rows = []
+            previous = None
+            for day, close in series:
+                change = (None if previous in (None, 0)
+                          else round((close - previous) / previous * 100, 4))
+                rows.append((key, day, close, change))
+                previous = close
+            if rows:
+                conn.executemany(
+                    "INSERT INTO global_bars (key, date, close, "
+                    "change_pct) VALUES (?,?,?,?) ON CONFLICT DO NOTHING",
+                    rows)
+                conn.commit()
+                written += len(rows)
+            if getattr(fetcher, "throttle", False):
+                time.sleep(0.4)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:                               # noqa: BLE001
+                pass
+    return written
+
+
+def requests_history_fetcher(timeout=15):
+    """Live series fetcher. Injected the same way requests_fetcher()
+    is, so tests never touch the network."""
+    from urllib.parse import quote
+
+    def _get(symbol, window="1y"):
+        import requests
+        url = HISTORY_URL.format(symbol=quote(symbol, safe=""),
+                                 range=window)
+        response = requests.get(
+            url, timeout=timeout,
+            headers={"User-Agent":
+                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        response.raise_for_status()
+        return response.text
+
+    _get.throttle = True
+    return _get
+
+
+def series(key, since=None, path=HISTORY_PATH):
+    """[(date, close, change_pct)] oldest first. [] when unknown."""
+    if not os.path.exists(path):
+        return []
+    conn = None
+    try:
+        conn = sqlite3.connect("file:" + path + "?mode=ro", uri=True)
+        sql = ("SELECT date, close, change_pct FROM global_bars "
+               "WHERE key = ?")
+        params = [str(key)]
+        if since:
+            sql += " AND date >= ?"
+            params.append(str(since))
+        sql += " ORDER BY date"
+        return conn.execute(sql, params).fetchall()
+    except Exception:                                       # noqa: BLE001
+        return []
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:                               # noqa: BLE001
+                pass
+
+
+def moves(key, threshold_pct=1.0, since=None, path=HISTORY_PATH):
+    """Sessions where this instrument moved more than `threshold_pct`.
+
+    [(date, change_pct)] -- the days worth asking "and what did the
+    Indian names do". A quarter-percent drift in copper is not an
+    event and measuring against it only adds noise.
+    """
+    out = []
+    for day, _close, change in series(key, since=since, path=path):
+        if change is None:
+            continue
+        if abs(change) >= threshold_pct:
+            out.append((day, change))
+    return out

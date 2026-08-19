@@ -48,11 +48,14 @@ The entry stop was fixed on 18 August. PEAK_TRAIL_PCT was left at a
 flat 2.5% from the peak -- half an ordinary day for ICIL (4.99%) and
 more than a whole one for POLYCAB (1.79%).
 
-GAP 4 -- NOT FIXED HERE, AND NAMED SO IT IS NOT LOST
+GAP 4 -- NAMED ON 19 AUGUST, BUILT THE SAME DAY
 core/sector_map.sides() knows which companies a commodity move helps
-and which it hurts. Nothing on the entry path consults it, so a
-copper spike still scores a cable maker on the same footing as a
-copper miner. That is an entry-rule change and it gets its own pass.
+and which it hurts, and nothing on the ranking path consulted it: a
+copper spike scored a cable maker on the same footing as a copper
+miner. He asked for the build straight after reading this, it was
+measured over a year of daily bars first, and the guard test at the
+bottom of this file was INVERTED rather than deleted -- it had been
+written to fail on exactly this day.
 
 Author : H&M Opportunity Trader
 ==========================================================
@@ -302,18 +305,69 @@ def test_the_switch_restores_the_flat_trail(monkeypatch):
 # GAP 4: NAMED, NOT SILENTLY DROPPED
 # ---------------------------------------------------------------
 
-def test_the_sector_polarity_is_still_display_only():
-    """core/sector_map.sides() knows a copper spike helps HINDCOPPER
-    and hurts POLYCAB. Nothing on the entry path asks it yet.
+def test_the_sector_polarity_arrived_with_its_measurement():
+    """---- THIS TEST WAS WRITTEN TO FAIL TODAY. 19 August 2026. ----
 
-    This test FAILS THE DAY THAT CHANGES, on purpose: wiring commodity
-    polarity into entries is a rule with money behind it and it gets
-    argued in daylight, not noticed later in a diff.
+    Yesterday it read "the sector polarity is still display only" and
+    asserted no gate consulted it, so the wiring could not happen
+    quietly in a diff. He asked for the build; it was measured over a
+    year of daily bars first. The assertion is INVERTED rather than
+    deleted, and it very nearly passed for the wrong reason -- the
+    ranker calls commodity_tilt(), not sides(), so the old grep would
+    have gone on saying "display only" about a scorer that had
+    already been wired.
+
+    What it guards from here: the tilt may enter the SCORE only, it
+    stays bounded, and it stays switchable.
     """
-    for name in ("ranker.py", "auto_entry.py", "engine.py"):
+    from core import rules, sector_map
+
+    src = (ROOT / "core" / "ranker.py").read_text(encoding="utf-8")
+    code = chr(10).join(ln for ln in src.splitlines()
+                        if not ln.lstrip().startswith("#"))
+    assert "commodity_tilt" in code, "the build was undone"
+    assert "RANK_BY_COMMODITY_POLARITY" in code, "no switch"
+    assert hasattr(rules, "RANK_BY_COMMODITY_POLARITY")
+    assert 0.5 < sector_map.TILT_FLOOR < 1.0 < sector_map.TILT_CEILING < 1.5
+
+
+def test_the_tilt_reorders_and_never_refuses():
+    """A commodity reading is worth reordering a list. It is nowhere
+    near strong enough to block a setup that passed every other gate
+    -- the measured spread is about a tenth of a percent."""
+    src = (ROOT / "core" / "ranker.py").read_text(encoding="utf-8")
+    block = src[src.find("tilt, tilt_why = 1.0, None"):
+                src.find("out.append(Candidate")]
+    assert "refuse(" not in block
+    assert "continue" not in block
+
+
+def test_the_entry_path_still_does_not_read_polarity():
+    """auto_entry and engine decide whether to BUY. Neither may ask."""
+    for name in ("auto_entry.py", "engine.py"):
         src = (ROOT / "core" / name).read_text(encoding="utf-8")
-        code = "\n".join(ln for ln in src.splitlines()
-                         if not ln.lstrip().startswith("#"))
-        assert "sector_map.sides" not in code, (
-            f"core/{name} now trades on commodity polarity -- that "
-            f"needs its own measurement and its own tests")
+        code = chr(10).join(ln for ln in src.splitlines()
+                            if not ln.lstrip().startswith("#"))
+        for banned in ("sector_map.sides", "commodity_tilt"):
+            assert banned not in code, (
+                f"core/{name} now gates on commodity polarity")
+
+
+def test_a_stock_on_neither_side_is_left_alone():
+    """HINDALCO makes the metal it is exposed to, so sides() cannot
+    tell producer from converter and says so. UNKNOWN must never be
+    quietly treated as one of the two."""
+    from core import sector_map
+    tilt, why = sector_map.commodity_tilt("HINDALCO")
+    assert tilt == 1.0 and why is None
+
+
+def test_the_tilt_reads_only_completed_sessions():
+    """The series carries a row for TODAY, and while the market is
+    open that row is half a session. Reading it asks a different
+    question from the one that was measured -- and a tilt built on
+    half a day changes its mind at lunchtime."""
+    src = (ROOT / "core" / "sector_map.py").read_text(encoding="utf-8")
+    body = src[src.find("def commodities_that_moved"):
+               src.find("def commodity_tilt")]
+    assert "< cutoff" in body, "today's partial bar is being read"
