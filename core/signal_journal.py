@@ -79,6 +79,15 @@ CREATE TABLE IF NOT EXISTS signals (
     attempt       INTEGER,
     sector        TEXT,
     confirmations INTEGER,
+    -- WHAT THE RANKER THOUGHT IT WAS WORTH. 19 August 2026.
+    --
+    --     "whats the use for trader on seeing the score ?"
+    --
+    -- None yet, and that is the point: nothing had ever checked
+    -- whether a higher score leads to a better outcome, because the
+    -- score was never stored beside the signal. It came off his card
+    -- and landed here, so the question stops being an opinion.
+    score        REAL,
     PRIMARY KEY (trade_date, symbol, direction)
 );
 """
@@ -102,6 +111,14 @@ class SignalJournal:
         conn = sqlite3.connect(self.db_path, timeout=5)
         if not self._ready:
             conn.executescript(SCHEMA)
+            # CREATE TABLE IF NOT EXISTS does nothing to a table that
+            # is already there, so a store written before 19 August
+            # needs the column added explicitly. Wrapped because the
+            # second run must be a no-op, not an error.
+            try:
+                conn.execute("ALTER TABLE signals ADD COLUMN score REAL")
+            except Exception:                              # noqa: BLE001
+                pass
             conn.commit()
             self._ready = True
         return conn
@@ -112,7 +129,7 @@ class SignalJournal:
                orb_low=None, taken=False, refused_why=None,
                open_positions=None, when=None, volume_mult=None,
                news_kind=None, filing_kind=None, results_grade=None,
-               attempt=None, sector=None):
+               attempt=None, sector=None, score=None):
         """Buffer one signal. Flushed by flush(), not written per tick.
 
         Buffered deliberately: this is called from the tick path, and
@@ -143,7 +160,7 @@ class SignalJournal:
                         "volume_mult": None, "news_kind": None,
                         "filing_kind": None, "results_grade": None,
                         "attempt": None, "sector": None,
-                        "confirmations": 0,
+                        "confirmations": 0, "score": None,
                     }
                     self._pending[key] = row
                 row["last_seen"] = when.strftime("%Y-%m-%d %H:%M:%S")
@@ -160,7 +177,8 @@ class SignalJournal:
                                      ("filing_kind", filing_kind),
                                      ("results_grade", results_grade),
                                      ("attempt", attempt),
-                                     ("sector", sector)):
+                                     ("sector", sector),
+                                     ("score", score)):
                     if value is not None:
                         row[field] = value
                 row["confirmations"] = sum([
@@ -195,12 +213,12 @@ class SignalJournal:
                 "first_seen, last_seen, break_price, orb_high, orb_low, "
                 "taken, refused_why, fired_count, open_positions_at_signal, "
                 "volume_mult, news_kind, filing_kind, results_grade, "
-                "attempt, sector, confirmations) "
+                "attempt, sector, confirmations, score) "
                 "VALUES (:trade_date, :symbol, :direction, :first_seen, "
                 ":last_seen, :break_price, :orb_high, :orb_low, :taken, "
                 ":refused_why, :fired_count, :open_positions_at_signal, "
                 ":volume_mult, :news_kind, :filing_kind, :results_grade, "
-                ":attempt, :sector, :confirmations) "
+                ":attempt, :sector, :confirmations, :score) "
                 "ON CONFLICT(trade_date, symbol, direction) DO UPDATE SET "
                 "last_seen=excluded.last_seen, taken=excluded.taken, "
                 "refused_why=excluded.refused_why, "
@@ -210,7 +228,7 @@ class SignalJournal:
                 "filing_kind=excluded.filing_kind, "
                 "results_grade=excluded.results_grade, "
                 "attempt=excluded.attempt, sector=excluded.sector, "
-                "confirmations=excluded.confirmations",
+                "confirmations=excluded.confirmations, score=excluded.score",
                 rows)
             conn.commit()
             conn.close()

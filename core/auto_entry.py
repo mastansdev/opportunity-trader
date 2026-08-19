@@ -459,6 +459,40 @@ def early_rows(movers, now=None, plan_of=None, evidence_of=None):
     return out
 
 
+def _journal_pick(engine, row, taken, why):
+    """Record a ranked pick and what became of it. Never raises.
+
+    ---- THE RANKED LANE KEPT NO RECORD. 19 August 2026. ----
+
+        "whats the use for trader on seeing the score ?"
+
+    None yet -- and it could not even be checked, because only the
+    STRUCTURAL lane wrote to core/signal_journal.py. Every ranked
+    pick, its score, and whether it reached his phone existed for one
+    loop and was gone. So "does a higher score lead to a better
+    outcome" had no data behind it, in either direction.
+
+    Buffered, not written: record() keeps a dict keyed by symbol and
+    the heartbeat flushes it, so this costs no disk on the tick path.
+    """
+    journal = getattr(engine, "signal_journal", None)
+    if journal is None:
+        return
+    try:
+        journal.record(
+            str(row.get("symbol") or "").upper(),
+            "LONG",
+            break_price=_num(row.get("ltp")),
+            taken=bool(taken),
+            refused_why=None if taken else str(why or "")[:200],
+            volume_mult=_num(row.get("volume_x")),
+            sector=row.get("sector"),
+            score=_num(row.get("score")),
+        )
+    except Exception as exc:                               # noqa: BLE001
+        _broke("signal journal (the pick is unrecorded)", exc)
+
+
 def _alert_lines(row, plan):
     """Everything the board already knows about this pick, on one card.
 
@@ -742,6 +776,7 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
         why = refuse_reason(row, engine, now=now, held=held,
                             max_positions=seats)
         if why:
+            _journal_pick(engine, row, False, why)
             out.append({"symbol": symbol, "taken": False, "why": why,
                         "score": _num(row.get("score"))})
             continue
@@ -799,6 +834,8 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                                    "trading. Use the dashboard BUY.")
                 except Exception as exc:                   # noqa: BLE001
                     _broke("alert (he never saw this pick)", exc)
+            _journal_pick(engine, row, False,
+                          "ALERT ONLY -- alerted, operator decides")
             out.append({"symbol": symbol, "taken": False,
                         "score": _num(row.get("score")),
                         "why": "ALERT ONLY -- bot not trading, "
@@ -826,6 +863,7 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                         "why": f"the order path refused it ({exc})"})
             continue
         held.add(symbol)
+        _journal_pick(engine, row, True, detail)
         out.append({"symbol": symbol, "taken": True, "why": detail,
                     "score": _num(row.get("score"))})
     return out
