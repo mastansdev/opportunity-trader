@@ -329,12 +329,22 @@ def test_the_board_hands_the_lane_the_engines_own_answer():
 
 
 def test_auto_entry_still_holds_no_engine_reference():
-    """It is handed evidence_of, mtf_of, plan_of and adv_of. A module
-    on the entry path that reaches into the Engine is a module two
-    people have to keep in step."""
-    src = (ROOT / "core" / "auto_entry.py").read_text(encoding="utf-8")
-    body = src[src.find("def early_rows"):src.find("def refuse_reason")]
-    code = "\n".join(ln for ln in body.splitlines()
-                     if not ln.lstrip().startswith("#"))
+    """early_rows() is HANDED evidence_of, mtf_of, plan_of and adv_of.
+    A function on the entry path that reaches into the Engine itself
+    is one two people have to keep in step.
+
+    ---- SLICE THE FUNCTION, NOT THE NEIGHBOURHOOD. 19 Aug 2026 ----
+    This read from "def early_rows" to whatever def it happened to
+    know came next, and two helpers were later added in between -- one
+    of them handed the engine deliberately, to write the journal. The
+    invariant was never "this word may not appear nearby".
+    """
+    import inspect
+
+    from core import auto_entry
+
+    code = chr(10).join(
+        ln for ln in inspect.getsource(auto_entry.early_rows).splitlines()
+        if not ln.lstrip().startswith("#"))
     assert "_capture_reason" not in code
     assert "evidence_of" in code

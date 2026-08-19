@@ -478,9 +478,33 @@ def _journal_pick(engine, row, taken, why):
     journal = getattr(engine, "signal_journal", None)
     if journal is None:
         return
+    symbol = str(row.get("symbol") or "").upper()
+
+    # ---- THE RANKED LANE RECORDED HALF A ROW. 19 Aug 2026. ----
+    #
+    # The first version passed the score and left news_kind NULL, so
+    # RAILTEL -- whose alert quoted a Rs 166.80 crore EPFO order --
+    # was recorded as a scored pick with no news against it. The
+    # structural lane fills those columns from _capture_reason(); the
+    # lane that actually produces his alerts did not, which would have
+    # left "does news predict" unanswerable for exactly the picks that
+    # reach his phone.
+    #
+    # Same source as the alert sentence and the structural lane. One
+    # answer per stock per morning, or the record contradicts the
+    # message again.
+    reason = {}
+    try:
+        capture = getattr(engine, "_capture_reason", None)
+        if capture is not None:
+            reason = capture(symbol) or {}
+    except Exception as exc:                               # noqa: BLE001
+        _broke("reason capture for the journal", exc)
+        reason = {}
+
     try:
         journal.record(
-            str(row.get("symbol") or "").upper(),
+            symbol,
             "LONG",
             break_price=_num(row.get("ltp")),
             taken=bool(taken),
@@ -488,6 +512,9 @@ def _journal_pick(engine, row, taken, why):
             volume_mult=_num(row.get("volume_x")),
             sector=row.get("sector"),
             score=_num(row.get("score")),
+            news_kind=reason.get("news_kind"),
+            filing_kind=reason.get("filing_kind"),
+            results_grade=reason.get("results_grade"),
         )
     except Exception as exc:                               # noqa: BLE001
         _broke("signal journal (the pick is unrecorded)", exc)

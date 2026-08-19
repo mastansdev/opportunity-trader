@@ -171,12 +171,63 @@ class DecisionLog:
         A strategy is also its declines. If "no reason found" rejects
         eleven names and eight of them run, the mechanism gate is wrong
         and only this table can say so.
+
+        ---- TWO PRODUCERS, TWO SHAPES. 19 August 2026. ----
+
+        Found in his live log, once, and silently:
+
+            [RANK] Could not record: invalid literal for int() with
+                   base 10: 'up only -13.1% -- not moving'
+
+        Two modules publish a key called "refusals" and they do not
+        agree on what it holds:
+
+            core/ranker.py:930   {reason: count}    -- a census
+            core/select.py:339   {symbol: reason}   -- a per-stock log
+
+        This method expected the first and int()'d the value. Handed
+        the second it raised -- and the int() sat OUTSIDE the try, so
+        ONE unreadable entry threw away the WHOLE cycle's census,
+        including every well-formed count beside it.
+
+        The refusal table is how he finds out whether "no reason
+        found x22" protected him or blinded him. Losing a cycle of it
+        to a shape mismatch is exactly the kind of quiet gap this
+        project keeps finding.
+
+        Both shapes are meaningful and both are now recorded: values
+        that are numbers are counts, values that are sentences are
+        tallied by how often each sentence appears. Anything else is
+        skipped and SAID, rather than taking the batch down with it.
         """
         if not self._ready or not counts:
             return 0
         now = when or datetime.now()
+
+        tally = {}
+        skipped = 0
+        for key, value in counts.items():
+            if isinstance(value, bool):
+                skipped += 1
+                continue
+            if isinstance(value, (int, float)):
+                tally[str(key)] = tally.get(str(key), 0) + int(value)
+            elif isinstance(value, str) and value.strip():
+                # {symbol: reason} -- the reason is what is counted,
+                # because "how often was this refusal used" is the
+                # question the table answers.
+                tally[value.strip()] = tally.get(value.strip(), 0) + 1
+            else:
+                skipped += 1
+        if skipped:
+            from core.logger import diagnostic
+            diagnostic(f"[DECISIONS] {skipped} refusal entr(ies) in an "
+                       f"unreadable shape were skipped; the rest were "
+                       f"recorded.")
+        if not tally:
+            return 0
         rows = [(now.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d %H:%M:%S"),
-                 str(k), int(v)) for k, v in counts.items()]
+                 reason, count) for reason, count in tally.items()]
         try:
             with self._lock:
                 conn = self._connect()
