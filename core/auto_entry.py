@@ -663,7 +663,19 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
             continue
 
         plan = row["plan"]
-        detail = (f"{symbol} BUY {plan['qty']} @ {row.get('ltp')} "
+        # ---- THE ONE NUMBER THE ALERT DROPPED. 19 Aug 2026. ----
+        #
+        #     "alerts are recving but random alerts i'm getting"
+        #
+        # The ranker scores every row and this function SORTS BY IT --
+        # and then built a sentence that threw it away. So RAILTEL at
+        # 30.7 and KTKBANK at 5.5 arrived on his phone looking exactly
+        # alike, in whatever order the clock produced them. He could
+        # not tell the best setup of the day from the weakest, because
+        # the bot never told him.
+        _score = _num(row.get("score"))
+        detail = ((f"[score {_score:.1f}] " if _score is not None else "")
+                  + f"{symbol} BUY {plan['qty']} @ {row.get('ltp')} "
                   f"stop {plan['stop']} target {plan.get('target')} "
                   f"-- {row.get('why') or 'ranked setup'}")
 

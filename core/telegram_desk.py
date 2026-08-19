@@ -191,6 +191,10 @@ class TelegramDesk:
         self._pushed = 0
         # SCORE walks 19M candles. Once per session is enough.
         self._score_cache = None
+        # Every ranked score pushed today, so each new alert can say
+        # where it stands. Reset by date -- see _rank_today().
+        self._score_day = None
+        self._scores = []
 
     # ---------------- outbound ----------------
 
@@ -268,6 +272,45 @@ class TelegramDesk:
             diagnostic(f"[TG] push failed: {type(exc).__name__}")
             return False
 
+    def _rank_today(self, message):
+        """Where this alert stands against the ones already sent.
+
+        ---- ARRIVAL ORDER IS NOT QUALITY ORDER. 19 Aug 2026. ----
+
+            "alerts are recving but random alerts i'm getting"
+
+        A live stream cannot be sorted -- the 11:00 pick does not
+        exist when the 09:31 one is sent. What CAN be said is where
+        each one stands against everything sent so far, and that is
+        the difference between a list and a queue.
+
+        The score arrives already formatted by core/auto_entry.py; it
+        is read back rather than recomputed, so the phone and the
+        board can never disagree about which pick was stronger.
+        Returns (note, is_best) and never raises.
+        """
+        import re as _re
+        found = _re.search(r"\[score (-?[0-9.]+)\]", message or "")
+        if not found:
+            return None, False
+        try:
+            score = float(found.group(1))
+        except ValueError:
+            return None, False
+        today = datetime.now().strftime("%Y-%m-%d")
+        with self._lock:
+            if self._score_day != today:
+                self._score_day, self._scores = today, []
+            self._scores.append(score)
+            ranked = sorted(self._scores, reverse=True)
+            place = ranked.index(score) + 1
+            total = len(ranked)
+        if total == 1:
+            return "first pick of the day", True
+        if place == 1:
+            return f"BEST of {total} so far today", True
+        return f"#{place} of {total} today", False
+
     def _card(self, symbol, kind, message):
         """The envelope. What is inside it is untouched."""
         head, verb = self.HEADS.get(kind, (None, None))
@@ -298,7 +341,12 @@ class TelegramDesk:
             head = "BREAKOUT (no evidence)"
         elif "[EVIDENCE:" in message:
             head = "OPPORTUNITY + EVIDENCE"
+        standing, is_best = self._rank_today(message)
+        if is_best:
+            head = "** " + head
         card = f"*{head} -- {symbol}*\n{message}"
+        if standing:
+            card += f"\n_{standing}_"
         if symbol and symbol != "?":
             card += f"\n\n`{verb} {symbol}`   _(then_ `YES`_)_"
         return card
@@ -711,8 +759,19 @@ class TelegramDesk:
         row = next((r for r in (ranked.get("rows") or [])
                     if str(r.get("symbol", "")).upper() == symbol), None)
         if row:
-            return (f"*{symbol}* is on the board.\n"
-                    f"{row.get('mechanism') or ''}")
+            # ---- ON THE BOARD IS NOT ON HIS PHONE. 19 Aug ----
+            # RAILTEL sat on the board at 30.7 and never
+            # alerted, and this replied "it is on the board" --
+            # true, and not the question he was asking.
+            routed = next((r for r in (snap.get("routing") or [])
+                           if str(r.get("symbol", "")).upper()
+                           == symbol), None)
+            out = (f"*{symbol}* is on the board.\n"
+                   f"{row.get('mechanism') or ''}")
+            if routed and not routed.get("taken"):
+                out += (f"\n\n_No alert sent: "
+                        f"{routed.get('why')}_")
+            return out
         refused = next((r for r in (ranked.get("refused_rows") or [])
                         if str(r.get("symbol", "")).upper() == symbol), None)
         if refused:

@@ -219,3 +219,41 @@ def _atr_pct_from(rows):
     if last_close <= 0:
         return None
     return (sum(ranges) / len(ranges)) / last_close * 100.0
+
+def scaled_stop_pct(symbol, mult, floor_pct, ceiling_pct, fallback_pct,
+                    as_of=None):
+    """This stock's own daily range x `mult`, bounded, as a PERCENT.
+
+    ---- ONE DEFINITION, THREE CALLERS. 19 August 2026. ----
+
+    core/engine.py sized the entry stop from the daily range on
+    18 August and core/trailing_stop.py followed on the 19th. A third
+    site was missed: core/position_plan.py, which decides whether a
+    ranked pick can be sized AT ALL -- and therefore whether it ever
+    reaches his phone.
+
+    That site had its own rule, and it did not widen a stop, it
+    REFUSED the trade:
+
+        RAILTEL     score 30.68   structural stop 0.10%   ATR 2.08%
+        KIRLOSBROS  score 17.95   structural stop 0.14%   ATR 3.72%
+
+    Both were the day's best setups. Both were dropped because a
+    day-low-derived stop sat a tenth of a percent below the entry --
+    which is not a stop, it is noise -- and the answer to a bad stop
+    level is a better stop, not a discarded opportunity.
+
+    Everything scaling a distance to a stock now comes through here,
+    so the three cannot drift onto different ideas of how much a stock
+    moves. `fallback_pct` is returned whenever the range cannot be
+    measured: a distance derived from a volatility nobody measured is
+    worse than an honestly flat one.
+    """
+    try:
+        daily = daily_atr_pct(symbol, as_of=as_of)
+    except Exception:                                       # noqa: BLE001
+        daily = None
+    if not daily or daily <= 0:
+        return float(fallback_pct)
+    wanted = float(mult) * float(daily)
+    return max(float(floor_pct), min(float(ceiling_pct), wanted))

@@ -1804,7 +1804,19 @@ def main():
                     _early = _snap.get("early")
                     _rows = _rows + ((_early or {}).get("rows") or [])
                     if _rows:
-                        auto_entry.take(
+                        # ---- THE REASON WAS COMPUTED AND BINNED ----
+                        #      19 August 2026.
+                        #
+                        #     "alerts are recving but random alerts"
+                        #
+                        # take() returns {"symbol","taken","why"} for
+                        # every ranked pick -- its own docstring calls
+                        # it "for the record" -- and this call threw
+                        # the record away. So on 19 August RAILTEL
+                        # scored 30.7, was KEPT by the ranker, never
+                        # reached his phone, and nothing anywhere
+                        # could say why. Kept now, and published.
+                        engine.routing_decisions = auto_entry.take(
                             _rows, engine,
                             now=datetime.now(),
                             security_id_of=master_loader.security_id,

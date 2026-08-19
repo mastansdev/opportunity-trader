@@ -115,7 +115,8 @@ def stop_for(entry, side, day_low=None, day_high=None, atr=None):
 
 
 def plan(entry, side, day_low=None, day_high=None, atr=None,
-         margin_pct=None, risk_rs=None, budget_rs=None):
+         margin_pct=None, risk_rs=None, budget_rs=None,
+         symbol=None):
     """The whole trade, or an honest refusal.
 
     Returns:
@@ -141,8 +142,54 @@ def plan(entry, side, day_low=None, day_high=None, atr=None,
 
     distance = abs(entry - stop)
     stop_pct = distance / entry * 100.0
+
+    # ---- A BAD STOP LEVEL IS NOT A BAD TRADE. 19 August 2026. ----
+    #
+    #     "alerts are recving but random alerts i'm getting"
+    #
+    # This refused outright, and it was the single biggest filter on
+    # what reached his phone. The two best setups of 19 August:
+    #
+    #     RAILTEL     score 30.68   struct stop 0.10%   daily ATR 2.08%
+    #     KIRLOSBROS  score 17.95   struct stop 0.14%   daily ATR 3.72%
+    #
+    # RAILTEL was up 4.0% while its sector fell 0.7%, on 28.4x its
+    # normal volume, on a Rs 166.80 crore EPFO work order -- the
+    # highest score of the day by a distance. It never alerted, and
+    # KTKBANK at 5.5 did, because KTKBANK's day low happened to sit
+    # far enough below its price.
+    #
+    # So what reached his phone was filtered by WHERE THE DAY'S LOW
+    # HAPPENED TO BE, not by the quality of the opportunity -- and a
+    # stock making highs on a real event is exactly the shape whose
+    # day low ends up too close. The filter was strongest against the
+    # setups it should have been weakest against.
+    #
+    # A stop a tenth of a percent below entry is not a stop, it is
+    # noise. The answer is a stop that fits the stock, which is what
+    # core/engine.py and core/trailing_stop.py already use. Same
+    # source, same bounds -- see core/atr.scaled_stop_pct().
+    #
+    # TOO FAR still refuses, below. That one is a real statement about
+    # the trade: the loss would not be small.
     if stop_pct < MIN_STOP_DISTANCE_PCT:
-        return {"ok": False, "why": "stop too close -- noise would take it"}
+        widened = None
+        if symbol:
+            try:
+                from core.atr import scaled_stop_pct
+                from config import DAILY_ATR_STOP_MULT
+                widened = scaled_stop_pct(
+                    symbol, DAILY_ATR_STOP_MULT, MIN_STOP_DISTANCE_PCT,
+                    MAX_STOP_DISTANCE_PCT, MIN_STOP_DISTANCE_PCT)
+            except Exception:                              # noqa: BLE001
+                widened = None
+        if not widened:
+            return {"ok": False,
+                    "why": "stop too close and no daily range to widen it"}
+        stop_pct = widened
+        distance = entry * stop_pct / 100.0
+        stop = round(entry - distance if side == "BUY"
+                     else entry + distance, 2)
     if stop_pct > MAX_STOP_DISTANCE_PCT:
         return {"ok": False, "why": "stop too far -- the loss would not be small"}
 

@@ -885,6 +885,12 @@ class DashboardState:
             # is how a constant from 9 August passed for a live
             # balance for nine days.
             "broker_funds": self._safe_broker_funds(),
+            # WHY EACH RANKED PICK DID OR DID NOT ALERT. 19 Aug 2026.
+            # The ranker's own refusals are a different list -- those
+            # are stocks it never ranked. This is the gap between
+            # "kept by the ranker" and "reached his phone", which was
+            # invisible and is where the best pick of the day went.
+            "routing": self._safe_routing(),
             "advances": breadth["advances"],
             "declines": breadth["declines"],
             "unchanged": breadth["unchanged"],
@@ -2928,7 +2934,11 @@ class DashboardState:
                     source.get("ltp"), row.get("action"),
                     day_low=source.get("day_low"),
                     day_high=source.get("day_high"),
-                    margin_pct=mtf.get("margin_pct"))
+                    margin_pct=mtf.get("margin_pct"),
+                    # Without the symbol the plan cannot widen a stop
+                    # that is too close and refuses instead -- which
+                    # dropped the best two picks of 19 August.
+                    symbol=row.get("symbol"))
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[RANK] Could not plan positions: {exc}")
 
@@ -3186,7 +3196,8 @@ class DashboardState:
                     mover.get("ltp"), "BUY",
                     day_low=mover.get("day_low"),
                     day_high=mover.get("day_high"),
-                    margin_pct=mtf.get("margin_pct"))
+                    margin_pct=mtf.get("margin_pct"),
+                    symbol=mover.get("symbol"))
             except Exception as exc:                       # noqa: BLE001
                 diagnostic(f"[EARLY] Could not size "
                            f"{mover.get('symbol')}: {exc}")
@@ -5654,6 +5665,14 @@ class DashboardState:
             if str(row.get("symbol") or "").upper() == symbol:
                 return row.get("change_pct")
         return None
+
+    def _safe_routing(self):
+        """What take() decided about each ranked pick. Never raises."""
+        try:
+            return list(getattr(self.engine, "routing_decisions", None)
+                        or [])
+        except Exception:                                  # noqa: BLE001
+            return []
 
     def _safe_broker_funds(self):
         """What Dhan last said, and when. Never raises, never calls out.
