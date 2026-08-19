@@ -408,6 +408,44 @@ def liveness(row):
         round(off_high, 2) if off_high is not None else None)
 
 
+
+def _best_of_each_sector(rows):
+    """Interleave by sector: every sector's best, then every second.
+
+    ---- WHY NOT SIMPLY CAP AT N PER SECTOR. 19 August 2026. ----
+    A cap throws away a real setup on a day when one sector is the
+    whole story. This reorders instead, so the leaders come first and
+    nothing is lost. The book's own limits then decide how many are
+    taken, which is where that decision has always belonged.
+
+    Order WITHIN a sector is preserved exactly as it arrived, so the
+    liveness-then-score rule above still holds inside each group.
+    A row with no sector is its own group -- an unknown sector must
+    not silently become one big bucket that gets rationed hardest.
+    """
+    groups = {}
+    order = []
+    for index, row in enumerate(rows or []):
+        sector = str((row or {}).get("sector") or "").strip().upper()
+        key = sector or f"__unknown_{index}"
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(row)
+
+    out = []
+    depth = 0
+    while True:
+        added = False
+        for key in order:
+            group = groups[key]
+            if depth < len(group):
+                out.append(group[depth])
+                added = True
+        if not added:
+            return out
+        depth += 1
+
 def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
          adv_of=None, blocked=None, held=None, mtf_of=None, top=6,
          now=None, open_of=None):
@@ -814,6 +852,27 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
     # ones. We did not measure it, so we must not demote it -- that is
     # the same "unasked is not failed" rule the MTF gate follows.
     out.sort(key=lambda c: (c.get("state") == "fading", -c["score"]))
+
+    # ---- FIVE CHEMICALS NAMES IS ONE BET, NOT FIVE. 19 Aug 2026 ----
+    #
+    #     "which events will create opportunity to which sector stocks
+    #      & trade in top ranker of that sector"
+    #
+    # An event does not happen to a stock, it happens to a SECTOR, and
+    # the sector then hands the same reason to every name in it. This
+    # list had no per-sector limit at all, so a copper headline or a
+    # chemicals rally could put four or five correlated names on the
+    # board -- and the book, sized for three positions, would fill
+    # with one idea wearing four tickers. When that idea is wrong,
+    # every seat is wrong together.
+    #
+    # So: the best name per sector, then the next best, and so on.
+    # Nothing is deleted -- the also-rans keep their place BELOW every
+    # sector's leader, so a day when one sector genuinely owns the
+    # tape still surfaces its second name, just not above another
+    # sector's first.
+    out = _best_of_each_sector(out)
+
     if rejected:
         diagnostic("[RANK] refused: " + ", ".join(
             f"{k} x{v}" for k, v in sorted(rejected.items())))

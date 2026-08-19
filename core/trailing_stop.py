@@ -58,6 +58,8 @@ Author : H&M Opportunity Trader
 from config import (
     TRAILING_STOP_WINDOW_CANDLES, MIN_STOP_DISTANCE_PCT,
     ENABLE_PEAK_TRAIL, PEAK_TRAIL_PCT,
+    VOLATILITY_SCALED_TRAIL, DAILY_ATR_TRAIL_MULT,
+    TRAIL_EVENT_SLACK, TRAIL_MIN_PCT, TRAIL_MAX_PCT,
 )
 
 # ==========================================================
@@ -89,6 +91,60 @@ LONG = "LONG"
 SHORT = "SHORT"
 
 
+
+# ==========================================================
+#  THE TRAIL WAS ALSO ONE WIDTH FOR EVERY STOCK
+# ==========================================================
+#
+#     "why can't bot self adjust the trading based on the stock
+#      movement & news/events supporting the stock price movement.
+#      trailing in good moving stocks (strong supported events)"
+#                                 -- operator, 19 August 2026
+#
+# The entry stop was fixed on 18 August: it is now this stock's own
+# daily range rather than a flat 2.5%. The TRAIL was left behind and
+# is the same mistake one step later -- PEAK_TRAIL_PCT is 2.5% from
+# the peak for POLYCAB, whose ordinary day is 1.79%, and for ICIL,
+# whose ordinary day is 4.99%.
+#
+# On ICIL a 2.5% trail is HALF a normal day's movement. It is not a
+# trail, it is a coin toss that fires on the first ordinary breather,
+# which is exactly the complaint that got the trail switched off
+# entirely on 29 July after it sold KAYNES before a run to 3,685.
+#
+# Same source as the entry stop -- core/atr.daily_atr_pct(), read off
+# the bhavcopy store, no network, cached per session -- so the trail
+# and the stop can never drift onto different definitions of "how
+# much this stock moves".
+#
+# STRONG EVENTS GET MORE ROOM. His second sentence: a stock running on
+# a real catalyst deserves a wider leash than one drifting on nothing,
+# because the catalyst is a reason to expect continuation and a
+# breather is not a failure. That is TRAIL_EVENT_SLACK, applied only
+# when the caller says the position carries one -- this file never
+# decides what counts as an event.
+
+def _trail_pct_for(symbol, has_event=False):
+    """How far below the peak this stock's trail belongs, as a
+    FRACTION. Falls back to the flat PEAK_TRAIL_PCT whenever the daily
+    range cannot be measured -- a trail derived from a volatility
+    nobody measured is worse than an honestly flat one.
+    """
+    if not VOLATILITY_SCALED_TRAIL:
+        return PEAK_TRAIL_PCT
+    try:
+        from core.atr import daily_atr_pct
+        daily = daily_atr_pct(symbol)
+    except Exception:                                       # noqa: BLE001
+        daily = None
+    if not daily or daily <= 0:
+        return PEAK_TRAIL_PCT
+    wanted = DAILY_ATR_TRAIL_MULT * float(daily)
+    if has_event:
+        wanted *= TRAIL_EVENT_SLACK
+    wanted = max(TRAIL_MIN_PCT, min(TRAIL_MAX_PCT, wanted))
+    return wanted / 100.0
+
 class TrailingStopEngine:
 
     def __init__(self, window=TRAILING_STOP_WINDOW_CANDLES):
@@ -98,7 +154,8 @@ class TrailingStopEngine:
 
     # --------------------------------------------------
 
-    def start(self, symbol, seed_stop, direction=LONG, entry_price=None):
+    def start(self, symbol, seed_stop, direction=LONG,
+              entry_price=None, has_event=False):
         """
         Called once, right at entry -- seeds the stop at the
         breakout/breakdown candle's own extreme (low for LONG,
@@ -120,6 +177,9 @@ class TrailingStopEngine:
             "entry": entry_price,
             "base_stop": seed_stop,
             "locked": False,
+            # Set by the caller at entry. This file never decides what
+            # counts as an event -- see _trail_pct_for().
+            "has_event": bool(has_event),
         }
         # With the peak trail on, the stop starts EXACTLY
         # PEAK_TRAIL_PCT below the entry -- not wherever the breakout
@@ -141,10 +201,12 @@ class TrailingStopEngine:
             if ENABLE_ONE_TO_ONE_LOCK and direction == LONG and seed_stop:
                 state["base_stop"] = seed_stop
             elif direction == LONG:
-                state["stop"] = entry_price * (1 - PEAK_TRAIL_PCT)
+                state["stop"] = entry_price * (
+                    1 - _trail_pct_for(symbol, state.get("has_event")))
                 state["base_stop"] = state["stop"]
             else:
-                state["stop"] = entry_price * (1 + PEAK_TRAIL_PCT)
+                state["stop"] = entry_price * (
+                    1 + _trail_pct_for(symbol, state.get("has_event")))
                 state["base_stop"] = state["stop"]
 
     def update_on_price(self, symbol, price):
@@ -181,13 +243,17 @@ class TrailingStopEngine:
                     if moved is not None:
                         state["stop"] = moved
                 else:
-                    candidate = price * (1 - PEAK_TRAIL_PCT)
+                    candidate = price * (
+                        1 - _trail_pct_for(symbol,
+                                           state.get("has_event")))
                     if candidate > state["stop"]:
                         state["stop"] = candidate
         else:
             if peak is None or price < peak:
                 state["peak"] = price
-                candidate = price * (1 + PEAK_TRAIL_PCT)
+                candidate = price * (
+                    1 + _trail_pct_for(symbol,
+                                       state.get("has_event")))
                 if candidate < state["stop"]:
                     state["stop"] = candidate
         return state["stop"]

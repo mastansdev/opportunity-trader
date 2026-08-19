@@ -530,7 +530,8 @@ def _events_for(symbol):
     return rows
 
 
-def why(events=None, news_hits=None, on_date=None, symbol=None):
+def _why_before_payoff(events=None, news_hits=None, on_date=None,
+                       symbol=None):
     """The single answer, or None.
 
     PRO channels first -- they are the source he trusts and, on
@@ -624,3 +625,75 @@ def from_catalysts(symbol, on_date=None):
         return catalysts.for_symbol(symbol, now=when)
     except Exception as exc:                               # noqa: BLE001
         return _broke("catalysts", exc)
+
+
+# ==========================================================
+#  THE WEIGHT WAS A NUMBER SOMEBODY TYPED
+# ==========================================================
+#
+#     "bot is not fully equipped to find the opportunity ... u need to
+#      educate & make sure bot must understand about markets"
+#                                 -- operator, 19 August 2026
+#
+# Every weight above is hand-assigned: 0.95, 0.9, 0.85, 0.8, 0.65,
+# 0.6, 0.55, 0.5. core/ranker.py multiplies one of them into every
+# score it produces, and not one had ever been checked against what
+# the stock then did.
+#
+# core/opportunity.py had measured exactly that, on stored events and
+# real price history, and the answers do not agree with the typing:
+#
+#     ORDER_WIN          +0.64%   n=80     hand weight ~0.8
+#     BUSINESS_UPDATE    -0.32%   n=123    hand weight ~0.9
+#
+# A business update was outranking an order win on the board while
+# being worth LESS THAN NOTHING across 123 cases. That is the machine
+# by which "the top-ranked three were the worst of the eleven" in the
+# 8 August replay -- the bot was ranking by how important an event
+# SOUNDS.
+#
+# The tilt is bounded, switchable and shown. See
+# core/opportunity.payoff_weight() for why it stops well short of
+# letting a measurement decide anything on its own.
+
+def why(events=None, news_hits=None, on_date=None, symbol=None):
+    """The reason this stock is moving, weighted by what that KIND of
+    reason has actually been worth.
+
+    Same shape in and out -- {"text", "weight", "direction", "source"}
+    -- so core/ranker.py needs no new field and every existing caller
+    is untouched. Two fields are ADDED for the board: `payoff_mult`
+    and `payoff_note`, so a ranking he disagrees with can be taken
+    apart rather than trusted.
+
+    Never raises and never blocks: any failure leaves the hand weight
+    exactly as it was.
+    """
+    got = _why_before_payoff(events=events, news_hits=news_hits,
+                             on_date=on_date, symbol=symbol)
+    if not isinstance(got, dict):
+        return got
+    try:
+        from core.rules import RANK_BY_MEASURED_PAYOFF
+        if not RANK_BY_MEASURED_PAYOFF:
+            return got
+        raw = got.get("weight")
+        if raw is None:
+            return got
+        from core import opportunity
+        text = str(got.get("text") or "")
+        mult = opportunity.payoff_weight(text)
+        if mult == 1.0:
+            return got
+        got["payoff_mult"] = round(mult, 3)
+        got["payoff_note"] = opportunity.payoff_note(text)
+        got["weight_before_payoff"] = raw
+        got["weight"] = round(float(raw) * mult, 4)
+    except Exception as exc:                                # noqa: BLE001
+        try:
+            from core.logger import diagnostic
+            diagnostic(f"[WHY] payoff weighting skipped "
+                       f"({type(exc).__name__}). The hand weight stands.")
+        except Exception:                                   # noqa: BLE001
+            pass
+    return got

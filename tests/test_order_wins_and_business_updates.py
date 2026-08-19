@@ -158,13 +158,38 @@ def test_why_moving_actually_calls_it():
 
 def test_a_result_still_outranks_an_order_win():
     """A published result is stronger evidence than a contract, and
-    the ordering inside why() must keep it that way."""
+    the ordering must keep it that way.
+
+    ---- THE FUNCTION MOVED, THE RULE DID NOT. 19 Aug 2026. ----
+    This read inspect.getsource(why_moving.why). On 19 August why()
+    became a thin wrapper that applies the measured-payoff tilt, and
+    the fallback chain moved into _why_before_payoff(). The chain is
+    unchanged; the test was reading the wrong function and passing on
+    an empty search would have been worse than failing.
+
+    Same shape of miss this suite has had before: a test that greps
+    source rather than behaviour keeps passing until the source moves,
+    then reports a fault that is not there.
+    """
     import inspect
 
     from core import why_moving
-    body = inspect.getsource(why_moving.why)
+    body = inspect.getsource(why_moving._why_before_payoff)
     assert body.index("from_events") < body.index("from_catalysts")
     assert body.index("from_news") < body.index("from_catalysts")
+
+
+def test_the_payoff_tilt_cannot_reorder_that_chain():
+    """The tilt adjusts a WEIGHT. It must not reach into which source
+    answers first -- that ordering is evidence quality, not payoff."""
+    import inspect
+
+    from core import why_moving
+    wrapper = inspect.getsource(why_moving.why)
+    for name in ("from_events", "from_news", "from_catalysts"):
+        assert name not in wrapper, (
+            f"why() now decides between sources as well as weighting "
+            f"them -- {name} belongs in _why_before_payoff()")
 
 
 def test_it_never_raises_on_junk():

@@ -263,6 +263,30 @@ MIN_REASON_CHARS = 15
 # is the whole of the evidence. No event, no trade.
 ENGINE_REQUIRE_REASON = True
 
+# ==========================================================
+#  RANK BY WHAT A REASON HAS PAID, NOT BY HOW IT SOUNDS
+# ==========================================================
+#
+#     "u need to educate & make sure bot must understand about markets
+#      & which events will create opportunity to which sector stocks"
+#                                 -- operator, 19 August 2026
+#
+# core/ranker.py multiplies core/why_moving.py's mechanism weight into
+# every score, and every one of those weights was typed by hand --
+# 0.95, 0.9, 0.85, 0.8, 0.65, 0.6, 0.55, 0.5. core/opportunity.py had
+# separately measured what each family is worth the session after it
+# appears, and the two disagree:
+#
+#     ORDER_WIN         +0.64%  n=80    hand weight ~0.8
+#     BUSINESS_UPDATE   -0.32%  n=123   hand weight ~0.9
+#
+# With this ON, the measured payoff TILTS the hand weight within
+# [0.5x, 1.5x]. It cannot veto a trade and cannot conjure one -- the
+# other four scoring terms are untouched. Off, the hand weights stand
+# exactly as before, which is the state every earlier measurement in
+# this repo was taken under.
+RANK_BY_MEASURED_PAYOFF = True
+
 
 def is_a_reason(text):
     """True when `text` is a mechanism a human could act on.

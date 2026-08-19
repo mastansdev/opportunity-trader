@@ -2105,6 +2105,28 @@ class Engine:
             return position >= STILL_TRENDING_MIN_POSITION
         return position <= (1.0 - STILL_TRENDING_MIN_POSITION)
 
+    def _position_has_event(self, symbol):
+        """Is this position standing on a real catalyst?
+
+            "trailing in good moving stocks (strong supported events)"
+                                -- operator, 19 August 2026
+
+        core/trailing_stop.py widens the leash when this is True,
+        because a catalyst is a reason to expect continuation and a
+        pause inside one is not a failure.
+
+        The answer comes from _capture_reason() -- the same evidence
+        the alert prints and core/trade_memory.py stores -- so a
+        position the board calls evidence-backed is trailed as one.
+        A second definition of "event" living here would drift from
+        that one within a week.
+        """
+        try:
+            return bool((self._capture_reason(symbol) or {}).get(
+                "had_reason"))
+        except Exception:                                  # noqa: BLE001
+            return False
+
     def _hard_stop_pct(self, symbol):
         """How far below entry this stock's stop belongs, as a FRACTION.
 
@@ -2419,7 +2441,8 @@ class Engine:
             "stop_mode": STOP_MODE_SWING_TRAILING,
         }
         self.trailing_stop.start(symbol, float(stop), direction=direction,
-                                 entry_price=float(entry_price))
+                                 entry_price=float(entry_price),
+                                 has_event=self._position_has_event(symbol))
         return True
 
     def _check_move_died(self, symbol, price, tick_time):
@@ -4419,7 +4442,8 @@ class Engine:
         # momentum mode) use core/trailing_stop.py at all.
         if target is None and stop_mode == STOP_MODE_SWING_TRAILING:
             self.trailing_stop.start(
-                symbol, stop_seed, direction=direction, entry_price=price
+                symbol, stop_seed, direction=direction, entry_price=price,
+                has_event=self._position_has_event(symbol),
             )
 
         # ---- REST A STOP AT THE BROKER, 2026-08-02 ----

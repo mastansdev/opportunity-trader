@@ -852,6 +852,30 @@ TRAILING_STOP_WINDOW_CANDLES = 5   # LEGACY -- see PEAK_TRAIL_PCT below
 ENABLE_PEAK_TRAIL = True
 PEAK_TRAIL_PCT = 0.025
 
+# ---- AND THE TRAIL IS ONE WIDTH TOO. 19 August 2026. ----
+#
+#     "trailing in good moving stocks (strong supported events)"
+#
+# 2.5% from the peak is half an ordinary day for ICIL (daily range
+# 4.99%) and more than a full day for POLYCAB (1.79%). On the first it
+# fires on a routine breather; on the second it gives away money it
+# never needed to risk. Same source as the entry stop --
+# core/atr.daily_atr_pct() -- so the two can never drift onto
+# different definitions of how much a stock moves.
+VOLATILITY_SCALED_TRAIL = True
+DAILY_ATR_TRAIL_MULT = 0.8
+
+# A position standing on a real catalyst gets a wider leash: the
+# catalyst is a reason to expect continuation, and a pause inside one
+# is not a failure. Applied only when the entry says the position
+# carries an event.
+TRAIL_EVENT_SLACK = 1.4
+
+# Bounds, in PERCENT. Below the floor a trail is noise; above the
+# ceiling it is not protecting anything.
+TRAIL_MIN_PCT = 1.5
+TRAIL_MAX_PCT = 7.0
+
 # Operator-approved 2026-07-23, after watching the first live
 # session whipsaw repeatedly: the initial stop used to be seeded
 # from the BREAKOUT CANDLE's own low/high -- a single 1-minute

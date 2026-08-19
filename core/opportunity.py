@@ -504,3 +504,159 @@ def verdict():
     return (f"{seen} opportunity events across {len(got['families'])} "
             f"families, {len(measured)} with enough cases to measure. "
             f"It recognises and remembers; it does not vote.")
+
+
+# ==========================================================
+#  WHAT A FAMILY IS WORTH, AS A NUMBER THE RANKER CAN USE
+# ==========================================================
+#
+#     "bot is not fully equipped to find the opportunity ... u need to
+#      educate & make sure bot must understand about markets & which
+#      events will create opportunity to which sector stocks"
+#                                 -- operator, 19 August 2026
+#
+# THE GAP, STATED EXACTLY
+# -----------------------
+# core/ranker.py scores five things, and one of them is the strength
+# of the reason:
+#
+#     score += W_MECHANISM * mech["weight"] * 2.0
+#
+# Every one of those weights is a number somebody typed.
+# core/why_moving.py hands out 0.95, 0.85, 0.9, 0.8, 0.65, 0.6, 0.55,
+# 0.5 by hand. None was ever checked against an outcome.
+#
+# Meanwhile THIS FILE measured what each family is actually worth on
+# the session after it appears:
+#
+#     COMMODITY_CYCLE    +0.73%   n=36
+#     ORDER_WIN          +0.64%   n=80
+#     CAPACITY_EXPANSION +0.18%   n=207
+#     GUIDANCE           -0.22%   n=526
+#     BUSINESS_UPDATE    -0.32%   n=123
+#     FDA_APPROVAL       -0.44%   n=24
+#     TARIFF_DUTY        -0.81%   n=23
+#
+# So a BUSINESS_UPDATE was handed a weight near 0.9 and ranked at the
+# top of the board while its measured next-session return is
+# NEGATIVE across 123 cases. That is the mechanism by which "the
+# top-ranked three were the worst of the eleven" in the 8 August
+# replay. The bot was ranking by how important an event SOUNDS.
+#
+# THIS CROSSES A LINE THIS REPO HAS HELD ON PURPOSE
+# -------------------------------------------------
+# Every measurement here has been severed from the decision path, and
+# core/signal_journal.py still is -- a test fails the build if a gate
+# imports it. That rule exists so a number measured on Tuesday cannot
+# quietly become a trading rule on Wednesday.
+#
+# He asked for this crossing in as many words, so it is made in
+# daylight and with the brakes named:
+#
+#   * it TILTS, never decides. The output is a multiplier bounded to
+#     [PAYOFF_FLOOR, PAYOFF_CEILING], applied to one of five scoring
+#     terms. No family can veto a trade and none can conjure one.
+#   * a family with fewer than PAYOFF_MIN_CASES measured cases moves
+#     nothing. 1.0 is the answer for "not enough evidence", and it is
+#     the same answer as "no family recognised".
+#   * core/rules.RANK_BY_MEASURED_PAYOFF turns the whole thing off in
+#     one place, and the board still shows both numbers so a ranking
+#     he disagrees with can be taken apart.
+
+#: A family must have at least this many measured cases before its
+#: payoff is allowed to move a score at all.
+PAYOFF_MIN_CASES = 20
+
+#: How hard a measured percent leans on the weight. At 0.5, the best
+#: family measured (+0.73%) earns x1.37 and the worst (-0.81%) earns
+#: x0.60 -- a real tilt, and nowhere near enough to overrule volume,
+#: sector leadership and persistence combined.
+PAYOFF_SENSITIVITY = 0.5
+
+PAYOFF_FLOOR = 0.5
+PAYOFF_CEILING = 1.5
+
+_PAYOFF_CACHE = {}
+
+
+def reset_payoff_cache():
+    _PAYOFF_CACHE.clear()
+
+
+def payoff_table(min_cases=PAYOFF_MIN_CASES):
+    """{family key: avg_pct} for families measured on enough cases.
+
+    evaluate() walks stored events and price history, so it is called
+    ONCE per process and held. This is read from the ranking path and
+    the ranking path runs per symbol per cycle.
+    """
+    key = ("table", min_cases)
+    if key in _PAYOFF_CACHE:
+        return _PAYOFF_CACHE[key]
+    table = {}
+    try:
+        for family in (evaluate() or {}).get("families") or []:
+            if family.get("verdict") != "measured":
+                continue
+            if int(family.get("measured") or 0) < min_cases:
+                continue
+            # The direction-split average where one exists: a GUIDANCE
+            # that RAISES and one that CUTS are not the same event, and
+            # this file already separates them.
+            value = family.get("avg_pct_positive")
+            if value is None:
+                value = family.get("avg_pct")
+            if value is not None:
+                table[family["key"]] = float(value)
+    except Exception:                                       # noqa: BLE001
+        table = {}
+    _PAYOFF_CACHE[key] = table
+    return table
+
+
+def payoff_weight(text, min_cases=PAYOFF_MIN_CASES):
+    """How much to lean on a reason, given what its family has paid.
+
+    1.0 means "no opinion" and is returned for: an unrecognised
+    sentence, a family with too few cases, and any failure at all.
+    A multiplier of 1.0 leaves the ranker exactly as it was, which is
+    the correct behaviour when this file has nothing to add.
+    """
+    if not text:
+        return 1.0
+    try:
+        table = payoff_table(min_cases)
+        if not table:
+            return 1.0
+        hits = [h for h in (classify(text) or [])
+                if h.get("key") in table]
+        if not hits:
+            return 1.0
+        # The STRONGEST claim wins rather than the average: a sentence
+        # carrying both an order win and a routine update is an order
+        # win with an update attached, not the mean of the two.
+        best = max(table[h["key"]] for h in hits)
+        tilt = 1.0 + PAYOFF_SENSITIVITY * best
+        return max(PAYOFF_FLOOR, min(PAYOFF_CEILING, tilt))
+    except Exception:                                       # noqa: BLE001
+        return 1.0
+
+
+def payoff_note(text, min_cases=PAYOFF_MIN_CASES):
+    """A sentence for the board explaining the tilt, or None.
+
+    A score he cannot take apart is a score he has to trust, and this
+    project does not ask him to trust numbers.
+    """
+    try:
+        table = payoff_table(min_cases)
+        hits = [h for h in (classify(text) or []) if h.get("key") in table]
+        if not hits:
+            return None
+        best = max(hits, key=lambda h: table[h["key"]])
+        pct = table[best["key"]]
+        return (f"{best['key']} has averaged {pct:+.2f}% the session "
+                f"after, so this reason is weighted "
+                f"x{payoff_weight(text, min_cases):.2f}")
+    except Exception:                                       # noqa: BLE001
+        return None
