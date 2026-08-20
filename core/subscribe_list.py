@@ -253,7 +253,7 @@ UNCLASSIFIED_REASON = "new listing -- awaiting sector classification"
 
 def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
            corporate_actions=None, min_turnover=MIN_TURNOVER_RS,
-           remarks=None):
+           remarks=None, seen_recently=True):
     """
     The whole YES/NO decision for one symbol. Pure function -- no I/O,
     no network, no clock. Returns (subscribe_bool, reason_string); the
@@ -299,10 +299,31 @@ def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
     # -- checks that need yesterday's bhavcopy --
 
     if bhav is None:
-        # FAIL-OPEN. Could be a genuinely delisted name, or simply a
-        # bhavcopy we failed to download. Never silently drop a stock
-        # over a network problem -- the caller reports these instead.
-        return True, ""
+        # ---- NEVER IN ANY BHAVCOPY IS NOT A NETWORK PROBLEM ----
+        #      20 August 2026.
+        #
+        # FAIL-OPEN is right for a MISSED download: a genuine stock
+        # must never be dropped because a file did not arrive.
+        #
+        # But it fails open on ABSENCE, and KEL has never appeared in
+        # any bhavcopy because it is not traded on NSE at all -- its
+        # security id 18708 belongs to VISDEM TECHNOSYS. So it came
+        # back SUBSCRIBE=YES every single night, was set to NO by hand
+        # on 18 August, on the 19th, and on the 20th, and the guard in
+        # tests/test_master_loader.py caught it all three times.
+        #
+        # A guard that only fails a test does not stop a rewrite.
+        #
+        # `seen_recently` is what the caller knows and this function
+        # cannot: was this symbol in ANY of the recent bhavcopies. It
+        # defaults True so nothing changes for a caller that does not
+        # pass it -- absence has to be PROVEN before a stock is
+        # dropped, never assumed from one missing file.
+        if seen_recently:
+            return True, ""
+        return False, ("not in any recent bhavcopy -- not traded on "
+                       "NSE. A security id that still resolves is "
+                       "pointing at a DIFFERENT company")
 
     series = str(bhav.get("series") or "").strip().upper()
     if series and series not in TRADEABLE_SERIES:
@@ -422,7 +443,7 @@ def build_bhav_index_over(day_rows, min_sessions=TURNOVER_MIN_SESSIONS):
 
 def apply(rows, bhav_index, excluded=None, bands=None,
           corporate_actions=None, min_turnover=MIN_TURNOVER_RS,
-          remarks=None):
+          remarks=None, seen_recently=None):
     """
     Stamp SUBSCRIBE / SUBSCRIBE_REASON onto every row. Mutates and
     returns the rows, plus a summary dict for the operator.
@@ -447,6 +468,14 @@ def apply(rows, bhav_index, excluded=None, bands=None,
             corporate_actions=corporate_actions,
             min_turnover=min_turnover,
             remarks=remarks,
+            # The one thing decide() cannot know for itself: has this
+            # symbol appeared in ANY recent bhavcopy. Absent from all
+            # of them is not a missed download, it is a stock that
+            # does not trade -- see the NEVER IN ANY BHAVCOPY note in
+            # decide(). None means the caller could not tell, and the
+            # old fail-open behaviour is kept exactly.
+            seen_recently=(symbol in seen_recently
+                           if seen_recently is not None else True),
         )
         row[SUBSCRIBE_COL] = YES if ok else NO
         row[REASON_COL] = "" if ok else reason

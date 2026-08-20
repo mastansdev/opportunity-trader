@@ -1638,6 +1638,35 @@ MAX_OPEN_POSITIONS = 3
 #   - EXITS ARE UNAFFECTED. Stops, trails and targets run on anything
 #     already held whatever this says -- see core/engine.py's
 #     "Exits deliberately ignore alert_only so a stop always fires".
+# ---- HE ASKED TO ARM IT. THE CONFIG IS THE WRONG SWITCH. ----
+#      20 August 2026.
+#
+#     "yes do both. so basically paper trades will be logged"
+#
+# He said yes to arming the bot, and I started by flipping this to
+# False. That was wrong, and his own words from 12 August say why:
+#
+#     "by default bot trading = OFF (Bot Observing) when i start
+#      main.py . i can ON when i want bot to trade with the same
+#      rules"
+#
+# He set this to True that day HAVING ALREADY TRIED False, for two
+# reasons that have not changed:
+#
+#   1. This is the STARTUP value and the dashboard/Telegram switch is
+#      the control. With it False, main.py comes up already armed and
+#      the ON switch has nothing left to turn on.
+#   2. dashboard/server.py has promised since 5 August that "a
+#      restart returns to ALERT_ONLY_MODE, which is the safe value --
+#      it must come back watching, not trading". False makes that
+#      guarantee a lie, and a crash at 11:00 would restart into a
+#      trading bot.
+#
+# So arming is done the way he built it: start disarmed, send ON when
+# he wants the session armed. That is a decision per session rather
+# than a decision once, which is the right shape for a switch that
+# spends money -- and today it spends paper money, which is the whole
+# point of the experiment.
 ALERT_ONLY_MODE = True
 
 

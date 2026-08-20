@@ -44,12 +44,21 @@ from core import ranker
 from core.ranker import rank, sector_moves, should_swap, volume_ratio
 
 
-# 2,000,000 shares at Rs 100 is Rs 20 crore traded, against a default
-# ADV of Rs 10 crore -- 2.0x its normal day, which clears MIN_VOLUME_RATIO.
-# The first version used Rs 10 crore against Rs 200 crore, i.e. 0.05x, and
-# every candidate was correctly refused for "no volume behind it". The
-# fixture was wrong, not the gate.
-def mover(symbol, pct, sector="IT", volume=2_000_000, ltp=100.0,
+# 3,000,000 shares at Rs 100 is Rs 30 crore traded, against a default
+# ADV of Rs 10 crore -- 3.0x its normal day, which clears
+# MIN_VOLUME_RATIO.
+#
+# It has been wrong twice, the same way. The first version used Rs 10
+# crore against Rs 200 crore -- 0.05x -- and every candidate was
+# refused for "no volume behind it". The second used 2,000,000 shares
+# for 2.0x, which cleared the gate at 1.5 and stopped clearing it on
+# 20 August when MIN_VOLUME_RATIO was raised to 2.5 on measurement.
+#
+# Both times the FIXTURE was wrong and the gate was right, and both
+# times the failure looked like the ranker had broken. A fixture that
+# sits a hair above a threshold will fail every time that threshold
+# moves; 3.0x leaves room.
+def mover(symbol, pct, sector="IT", volume=3_000_000, ltp=100.0,
           recent=None):
     return {"symbol": symbol, "change_pct": pct, "sector": sector,
             "volume": volume, "ltp": ltp, "recent_pct": recent}

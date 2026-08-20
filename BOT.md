@@ -1,4 +1,4 @@
-<!-- generated: 2026-08-12 22:46 by tools/bot_doc.py -- do not edit by hand -->
+<!-- generated: 2026-08-20 16:42 by tools/bot_doc.py -- do not edit by hand -->
 # Opportunity Trader — what the bot is, and what it does
 
 **This file is generated.** Every number below is read out of `config.py` and `core/rules.py` when it is written, so it cannot drift away from the running bot. To change a rule, change the code and run `py tools/bot_doc.py --write`.
@@ -70,8 +70,8 @@ Since 12 August **both require a reason** — `core/rules.py`'s `is_a_reason()`,
 | 3 | Grade is allowed | EXCELLENT/GREAT/GOOD | `core/results_gate.py` |
 | 4 | Moving, against yesterday's close | ≥1% | `core/ranker.py` |
 | 5 | Moving, against today's open | ≥0.5% | `core/select.py` |
-| 6 | Money behind the move | ≥1.5× normal | `core/rules.py` |
-| 7 | …or, with no published reason | ≥2.5× normal | `core/rules.py` |
+| 6 | Money behind the move | ≥2.5× normal | `core/rules.py` |
+| 7 | …or, with no published reason | ≥5× normal | `core/rules.py` |
 | 8 | Liquid enough to get out of | ≥₹8 Cr | `core/rules.py` |
 | 9 | Still near its high | ≥0.5 of day range | `core/rules.py` |
 | 10 | Stop is not too tight | ≥0.75% | `core/rules.py` |

@@ -184,11 +184,54 @@ SHORTLIST_MIN_MOVE_PCT = 2.0
 # watchlist_builder.py were already using -- 1.2x is barely above an
 # ordinary day and let a band of thin movers onto the entry path that
 # the rest of the bot refused.
-MIN_VOLUME_RATIO = 1.5
+# ---- RAISED 1.5 -> 2.5 ON 20 AUGUST 2026, ON MEASUREMENT ----
+#
+# core/signal_journal.py scored 13,272 recorded signals against the
+# candles that followed them. Volume is the ONE selector in this bot
+# with a clean, monotonic edge:
+#
+#     under 2x normal    n=8217    44.3% up at close
+#     2 - 5x             n=2286    51.0%
+#     5 - 10x            n=1142    54.2%
+#     over 10x           n=1267    60.0%
+#
+# In his words, plainly: out of every 100 alerts, a barely-busier
+# stock gives 44 up and 56 down, and a stock trading ten times its
+# normal volume gives 60 up and 40 down. Heavy volume is real money
+# arriving, not a price twitching.
+#
+# 1.5 sat inside the 44-in-100 band -- the worst part of the curve
+# this bot measures. 2.5 moves the floor into the band that starts
+# paying, and it is deliberately NOT set at 10x: that bucket is only
+# 1,267 of 13,272 signals, so a 10x floor would be a different bot
+# rather than a better-behaved one.
+#
+#     "yes do both"       -- operator, 20 August 2026
+MIN_VOLUME_RATIO = 2.5
 
 # A stock with no published reason has to bring far more than that
 # before the tape alone is accepted as the reason.
-UNEXPLAINED_MIN_VOLUME_RATIO = 2.5
+# ---- IT COLLIDED WITH THE FLOOR. 20 August 2026. ----
+#
+# This is the bar a stock must clear to be taken WITH NO REASON AT
+# ALL -- exceptional volume standing in for an event.
+#
+# It was 2.5 while MIN_VOLUME_RATIO was 1.5, so "exceptional" meant
+# nearly twice the ordinary bar. Raising the floor to 2.5 the same
+# day made the two numbers EQUAL, and that quietly retired the reason
+# requirement for the ranked lane: every stock clearing the volume
+# gate would also have qualified as unexplained.
+#
+# Caught by tests/test_ranker.py::test_no_reason_at_all_is_refused,
+# which is exactly what that test is for -- a 3.0x mover with no
+# reason came back on the board.
+#
+# 5.0 keeps "exceptional" meaningfully above the floor and sits in a
+# band the journal actually measured: 5-10x normal volume was 54.2%
+# up at close against 44.3% under 2x. Not 10x -- that bucket is 1,267
+# of 13,272 signals, and a bar that high would close the lane rather
+# than tighten it.
+UNEXPLAINED_MIN_VOLUME_RATIO = 5.0
 UNEXPLAINED_WEIGHT = 0.35
 
 

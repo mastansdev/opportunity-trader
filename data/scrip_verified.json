@@ -1,10 +1,12 @@
 {
- "verified_at": "2026-08-19 15:53:38",
- "checked": 1887,
+ "verified_at": "2026-08-20 16:51:56",
+ "checked": 1902,
  "source": "https://images.dhan.co/api-data/api-scrip-master.csv",
- "mismatches": [],
+ "mismatches": [
+  "UCAL: master 3570, Dhan 7739"
+ ],
  "not_found": [
   "KEL"
  ],
- "clean": true
+ "clean": false
 }

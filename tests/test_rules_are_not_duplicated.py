@@ -100,7 +100,12 @@ def test_the_numbers_he_approved_are_the_numbers_in_the_file():
     be deliberate rather than accidental."""
     from core import rules
     assert rules.RISK_PER_TRADE_RS == 1500.0
-    assert rules.MIN_VOLUME_RATIO == 1.5
+    # RAISED 1.5 -> 2.5 on 20 August 2026, on measurement rather than
+    # taste: 13,272 scored signals put "under 2x normal volume" at
+    # 44.3% up at close and "over 10x" at 60.0%. 1.5 sat in the worst
+    # band the bot measures. This test's job is to prove the number is
+    # in ONE place and was CHOSEN -- not to hold a particular value.
+    assert rules.MIN_VOLUME_RATIO == 2.5
     assert rules.MIN_TRADABLE_PRICE_RS == 50.0
     assert rules.MIN_STOP_DISTANCE_PCT == 0.75
     assert rules.MAX_STOP_DISTANCE_PCT == 6.0
@@ -123,7 +128,7 @@ def test_every_module_that_used_to_copy_a_rule_now_imports_it():
     from core import rules
 
     assert position_plan.RISK_PER_TRADE_RS == rules.RISK_PER_TRADE_RS
-    assert ranker.MIN_VOLUME_RATIO == rules.MIN_VOLUME_RATIO == 1.5
+    assert ranker.MIN_VOLUME_RATIO == rules.MIN_VOLUME_RATIO == 2.5
     assert select.MIN_VOLUME_RATIO == rules.MIN_VOLUME_RATIO
     assert watchlist_builder.MIN_VOLUME_RATIO == rules.MIN_VOLUME_RATIO
     assert ranker.MIN_MOVE_PCT == rules.MIN_MOVE_FROM_PREV_CLOSE_PCT

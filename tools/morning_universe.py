@@ -363,10 +363,34 @@ def main():
     except Exception as exc:
         warn(f"[MORNING] Results calendar refresh failed ({exc}).")
 
+    # ---- EVERY SYMBOL ANY RECENT BHAVCOPY HAS SEEN. 20 Aug 2026 ----
+    #
+    # decide() fails OPEN when a symbol is missing from yesterday's
+    # bhavcopy, which is right for a download that did not arrive and
+    # wrong for a stock that is not traded. KEL is not on NSE at all,
+    # so it was missing every night and came back SUBSCRIBE=YES every
+    # night -- set to NO by hand on the 18th, 19th and 20th.
+    #
+    # Absence has to be PROVEN across the whole window before a stock
+    # is dropped. With one session readable this stays None and the
+    # old fail-open behaviour is exactly unchanged.
+    seen = None
+    if len(history) > 1:
+        seen = set()
+        for _, rows_ in history:
+            for r in rows_:
+                sym = str(r.get("TckrSymb") or r.get("SYMBOL")
+                          or "").strip().upper()
+                if sym:
+                    seen.add(sym)
+        decision(f"  Symbols seen recently  : {len(seen):,} across "
+                 f"{len(history)} sessions")
+
     rows, summary = apply(rows, bhav_index, excluded=excluded, bands=bands,
                           corporate_actions=actions,
                           min_turnover=MIN_TURNOVER_RS,
-                          remarks=remarks)
+                          remarks=remarks,
+                          seen_recently=seen)
     write_master(rows, MASTER_CSV_PATH)
     md = write_new_stocks_md(new_listings, security_ids=sec_ids)
 
