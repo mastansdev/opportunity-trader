@@ -313,6 +313,29 @@ RANK_BY_MEASURED_PAYOFF = True
 # a trade.
 RANK_BY_COMMODITY_POLARITY = True
 
+# ==========================================================
+#  A SECTOR MOVING TOGETHER COUNTS AS AN EVENT
+# ==========================================================
+#
+#     "if complete sector is being rallied then something is happening
+#      underlying right?"      -- operator, 20 August 2026
+#
+# Ten sugar names ran 7-17% on 20 August and every one was refused
+# for "no event behind it", MAGADSUGAR on 15x its normal volume. The
+# reason question was asked one stock at a time.
+#
+# Measured over a year, next-session move minus the market median:
+#
+#     any lone 5% mover (control)   n=3622   +0.550
+#     4 members co-moving           n=1036   +0.526    nothing
+#     6 members co-moving           n= 417   +0.925
+#     8 members co-moving           n= 149   +0.763
+#
+# So it counts only when SIX or more move together. At four it is
+# indistinguishable from an ordinary mover, and a rule built on four
+# would have been wrong.
+SECTOR_CO_MOVE_IS_A_REASON = True
+
 
 def is_a_reason(text):
     """True when `text` is a mechanism a human could act on.

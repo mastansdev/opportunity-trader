@@ -391,7 +391,33 @@ def _no_test_may_litter_the_live_data_folder():
     # ALIVE and is not this pytest process. A stale lock left behind
     # by a test still fails the run, which is the case it was built
     # for.
+    # ---- THE NIGHTLY CHAIN DOWNLOADS WHILE THE SUITE RUNS ----
+    #      20 August 2026.
+    #
+    # An 18-minute run reported:
+    #
+    #     the test suite CREATED files in the live data folder:
+    #     data\BhavCopy_NSE_CM_0_0_0_20260819_F_0000.csv
+    #
+    # It did not. That is NSE's bhavcopy, fetched by his collector
+    # during the run -- the same shape as the telegram lock on the
+    # 19th. A suite that takes a quarter of an hour will keep meeting
+    # files the live chain creates, and blaming the suite for them is
+    # how a guard gets switched off.
+    #
+    # These are DATED, EXTERNALLY SOURCED files with a fixed naming
+    # shape, so excusing them by name costs the guard nothing: a test
+    # that writes data/whatever.db is still caught, which is the case
+    # it exists for.
+    EXTERNAL = ("BhavCopy_", "sec_bhavdata", "MW-")
+
+    def _fetched_by_the_live_chain(path):
+        name = os.path.basename(path)
+        return name.startswith(EXTERNAL)
+
     def _written_by_a_live_process(path):
+        if _fetched_by_the_live_chain(path):
+            return True
         if not path.endswith(".lock"):
             return False
         try:

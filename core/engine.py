@@ -1429,7 +1429,8 @@ class Engine:
         Returns a dict stamped onto the position. Never raises -- a
         bookkeeping lookup must not be able to block a trade.
         """
-        out = {"news_kind": None, "filing_kind": None, "results_grade": None,
+        out = {"news_kind": None, "filing_kind": None,
+               "results_grade": None, "sector_move": None,
                "days_since_results": None, "had_reason": 0,
                "reason_summary": None}
         parts = []
@@ -1470,7 +1471,29 @@ class Engine:
         except Exception:                                  # noqa: BLE001
             pass
 
-        if out["news_kind"] is None:
+        # ---- A WHOLE SECTOR MOVING IS ITSELF THE EVENT ----
+        #      20 August 2026.
+        #
+        #     "if complete sector is being rallied then something is
+        #      happening underlying right?"
+        #
+        # On 20 August ten sugar names ran 7-17% together and every
+        # one was refused for "no event behind it" -- MAGADSUGAR on
+        # FIFTEEN times its normal volume. Each name individually had
+        # no filing, and nothing ever asked about the group.
+        #
+        # Measured before arming: six or more members co-moving gives
+        # a next-session excess of +0.925 against a +0.550 control of
+        # any lone 5% mover. At FOUR members it is +0.526 -- nothing.
+        # See core/sector_map.co_moving() for the table.
+        #
+        # A REASON, satisfying "no event, no trade". Not a score.
+        sector_move = self._sector_co_move_reason(symbol)
+        if sector_move:
+            out["sector_move"] = sector_move
+            parts.append(f"sector:{sector_move}")
+
+        if out["news_kind"] is None and not out.get("sector_move"):
             # on_date is the caller's clock -- a replay of a past
             # morning must not read events that had not happened yet.
             channel = self._channel_event_kind(symbol, on_date)
@@ -1597,6 +1620,43 @@ class Engine:
         if not summary:
             return "  [PRICE ONLY -- no event behind it]"
         return f"  [EVIDENCE: {summary}]"
+
+    def _sector_co_move_reason(self, symbol):
+        """Is this stock's whole group moving today? A sentence or None.
+
+        Reads the circuit poller's snapshot -- the same ~1,300-symbol
+        picture the gainers table is drawn from -- so it costs no
+        extra network and cannot disagree with the board about what
+        moved.
+
+        Never raises: this runs on the reason path and a broken lookup
+        must refuse a reason, not stop a tick.
+        """
+        try:
+            from core.rules import SECTOR_CO_MOVE_IS_A_REASON
+            if not SECTOR_CO_MOVE_IS_A_REASON:
+                return None
+            snapshot = ((self.circuit_monitor.get_snapshot() or {})
+                        if self.circuit_monitor is not None else {})
+            if not snapshot:
+                return None
+            moves = {}
+            for name, row in snapshot.items():
+                try:
+                    last = float((row or {}).get("last_price") or 0)
+                    prev = float((row or {}).get("prev_close") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if last > 0 and prev > 0:
+                    moves[str(name).upper()] = (last - prev) / prev * 100.0
+            if not moves:
+                return None
+            from core import sector_map
+            return sector_map.co_move_reason(symbol, moves)
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[SECTOR] co-move check failed "
+                       f"({type(exc).__name__}).")
+            return None
 
     def _channel_event_kind(self, symbol, when=None):
         """The PRO channel event behind this stock today, or None.

@@ -136,7 +136,14 @@ def test_the_channel_only_fills_in_when_RSS_has_nothing():
                src.find("def _channel_event_kind")]
     code = "\n".join(ln for ln in body.splitlines()
                      if not ln.lstrip().startswith("#"))
-    assert 'if out["news_kind"] is None:' in code, (
+    # ---- THE CONDITION GREW, THE RULE DID NOT. 20 Aug 2026 ----
+    # This matched the literal 'if out["news_kind"] is None:'. On
+    # 20 August a sector co-move became a reason too, so the line
+    # reads '... is None and not out.get("sector_move")'. What must
+    # hold is that the channel lookup is GUARDED by news_kind being
+    # empty -- not that the guard is spelled a particular way.
+    guard = code[:code.find("_channel_event_kind(symbol")]
+    assert 'out["news_kind"] is None' in guard, (
         "the channel event is overwriting a stance-carrying RSS item")
 
 

@@ -755,3 +755,131 @@ def commodity_tilt(symbol, on_date=None, path=MASTER_CSV):
     tilt = 1.0 + max(-1.0, min(1.0, lean)) * span
     tilt = max(TILT_FLOOR, min(TILT_CEILING, tilt))
     return round(tilt, 4), "; ".join(reasons)
+
+# ==========================================================
+#  A WHOLE SECTOR MOVING IS ITSELF THE EVENT
+# ==========================================================
+#
+#     "if complete sector is being rallied then something is happening
+#      underlying right?"      -- operator, 20 August 2026
+#
+# 20 August, the sugar complex, by 10:58 -- half a session:
+#
+#     BAJAJHIND  +16.7   DWARKESH   +15.6   MAGADSUGAR +9.9
+#     DHAMPURSUG  +9.9   RENUKA      +9.5   AVADHSUGAR +9.5
+#     DALMIASUG   +9.0   UTTAMSUGAR  +8.5   UGARSUGAR  +8.1
+#     TRIVENI     +7.4   BALRAMCHIN  +4.5
+#
+# The bot alerted on NONE of them, and its own journal says why:
+#
+#     MAGADSUGAR  vol 15.11x  "no event behind it"
+#     BALRAMCHIN  vol  4.37x  "no event behind it"
+#     DALMIASUG   vol  4.18x  "no event behind it"
+#
+# It asks "does THIS stock have a reason" one stock at a time. Each
+# sugar name individually had no filing, so each was refused --
+# correctly, by the rule as written. Ten names moving 7-17% together
+# was invisible, because nothing ever asked about the group.
+#
+# MEASURED BEFORE IT WAS ARMED, over a year of daily bars. For every
+# (day, group) where members moved 5%+ together, each member's NEXT
+# session, minus that session's market median:
+#
+#     control: ANY 5% mover        n=3622   +0.550
+#     4 members co-moving          n=1036   +0.526
+#     6 members co-moving          n= 417   +0.925
+#     8 members co-moving          n= 149   +0.763
+#
+# FOUR IS NOTHING. At four members a co-mover does no better than an
+# ordinary 5% mover -- +0.526 against +0.550 -- so "the sector is
+# moving" is not evidence on its own, and the first version of this
+# rule would have been wrong.
+#
+# SIX IS SOMETHING: +0.925 against a +0.550 control, an excess of
+# +0.375 over 57 events. Modest, consistent at eight, and the honest
+# reading is that a sector has to move BROADLY before it says anything
+# the stock's own momentum did not already say.
+#
+# So the threshold is six, not four, and it is a REASON -- something
+# that satisfies "no event, no trade" -- never a score of its own.
+
+#: How far a member must move to count toward its group.
+CO_MOVE_PCT = 5.0
+
+#: How many must move before the group means anything. Four measured
+#: as no better than a lone mover; six is where the excess appears.
+CO_MOVE_MIN_MEMBERS = 6
+
+#: Groups outside this size cannot say anything. Two names "co-moving"
+#: is a coincidence; a 200-name sector moving is the market.
+CO_MOVE_MIN_GROUP = 4
+CO_MOVE_MAX_GROUP = 60
+
+
+def co_moving(moves, min_move=CO_MOVE_PCT,
+              min_members=CO_MOVE_MIN_MEMBERS, path=MASTER_CSV):
+    """Which groups are moving TOGETHER right now.
+
+    `moves` is {symbol: percent move today}. Returns
+    {tag: [symbols that moved]} for every group with enough members
+    moving, biggest first. {} when nothing qualifies, which is the
+    normal answer on an ordinary day.
+
+    Never raises: this is read from the reason path and a broken
+    lookup must refuse a reason, not stop a tick.
+    """
+    if not moves:
+        return {}
+    try:
+        clean = {}
+        for symbol, value in moves.items():
+            try:
+                clean[str(symbol).strip().upper()] = float(value)
+            except (TypeError, ValueError):
+                continue
+        if not clean:
+            return {}
+
+        out = {}
+        for column in ("SECTOR", "INDUSTRY", "THEMES",
+                       "COMMODITY_EXPOSURE"):
+            for tag, symbols in (_tag_index(path).get(column) or {}).items():
+                if not (CO_MOVE_MIN_GROUP <= len(symbols)
+                        <= CO_MOVE_MAX_GROUP):
+                    continue
+                moved = sorted(s for s in symbols
+                               if clean.get(s, 0.0) >= min_move)
+                if len(moved) >= min_members:
+                    key = f"{tag}"
+                    if len(moved) > len(out.get(key, ())):
+                        out[key] = moved
+        return dict(sorted(out.items(), key=lambda kv: -len(kv[1])))
+    except Exception:                                       # noqa: BLE001
+        return {}
+
+
+def co_move_reason(symbol, moves, **kwargs):
+    """A sentence for `symbol` if its group is moving, else None.
+
+    The sentence is what he reads on the alert, so it carries the
+    count and the group -- "9 of 21 SUGAR names up 5%+" -- not a
+    verdict. He can disagree with a count.
+    """
+    symbol = str(symbol or "").strip().upper()
+    if not symbol:
+        return None
+    try:
+        for tag, moved in co_moving(moves, **kwargs).items():
+            if symbol in moved:
+                total = 0
+                for column in ("SECTOR", "INDUSTRY", "THEMES",
+                               "COMMODITY_EXPOSURE"):
+                    group = (_tag_index().get(column) or {}).get(tag)
+                    if group and symbol in group:
+                        total = max(total, len(group))
+                return (f"{len(moved)}"
+                        + (f" of {total}" if total else "")
+                        + f" {tag} names moving together today")
+    except Exception:                                       # noqa: BLE001
+        return None
+    return None

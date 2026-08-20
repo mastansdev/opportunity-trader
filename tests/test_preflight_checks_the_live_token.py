@@ -105,8 +105,42 @@ def test_a_token_dying_before_the_next_close_is_reported_broken(monkeypatch):
     import tools.dry_run_live_path as dr
     from core import dhan_auth
 
+    # ---- IT DEPENDED ON WHEN IT RAN. 20 August 2026. ----
+    #
+    # This failed once in an 18-minute suite and passed on its own
+    # afterwards, and the reason is not a code fault: a 6-minute token
+    # evaluated at 15:25 genuinely DOES outlive a 15:30 close, so
+    # _token() was right to say so. The test's blanket claim -- "it
+    # may never claim to outlive the next close" -- is only true away
+    # from the last six minutes of a session.
+    #
+    # The clock is pinned to mid-session so the case the test exists
+    # for is the case it actually exercises. A test that is wrong for
+    # six minutes a day teaches him to re-run rather than look.
     monkeypatch.setattr(dhan_auth, "access_token", lambda *a, **k: _jwt(0.1))
     monkeypatch.setattr(dhan_auth, "source", lambda: "totp")
+
+    # BOTH sides of the comparison have to move together. Pinning only
+    # the clock left _jwt() building an expiry from the REAL time, so
+    # a "6 minute" token read as 4.7 hours old against a pinned 11:00
+    # -- a fixture disagreeing with itself, which is worse than the
+    # flake it was meant to cure.
+    import datetime as _dt
+
+    pinned = _dt.datetime(2026, 8, 20, 11, 0)          # a Thursday, mid-session
+    expires = pinned + _dt.timedelta(minutes=6)
+
+    body = {"exp": int(expires.replace(
+        tzinfo=_dt.timezone(_dt.timedelta(hours=5, minutes=30))).timestamp())}
+    raw = base64.urlsafe_b64encode(json.dumps(body).encode()).decode()
+    monkeypatch.setattr(dhan_auth, "access_token",
+                        lambda *a, **k: f"head.{raw.rstrip('=')}.sig")
+
+    class _Pinned(_dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return pinned.replace(tzinfo=tz)
+    monkeypatch.setattr(dr, "datetime", _Pinned)
 
     ok, message = dr._token()
     # Six minutes of life left. Whatever the weekday, that is never a

@@ -238,6 +238,26 @@ CHANNELS = [
      "trust_hashtags": False},
     {"handle": "daytradertelugu", "name": "Day Trader Telugu",
      "kind": "image", "trust_hashtags": False},
+
+    # ---- ADDED 20 AUGUST 2026, ON HIS INSTRUCTION. ----
+    #
+    #     "redbox global added to pro channel in telegram , bot need
+    #      to get data from that channel too"
+    #
+    # Handle verified with tools/telegram_channels.py rather than read
+    # off the screenshot he sent -- that showed @REDBOXINDIA, which is
+    # the X account. The Telegram channel is @Indiaredboxglobal, and a
+    # wrong handle here reads NOTHING, silently, for as long as nobody
+    # checks.
+    #
+    # trust_hashtags is FALSE. Its copy is macro and sector-level --
+    # "COPPER COMPANIES WOULD BE IN FOCUS", "LME COPPER ONE-DAY SPREAD
+    # HITS $110" -- so its tags describe a THEME, not the one company
+    # a card is about. News Pulse taught this exact lesson on 8 August
+    # when four Siemens Energy stories arrived tagged #SIEMENS and the
+    # bot believed the tag.
+    {"handle": "Indiaredboxglobal", "name": "RedboxGlobal India",
+     "kind": "text", "trust_hashtags": False},
 ]
 
 # English words that are also NSE tickers. Matching these would tag
