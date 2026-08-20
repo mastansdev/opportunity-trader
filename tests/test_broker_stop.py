@@ -51,6 +51,29 @@ import pytest
 from trading.broker_stop import BrokerStop, hard_stop_price
 
 
+@pytest.fixture(autouse=True)
+def _these_tests_are_about_LIVE(monkeypatch):
+    """---- ADDED 19 AUGUST 2026, AND IT IS NOT A LOOSENING. ----
+
+    Every test in this file exercises what the broker stop does when
+    it is ARMED, against a fake Dhan. They were passing while
+    TRADING_MODE was PAPER, because nothing checked.
+
+    That is precisely what went wrong at 14:26 that day: a PAPER buy
+    of NILKAMAL produced a REAL resting SELL at Dhan, because
+    BROKER_STOP_ENABLED read its own flag and nothing else. Placement
+    now refuses unless TRADING_MODE is LIVE.
+
+    So these tests must SAY they are about live trading. Declaring it
+    here is the honest form -- the alternative was relaxing the guard
+    to keep a suite green, which is how the fault would come back.
+
+    tests/test_a_real_stop_never_guards_a_paper_trade.py holds the
+    other side: that PAPER sends nothing at all.
+    """
+    monkeypatch.setattr("config.TRADING_MODE", "LIVE")
+
+
 class FakeDhan:
     """Records what was asked of Dhan, and can be told to fail."""
 

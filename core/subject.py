@@ -239,6 +239,29 @@ def _headline_owner(head):
     text = " " + re.sub(r"\s+", " ", _clean_keep_spaces(head)) + " "
     for name, symbol in _name_index():
         if f" {name} " in text:
+            # ---- MINISTRY OF DEFENCE IS NOT A COMPANY. 19 Aug 2026 ----
+            #
+            # "#STOCKSTOWATCH #HAL wins order from Ministry of Defence"
+            # resolved its owner to DEFENCE -- a REAL NSE ticker whose
+            # name in the master is the single word "DEFENCE" -- so the
+            # owner was not HAL, and the card was judged to be about
+            # nobody.
+            #
+            # A one-word company name matches any sentence containing
+            # that ordinary word, and defence, power, motors and
+            # finance are all over Indian market copy. That is not a
+            # headline naming a company, it is a coincidence.
+            #
+            # So a single-word name only wins when the card's own tags
+            # name it. An explicit hashtag is strong evidence; one
+            # common word inside a sentence is not. Multi-word names --
+            # the SIEMENS/ENRIN case this function was written for --
+            # are untouched, because two words in sequence are not a
+            # coincidence.
+            if " " not in name:
+                tags = declared(head)
+                if tags and not any(_same(symbol, tag) for tag in tags):
+                    continue
             return symbol
     return None
 

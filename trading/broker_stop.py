@@ -86,6 +86,23 @@ SHORT = "SHORT"
 GONE = ("TRADED", "CANCELLED", "REJECTED", "EXPIRED")
 
 
+def _trading_is_live():
+    """Is TRADING_MODE LIVE right now? Never raises.
+
+    Unreadable means NOT live: refusing to rest a protective order
+    costs a restart, while resting one against a simulated position
+    costs money and cannot be taken back once it fills.
+
+    Read at call time, never cached -- he edits .env between sessions
+    and a stale answer here places live orders.
+    """
+    try:
+        from config import TRADING_MODE
+        return str(TRADING_MODE).upper() == "LIVE"
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 class BrokerStop:
     """Resting stop orders at Dhan, one per open position.
 
@@ -217,6 +234,26 @@ class BrokerStop:
         """
         if not self._live():
             return None
+
+        # ---- A REAL ORDER MAY NOT PROTECT A PRETEND POSITION ----
+        #      19 August 2026.
+        #
+        # The second, independent check. core/engine.py already
+        # refuses to arm this when TRADING_MODE is not LIVE, and this
+        # one exists because on 19 August a PAPER buy of NILKAMAL at
+        # 14:26:33 produced a REAL resting SELL at Dhan ten seconds
+        # later. One flag decided it, and that flag knew nothing about
+        # whether the rest of the system was simulating.
+        #
+        # Read at call time, never cached: he edits .env between
+        # sessions, and a stale answer here places live orders.
+        if not _trading_is_live():
+            warn(f"[BROKER_STOP] REFUSED to rest a stop for {symbol}: "
+                 f"TRADING_MODE is not LIVE. A resting order at the "
+                 f"broker is a live instruction and the position it "
+                 f"would protect is simulated.")
+            return None
+
         try:
             qty = int(qty)
             stop_price = round(float(stop_price), 2)
@@ -242,10 +279,34 @@ class BrokerStop:
                 exchange_segment=self.segment,
                 transaction_type=side,
                 product_type=self.product,
-                # MARKET on trigger, deliberately. A LIMIT can go
-                # unfilled through a gap-down, and an unfilled
-                # protective order is the thing this file exists to
-                # prevent. The price is not the point; being out is.
+                # ---- THIS CLAIM IS NOT WHAT DHAN DID. 19 Aug 2026 ----
+                #
+                # The comment here read: "MARKET on trigger,
+                # deliberately. A LIMIT can go unfilled through a
+                # gap-down." That is the right INTENT and it is not
+                # what came back.
+                #
+                # On 19 August this sent orderType=MARKET, price=0,
+                # triggerPrice=2023.75 to /forever/orders. Dhan booked
+                # it as:
+                #
+                #     NILKAMAL   SELL 28 LIMIT MTF -> REJECTED
+                #
+                # A LIMIT, at 2027.20 -- a price this code never sent.
+                # Dhan's Forever Order docs list price AND triggerPrice
+                # as both REQUIRED, so price=0 is very likely why.
+                #
+                # It was rejected for an unrelated reason (no MTF
+                # position to sell), so this is ONE observation and
+                # not a proven mechanism. It is written down rather
+                # than guessed at, and the guarantee above is
+                # withdrawn until a real LIVE stop is placed and the
+                # order book is read back.
+                #
+                # NOT redesigned on one data point. STOP_LOSS_MARKET
+                # exists in the modify contract and may be the right
+                # type here, and choosing it on this much evidence is
+                # how the wrong comment got written in the first place.
                 order_type=MARKET,
                 quantity=qty,
                 price=0,

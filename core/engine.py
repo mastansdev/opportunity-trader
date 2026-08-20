@@ -449,8 +449,44 @@ class Engine:
         #
         # OFF unless BROKER_STOP_ENABLED. See trading/broker_stop.py.
         from config import (BROKER_STOP_ENABLED, BROKER_STOP_RESYNC_PCT,
-                            BROKER_STOP_TAG_PREFIX, EXCHANGE_SEGMENT)
+                            BROKER_STOP_TAG_PREFIX, EXCHANGE_SEGMENT,
+                            TRADING_MODE)
         from trading.broker_stop import BrokerStop
+
+        # ---- THE BUY WAS IMAGINARY. THE SELL WAS REAL. ----
+        #      19 August 2026, 14:26.
+        #
+        #     "why dhan pipeline activiated & order placed to SELL
+        #      NILKAMAL?"
+        #
+        # Ten seconds apart in his log:
+        #
+        #   14:26:33  PAPER BUY NILKAMAL qty=28 @ 2075.64
+        #             (MANUAL_BUY_DASHBOARD)
+        #   14:26:43  [BROKER_STOP] NILKAMAL: SELL 28 resting at Dhan,
+        #             trigger 2023.75 (id 23132608191377)
+        #
+        # TRADING_MODE was PAPER, so the BUY was simulated and no
+        # order left the machine. BROKER_STOP_ENABLED reads its own
+        # flag and nothing else, so the protective SELL was placed
+        # FOR REAL, against a position that existed only in memory.
+        #
+        # Dhan rejected it -- he held no NILKAMAL MTF position to sell
+        # -- and that rejection is the only reason this cost nothing.
+        # The protection was the exchange's, not ours. Had he been
+        # holding NILKAMAL from his own trading, a stop derived from a
+        # paper entry could have been ACCEPTED against real shares.
+        #
+        # A resting order at a broker is a LIVE instruction. It cannot
+        # be armed by a flag that does not know whether the rest of
+        # the system is pretending.
+        _stop_live = str(TRADING_MODE).upper() == "LIVE"
+        if BROKER_STOP_ENABLED and not _stop_live:
+            warn(f"[BROKER_STOP] DISABLED -- BROKER_STOP_ENABLED is on "
+                 f"but TRADING_MODE is {TRADING_MODE}. A real resting "
+                 f"order must never protect a simulated position. "
+                 f"Set TRADING_MODE=LIVE to arm it.")
+
         self.broker_stop = BrokerStop(
             dhan_client=dhan_client,
             exchange_segment=EXCHANGE_SEGMENT,
@@ -458,7 +494,7 @@ class Engine:
             # A protective order on the wrong product would be refused
             # by Dhan, or worse, accepted against a different position.
             product_type="MTF",
-            enabled=BROKER_STOP_ENABLED,
+            enabled=BROKER_STOP_ENABLED and _stop_live,
             resync_pct=BROKER_STOP_RESYNC_PCT,
             tag_prefix=BROKER_STOP_TAG_PREFIX,
         )

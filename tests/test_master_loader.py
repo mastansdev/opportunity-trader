@@ -371,3 +371,51 @@ def test_no_tradeable_symbol_is_unknown_to_dhan():
         f"has no NSE equity for them. Their security ids still resolve "
         f"to something -- KEL's 18708 is VISDEM TECHNOSYS. Mark them "
         f"NO, or the bot can order a company nobody chose.")
+
+# ---------------------------------------------------------------
+# THE WRITER MAY NOT DELETE A COLUMN IT DOES NOT RECOGNISE
+# ---------------------------------------------------------------
+#
+# SERIES was restored by hand on 18 August and again on 19 August,
+# and the guard above caught it both times:
+#
+#     1306 tradeable row(s) have no SERIES, so the T2T gate cannot
+#     see them
+#
+# The cause was core/subscribe_list.write_master(): the header came
+# from a hardcoded REQUIRED_COLUMNS, and extrasaction was "ignore",
+# so any column not on that list was deleted on every nightly run
+# without a word. Five commands take turns editing that file and none
+# of them owns all of its columns.
+#
+# A guard that only fails a test does not stop a rewrite. This pins
+# the writer itself.
+
+def test_write_master_preserves_a_column_it_does_not_know_about(tmp_path):
+    import csv
+
+    from core.subscribe_list import write_master
+
+    path = tmp_path / "m.csv"
+    write_master([{"SECURITY ID": "1", "SYMBOL": "TCS", "SERIES": "EQ",
+                   "COMPANY NAME": "TCS", "SUBSCRIBE": "YES",
+                   "SUBSCRIBE_REASON": "", "SOMETHING_NEW": "kept"}],
+                 str(path))
+    got = list(csv.DictReader(path.open(encoding="utf-8")))
+    assert got[0]["SERIES"] == "EQ", (
+        "the nightly rewrite deletes SERIES again -- the T2T gate goes "
+        "blind on every tradeable row")
+    assert got[0]["SOMETHING_NEW"] == "kept"
+
+
+def test_the_required_columns_still_lead_the_header(tmp_path):
+    """Preserved, not reordered. He reads this file by eye."""
+    import csv
+
+    from core.subscribe_list import REQUIRED_COLUMNS, write_master
+
+    path = tmp_path / "m.csv"
+    write_master([{"SYMBOL": "TCS", "ZZZ_EXTRA": "x"}], str(path))
+    header = next(csv.reader(path.open(encoding="utf-8")))
+    assert header[:len(REQUIRED_COLUMNS)] == list(REQUIRED_COLUMNS)
+    assert header[-1] == "ZZZ_EXTRA"

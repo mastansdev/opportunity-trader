@@ -485,6 +485,36 @@ def write_master(rows, path=MASTER_CSV_PATH):
         if extra not in fieldnames:
             fieldnames.append(extra)
 
+    # ---- IT SILENTLY DROPPED A COLUMN EVERY NIGHT. 19 Aug 2026 ----
+    #
+    # The header came from REQUIRED_COLUMNS alone, and extrasaction
+    # was "ignore" -- so any column NOT on that hardcoded list was
+    # deleted on every nightly run, without a word.
+    #
+    # SERIES is not on the list. It was restored by hand on 18 August
+    # and again on the 19th, and the guard in
+    # tests/test_master_loader.py caught it both times:
+    #
+    #     1306 tradeable row(s) have no SERIES, so the T2T gate
+    #     cannot see them
+    #
+    # A T2T name is settlement-only -- it cannot be squared off
+    # intraday -- so a blind gate is a real trading fault, not a
+    # cosmetic one. And the guard only fails a test; it never stopped
+    # the rewrite, which is why this happened three times.
+    #
+    # Any column present on the ROWS is now preserved, appended after
+    # the required ones so the familiar order is unchanged. This file
+    # does not own the columns other tools add, and a writer that
+    # silently discards data it does not recognise is the wrong shape
+    # for a file five commands take turns editing.
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        for column in row:
+            if column not in fieldnames:
+                fieldnames.append(column)
+
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
