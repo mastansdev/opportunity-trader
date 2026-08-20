@@ -6,14 +6,37 @@
 # ---------------------------------------------------------------
 
 def test_cash_still_decides_below_the_working_ceiling():
-    """His rule first: "keep at least 1 lakh free cash & positions can
-    be build on remaining". Small account, small book."""
+    """---- HIS RULE CHANGED ON 20 AUGUST 2026. ----
+
+    It read: "keep at least 1 lakh free cash & positions can be build
+    on remaining" (8 August), and this test held him to it.
+
+        "no 1 lakh free cash rule"          -- 20 August
+
+    Why he removed it: the seat count is (capital - floor) / 30,000
+    and his free cash moves with his OWN manual trades in the same
+    account. At Rs 1,52,081 free the floor gave 1 seat; at Rs 1,20,000
+    it gave none. On an ordinary day it was not reserving a lakh, it
+    was closing the book.
+
+    Cash still decides -- that part is unchanged and is what this test
+    exists for. Only the reserve is gone.
+    """
     from core import capital
-    assert capital.slots(200_000)["total"] == 3
-    assert capital.slots(150_000)["total"] == 1
-    # The early return for "cannot afford one position" carries no
-    # `total` at all -- checked, not assumed.
-    assert capital.slots(120_000)["slots"] == 0
+    assert capital.slots(200_000)["total"] == 5
+    assert capital.slots(150_000)["total"] == 5
+    assert capital.slots(120_000)["total"] == 4
+    assert capital.slots(20_000)["slots"] == 0, (
+        "an account that cannot fund one position must still open none")
+
+
+def test_the_floor_machinery_still_works_if_he_restores_it():
+    """Set to 0, not deleted. Putting the reserve back is one number,
+    and the arithmetic that honours it must not rot while it is off."""
+    from core import capital
+    got = capital.slots(150_000, floor_rs=100_000)
+    assert got["total"] == 1, "the reserve no longer holds cash back"
+    assert capital.slots(120_000, floor_rs=100_000)["slots"] == 0
 
 
 def test_the_working_ceiling_holds_the_book_at_five():

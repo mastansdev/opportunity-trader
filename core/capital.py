@@ -49,8 +49,31 @@ Author : H&M Opportunity Trader
 ==========================================================
 """
 
-# Never deployed. His floor, stated in as many words.
-FREE_CASH_FLOOR_RS = 100_000.0
+# ---- RETIRED 20 AUGUST 2026, ON HIS INSTRUCTION. ----
+#
+#     "no 1 lakh free cash rule"
+#
+# It was his own, from 8 August -- "keep at least 1 lakh free cash &
+# positions can be build on remaining" -- and it was wired in here
+# exactly as he said it.
+#
+# What it does at today's balance is the reason he removed it. The
+# seat count is (capital - floor) / Rs 30,000, and his free cash
+# moves with his own manual trades:
+#
+#     Rs 1,52,081 free   ->  1 seat with the floor,  5 without
+#     Rs 1,20,000 free   ->  0 seats with the floor
+#
+# So on an ordinary day the floor was not reserving a lakh, it was
+# closing the book. Set to 0 rather than deleted: the arithmetic that
+# reads it is unchanged, and restoring the reserve is one number.
+#
+# WHAT STILL BOUNDS THE BOOK, so this is not "no limits":
+#   OWN_CASH_PER_POSITION_RS   Rs 30,000 of his own cash per position
+#   WORKING_MAX_POSITIONS      5, while the selector is unproven
+#   ABSOLUTE_MAX_POSITIONS     25, against a bad capital read
+#   config.DAILY_MAX_LOSS_RS   Rs 12,000, the day's stop
+FREE_CASH_FLOOR_RS = 0.0
 
 # Own cash committed per position. MTF supplies the rest, and how much
 # it supplies depends on the stock's own margin percentage.
