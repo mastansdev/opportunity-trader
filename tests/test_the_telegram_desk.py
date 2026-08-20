@@ -338,15 +338,26 @@ def test_an_unknown_kind_is_still_delivered(desk, sent):
                       "message": "something happened"}) is True
 
 
-def test_the_daily_cap_stops_it_and_says_so(desk, sent):
-    """311 alerts were written on 11 August. That volume on a phone
-    trains him to swipe them away unread."""
+def test_the_daily_ceiling_stops_it_and_says_so(desk, sent):
+    """311 alerts were written on 11 August, and that volume on a
+    phone trains him to swipe them away unread.
+
+    ---- THE WORD CHANGED, THE GUARANTEE DID NOT. 20 Aug 2026 ----
+    This asserted the message contains "cap". He asked "why only 25 ?
+    who decideds the markets", the ceiling was raised to a regression
+    brake and reworded to say so, and this failed on the word alone.
+    What it must actually guarantee is that the stop is ANNOUNCED and
+    names its own number -- a silent ceiling is the fault, not a
+    particular noun.
+    """
     from core.telegram_desk import PUSH_MAX_PER_DAY
     for i in range(PUSH_MAX_PER_DAY + 5):
         desk.push(dict(RANKED, symbol=f"SYM{i}"))
     assert len(sent) == PUSH_MAX_PER_DAY + 1, (
-        "the cap either leaked or went silent without saying so")
-    assert "cap" in sent[-1]["text"].lower()
+        "the ceiling either leaked or went silent without saying so")
+    said = sent[-1]["text"]
+    assert str(PUSH_MAX_PER_DAY) in said, "it did not say where it stopped"
+    assert "board" in said.lower(), "it did not say where the rest are"
 
 
 def test_push_never_raises_whatever_it_is_given(desk):

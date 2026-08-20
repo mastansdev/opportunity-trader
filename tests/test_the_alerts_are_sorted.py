@@ -316,3 +316,83 @@ def test_WHY_tells_him_a_board_pick_never_alerted():
     body = src[src.find("def _why("):src.find("def _opportunities")]
     assert "routing" in body
     assert "No alert sent" in body
+
+# ---------------------------------------------------------------
+# WHO DECIDES HOW MANY OPPORTUNITIES A DAY HAS
+# ---------------------------------------------------------------
+#
+#     "why only 25 ? who decideds the markets"
+#     "increase top=6 so i don't miss ranker approved setups"
+#                                 -- operator, 20 August 2026
+#
+# Both numbers were mine. On 20 August the alert cap withheld NINE of
+# 34 qualified alerts, and on the 19th the list cap discarded NINE of
+# 15 ranker-approved setups before the next filter even saw them.
+#
+# They are regression brakes now, sitting far above any honest day,
+# and the gates upstream decide what he sees.
+
+def test_the_alert_ceiling_is_a_brake_not_a_view_on_the_market():
+    from core.telegram_desk import PUSH_MAX_PER_DAY
+    assert PUSH_MAX_PER_DAY >= 100, (
+        "the ceiling is back down where it withholds real setups")
+
+
+def test_the_ranked_list_is_bigger_than_a_busy_day_survives():
+    """15 survived every gate on 19 August. The list may not be the
+    thing that decides what he sees."""
+    from core.ranker import RANKED_LIST_SIZE
+    assert RANKED_LIST_SIZE >= 20
+    import inspect
+    from core import ranker
+    assert inspect.signature(ranker.rank).parameters["top"].default ==         RANKED_LIST_SIZE
+
+
+def test_both_are_still_bounded():
+    """A brake with no limit is not a brake. A runaway upstream must
+    not be able to ring his phone three hundred times or hand the
+    board a thousand rows."""
+    from core.ranker import RANKED_LIST_SIZE
+    from core.telegram_desk import PUSH_MAX_PER_DAY
+    assert PUSH_MAX_PER_DAY <= 500
+    assert RANKED_LIST_SIZE <= 100
+
+
+def test_the_plain_breakout_lane_cannot_spend_the_whole_budget(desk):
+    """20 August, by lane: 24 plain breakouts against 9 ranked picks,
+    sharing one first-come-first-served budget. A quiet-but-good
+    morning must not be crowded out by a busy-but-thin one."""
+    from core.telegram_desk import PUSH_MAX_UNRANKED_PER_DAY
+
+    for i in range(PUSH_MAX_UNRANKED_PER_DAY + 10):
+        desk.push({"symbol": f"BRK{i}", "kind": "alert-only-LONG",
+                   "message": f"BRK{i} LONG -- STRUCTURAL_LONG_BREAKOUT"})
+    spent = len(desk.sent)
+
+    desk.push({"symbol": "RAILTEL", "kind": "ranked-buy",
+               "at": "11:00:00",
+               "message": "RAILTEL BUY -- order win, 29x volume"})
+    assert len(desk.sent) > spent, (
+        "a ranked pick was blocked by the plain-breakout lane's noise")
+
+
+def test_the_lane_budget_announces_itself_once(desk):
+    from core.telegram_desk import PUSH_MAX_UNRANKED_PER_DAY
+
+    for i in range(PUSH_MAX_UNRANKED_PER_DAY + 5):
+        desk.push({"symbol": f"B{i}", "kind": "alert-only-LONG",
+                   "message": f"B{i} LONG -- breakout"})
+    said = [m for m in desk.sent if "lane" in m["text"]
+            or "breakouts today" in m["text"]]
+    assert len(said) == 1, "the lane budget went quiet, or nagged"
+
+
+def test_a_ranked_pick_is_never_counted_against_the_lane_budget(desk):
+    from core.telegram_desk import PUSH_MAX_UNRANKED_PER_DAY
+
+    for i in range(PUSH_MAX_UNRANKED_PER_DAY + 20):
+        desk.push({"symbol": f"R{i}", "kind": "ranked-buy",
+                   "at": "11:00:00",
+                   "message": f"R{i} BUY -- a real reason"})
+    assert len(desk.sent) >= PUSH_MAX_UNRANKED_PER_DAY + 20, (
+        "ranked picks are being charged to the unranked lane")

@@ -157,6 +157,28 @@ SWAP_MARGIN = 2.0
 # More than 3% back from the day's extreme is a stock being sold into,
 # not one being bought. And a move that has done less than 0.15% in the
 # last window has stopped, whatever the day's number says.
+# ---- SIX WAS MINE, NOT THE MARKET'S. 20 August 2026. ----
+#
+#     "increase top=6 so i don't miss ranker approved setups"
+#
+# The chain on 19 August at 12:12:
+#
+#     120 considered -> 15 kept by every gate -> 6 (this number)
+#                    -> 2 after the card/liveness filter
+#
+# NINE setups passed every gate the ranker has -- reason, volume,
+# sector lead, liveness, MTF, a sizeable plan -- and were discarded
+# purely by list length, before the next filter even saw them. It was
+# a default argument, it was never reported, and it is the same shape
+# as every other invisible filter found this week.
+#
+# 25 sits well above the 15 that survived the gates on a busy day, so
+# the gates decide what he sees and this number does not. It stays
+# bounded only so a runaway upstream cannot hand the board a thousand
+# rows -- the same regression-brake reasoning as the alert ceiling in
+# core/telegram_desk.py.
+RANKED_LIST_SIZE = 25
+
 MAX_OFF_EXTREME_PCT = 3.0
 MIN_RECENT_PCT = 0.15
 
@@ -448,7 +470,8 @@ def _best_of_each_sector(rows):
         depth += 1
 
 def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
-         adv_of=None, blocked=None, held=None, mtf_of=None, top=6,
+         adv_of=None, blocked=None, held=None, mtf_of=None,
+         top=RANKED_LIST_SIZE,
          now=None, open_of=None):
     """Everything moving right now, best first, with the reason.
 

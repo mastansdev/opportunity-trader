@@ -78,18 +78,48 @@ CONFIRM_SECONDS = 60
 # 25 seconds when the market is quiet.
 POLL_SECONDS = 25
 
-# ---- THE PHONE IS NOT THE LOG. 18 August 2026. ----
+# ---- WHO DECIDES HOW MANY OPPORTUNITIES A DAY HAS? ----
+#      20 August 2026.
 #
-# The Engine's alert notes ran 200-360 A DAY from 31 July to 12 August
-# -- 311 on the 11th alone. That is the correct volume for a log file
-# and it is an unusable volume for a phone: an alert he swipes away
-# unread is worse than no alert, because he stops looking at the ones
-# that matter.
+#     "why only 25 ? who decideds the markets"
 #
-# So this is a hard daily ceiling, not a preference. When it is hit he
-# is told once that it was hit and where the rest are, which is the
-# one thing a silent cap must never do -- go silent without saying so.
-PUSH_MAX_PER_DAY = 25
+# He is right, and 25 was mine, not the market's.
+#
+# It was set on 18 August against a real problem: the alert notes ran
+# 200-360 A DAY from 31 July to 12 August, 311 on the 11th alone.
+# That is a firehose, and an alert he swipes away unread is worse
+# than no alert because he stops reading the ones that matter.
+#
+# But those gates were then tightened -- a reason is required, volume
+# is required, the pick has to be sizeable, MTF-eligible and still
+# moving -- and the firehose is gone:
+#
+#     19 August   12 alerts
+#     20 August   34 alerts   (cap bit at 25; NINE were withheld)
+#
+# Those 34 had each passed every gate upstream. A cap built to stop
+# noise was withholding qualified setups, which is exactly the
+# invisible-filter fault this project has spent a week removing.
+#
+# So the ceiling stops being a preference and becomes what it should
+# always have been: a REGRESSION BRAKE. It sits far above any honest
+# day, so it never touches real opportunities, and it still catches a
+# future gate failure before his phone rings three hundred times.
+PUSH_MAX_PER_DAY = 120
+
+# ---- AND THE WEAK LANE MUST NOT CROWD OUT THE STRONG ONE ----
+#
+# 20 August, by lane:
+#
+#     ranked      9    reason + volume + sector + a sizeable plan
+#     breakout   24    a level being crossed
+#
+# The budget was first-come-first-served across both, so the lane
+# with no score and often no event could spend it before the ranked
+# picks arrived. Reserving the ceiling for the ranked lane and giving
+# the unranked one its own smaller budget means a quiet-but-good
+# morning is never crowded out by a busy-but-thin one.
+PUSH_MAX_UNRANKED_PER_DAY = 30
 
 # A sizing refusal ("the stop is 140 away, a single share risks more
 # than the Rs 1,500 budget") is a REASON THE BOT DID NOTHING. It
@@ -189,6 +219,7 @@ class TelegramDesk:
         # a bot left running over midnight starts the new day at zero.
         self._push_day = None
         self._pushed = 0
+        self._pushed_unranked = 0
         # SCORE walks 19M candles. Once per session is enough.
         self._score_cache = None
         # Every ranked score pushed today, so each new alert can say
@@ -265,7 +296,7 @@ class TelegramDesk:
                 return False
             if not available():
                 return False
-            if not self._budget_allows():
+            if not self._budget_allows(kind):
                 return False
             return bool(send(self._card(symbol, kind, message,
                                         note.get("at"))))
@@ -361,26 +392,48 @@ class TelegramDesk:
             card += f"\n\n`{verb} {symbol}`   _(then_ `YES`_)_"
         return card
 
-    def _budget_allows(self):
-        """One counter, reset by date. It says so once when it stops.
+    def _budget_allows(self, kind=""):
+        """Two counters, reset by date. Each says so once when it stops.
 
         A cap that goes quiet without announcing itself is the same
         failure as no alert at all, dressed as a working one.
+
+        The UNRANKED lane -- a level being crossed, no score, often no
+        event -- has its own smaller budget so it cannot spend the
+        day's ceiling before the ranked picks arrive. On 20 August it
+        produced 24 of 34 alerts, and the ceiling was shared.
         """
         today = datetime.now().strftime("%Y-%m-%d")
+        unranked = str(kind or "").startswith("alert-only")
+
         with self._lock:
             if self._push_day != today:
                 self._push_day = today
                 self._pushed = 0
+                self._pushed_unranked = 0
             self._pushed += 1
-            n = self._pushed
-        if n <= PUSH_MAX_PER_DAY:
+            total = self._pushed
+            if unranked:
+                self._pushed_unranked += 1
+            lane = self._pushed_unranked
+
+        # Outside the lock deliberately -- send() is a network call.
+        if unranked and lane > PUSH_MAX_UNRANKED_PER_DAY:
+            if lane == PUSH_MAX_UNRANKED_PER_DAY + 1:
+                send(f"_{PUSH_MAX_UNRANKED_PER_DAY} plain breakouts "
+                     f"today -- that lane's budget. Picks with a "
+                     f"reason behind them still come through; the rest "
+                     f"are on the board._")
+            return False
+
+        if total <= PUSH_MAX_PER_DAY:
             return True
-        if n == PUSH_MAX_PER_DAY + 1:
-            # Outside the lock deliberately -- send() is a network call.
-            send(f"_That is {PUSH_MAX_PER_DAY} alerts today, the daily "
-                 f"cap. Anything further is on the board and in the "
-                 f"log -- nothing is hidden from the bot itself._")
+        if total == PUSH_MAX_PER_DAY + 1:
+            send(f"_That is {PUSH_MAX_PER_DAY} alerts today. That "
+                 f"ceiling is a brake against a broken gate, not a "
+                 f"view about the market -- if it just fired on an "
+                 f"ordinary day, tell me and it moves. Everything "
+                 f"further is on the board and in the log._")
         return False
 
     # ---------------- inbound ----------------
