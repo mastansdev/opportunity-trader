@@ -186,12 +186,34 @@ def _call(method, **params):
 
 
 def send(text, chat_id=None):
-    """Push a message to him. True if it went. Never raises."""
+    """Push a message to him. True if it went. Never raises.
+
+    MARKDOWN FIRST, THEN PLAIN. 20 August 2026.
+
+    parse_mode="Markdown" was unconditional. Telegram rejects the WHOLE
+    message with 400 if it cannot parse the entities, and _call turns
+    that into one diagnostic line and returns None -- so the alert
+    simply never arrives and the desk looks asleep:
+
+        Bad Request: can't parse entities: Can't find end of the
+        entity starting at byte offset 12
+
+    One unbalanced _ or * is enough. The card quotes the PRO channel
+    message verbatim, and those are arbitrary text -- "Q1_FY27",
+    "*BREAKOUT*" with a missing star, a bare underscore in a filing
+    title. The formatting is not worth the message: a plain alert he
+    can read beats a bold one he never sees.
+    """
     target = chat_id or _chat_id()
     if not target or not text:
         return False
-    return _call("sendMessage", chat_id=target, text=str(text)[:4000],
-                 parse_mode="Markdown",
+    body = str(text)[:4000]
+    got = _call("sendMessage", chat_id=target, text=body,
+                parse_mode="Markdown",
+                disable_web_page_preview="true")
+    if got is not None:
+        return True
+    return _call("sendMessage", chat_id=target, text=body,
                  disable_web_page_preview="true") is not None
 
 
