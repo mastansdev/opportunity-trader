@@ -185,6 +185,39 @@ def _call(method, **params):
         return None
 
 
+def _escape_md(text):
+    """Neutralise Markdown in text we did not write.
+
+    THE UNDERSCORES WERE EATEN. 21 August 2026.
+
+    He pasted his own phone back at me. Sent:
+
+        INBOUND + FORMATTING TEST from @HMalgo_Bot -- Q1_FY27
+
+    Received:
+
+        INBOUND + FORMATTING TEST from @HMalgoBot -- Q1FY27
+
+    Two underscores made a balanced pair, Telegram read them as
+    italics, and DELETED THEM FROM THE TEXT. This is worse than the
+    400 fixed the same morning, because a 400 is loud and this is
+    not: the alert arrives looking perfectly fine and says something
+    other than what was written.
+
+    The card quotes the PRO channel message verbatim -- strangers'
+    text, full of underscores and stars. A headline reading
+    "Q1_FY27 order_win 12_5cr" reaches him as "Q1FY27 orderwin 125cr",
+    and 12_5cr -> 125cr is a NUMBER CHANGING on an alert he trades on.
+
+    Only the body is escaped. The header and the `BUY SYM` block are
+    ours, they are deliberate, and they stay formatted.
+    """
+    out = str(text or "")
+    for ch in ("\\", "_", "*", "`", "["):
+        out = out.replace(ch, "\\" + ch)
+    return out
+
+
 def send(text, chat_id=None):
     """Push a message to him. True if it went. Never raises.
 
@@ -409,7 +442,7 @@ class TelegramDesk:
         # The TIME leads, because that is the first field he named and
         # a card without one cannot be told from a repeat.
         when = str(note_at or datetime.now().strftime("%H:%M:%S"))[:5]
-        card = f"*{when}  {symbol}  {head}*\n{message}"
+        card = f"*{when}  {symbol}  {head}*\n{_escape_md(message)}"
         if symbol and symbol != "?":
             card += f"\n\n`{verb} {symbol}`   _(then_ `YES`_)_"
         return card

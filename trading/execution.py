@@ -23,6 +23,7 @@ Same for a missing client: LIVE without a Dhan client refuses to start.
 
 from config import TRADING_MODE, I_UNDERSTAND_THIS_PLACES_REAL_ORDERS
 from core.logger import warn
+from trading.broker_view import BrokerView
 from trading.paper_execution import PaperExecution
 
 
@@ -57,6 +58,30 @@ class Execution:
         else:
             self.executor = PaperExecution(turnover_lookup=turnover_lookup)
             self.mode = "PAPER"
+
+            # ---- SIMULATED ORDERS, REAL BOOK. 21 August 2026. ----
+            #
+            #   "why bot is unable to see dhan account complete
+            #    holdings? ... none of them were happening then whats
+            #    the use of the bot trading?"
+            #
+            # He held nine real positions at Dhan and the dashboard
+            # showed a phantom NILKAMAL. The client was here the whole
+            # time -- main.py passes it in BOTH modes -- and this
+            # branch threw it away, because one line decided both
+            # "may we place orders" and "may we look".
+            #
+            # Those are different questions. Simulating a fill must
+            # never touch his account; READING what he already holds
+            # touches nothing at all. BrokerView has no order method
+            # of any kind, so this cannot become the NILKAMAL fault
+            # a second time.
+            view = BrokerView(dhan_client, price_lookup=price_lookup)
+            if view.available:
+                self.executor.broker_book = view.broker_book
+                self.executor.holdings = view.holdings
+                self.executor.positions = view.positions
+            self.broker_view = view
 
     def buy(self, security_id, symbol, price, qty, reason="", at_time=None):
         return self.executor.buy(security_id, symbol, price, qty, reason,

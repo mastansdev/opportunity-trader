@@ -154,11 +154,41 @@ def _bot_trading_now(state):
     if alert_only is None:
         return {"on": None, "known": False,
                 "note": "no reading from the engine -- unknown, not off"}
+
+    # ---- THE NOTE SAID "REAL" WHILE THE MODE SAID PAPER. 21 Aug ----
+    #
+    # He armed the bot at 07:51 in PAPER and the dashboard answered
+    # "placing REAL orders". Nothing real was leaving the machine --
+    # the note was hardcoded to the SWITCH and never read the MODE.
+    #
+    # This is the NILKAMAL fault pointing the other way. There, a
+    # paper position quietly grew a real order. Here, a paper session
+    # is labelled real. Both come from one flag being asked a question
+    # it does not know the answer to, and the label is the thing he
+    # reads to decide whether to stop everything.
+    #
+    # Read at CALL time. He edits the mode between sessions and a
+    # value captured at import describes the last run, not this one.
+    try:
+        from config import TRADING_MODE
+        mode = str(TRADING_MODE).upper()
+    except Exception:                                       # noqa: BLE001
+        mode = "UNKNOWN"
+    live = mode == "LIVE"
+
+    if alert_only:
+        note = "watching only -- it alerts and records, places nothing"
+    elif live:
+        note = "placing REAL orders"
+    else:
+        note = (f"armed, but {mode} -- orders are simulated and "
+                f"nothing reaches the broker")
+
     return {"on": not alert_only, "known": True,
             "open_positions": len(getattr(engine, "open_positions", {}) or {}),
-            "note": ("placing REAL orders" if not alert_only else
-                     "watching only -- it alerts and records, "
-                     "places nothing"),
+            "mode": mode,
+            "placing_real_orders": bool(not alert_only and live),
+            "note": note,
             "resets_on_restart": True}
 
 

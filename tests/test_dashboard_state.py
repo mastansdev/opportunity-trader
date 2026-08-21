@@ -469,12 +469,52 @@ def test_no_live_prices_falls_back_to_the_stored_close(tmp_path):
     assert gl["as_of"] == "2026-08-12"
 
 
-def test_gainers_losers_throttled_not_rebuilt_every_refresh():
+class _FrozenClock:
+    """The real `time` module with monotonic() standing still.
+
+    ---- THE TEST RACED THE THING IT WAS TESTING. 21 Aug 2026 ----
+
+    This failed two runs in three on the operator's machine. The
+    throttle window is GAINERS_LOSERS_REFRESH_SECONDS = 30s, and a
+    single DashboardState.refresh() takes 23-33s here -- it loads
+    2,646 liquidity symbols and a 2,401-symbol shortlist reference.
+    So on a loaded run the window expired BETWEEN the two refreshes
+    and the rebuild it then did was correct behaviour.
+
+    A test that fails because the machine is busy teaches the suite
+    to be ignored, which is worse than the bug it was watching for.
+    Nothing in the assertion ever needed real elapsed time: it is
+    about the cache being reused INSIDE the window. So the window is
+    now held open instead of raced.
+
+    Everything except monotonic() is delegated, because state.py uses
+    the module for other things and replacing it wholesale would
+    break them silently.
+    """
+
+    def __init__(self, module, at):
+        self._module = module
+        self._at = at
+
+    def __getattr__(self, name):
+        return getattr(self._module, name)
+
+    def monotonic(self):
+        return self._at
+
+
+def test_gainers_losers_throttled_not_rebuilt_every_refresh(monkeypatch):
     """Operator's own choice: 'for every 5 mins', not on every
     DashboardState.refresh() call -- config.GAINERS_LOSERS_REFRESH_SECONDS.
     A second refresh() immediately after the first must reuse the
     exact same cached result, even if the underlying snapshot data
     has since changed."""
+    import time as _time
+
+    import dashboard.state as _state
+    monkeypatch.setattr(_state, "time",
+                        _FrozenClock(_time, _time.monotonic()))
+
     loader = _loader({"TCS": "IT"})
     engine = _FakeEngine(circuit_snapshot={
         "TCS": _quote(115.0, 111.0, 116.0, 110.0, 100.0, 50000),
