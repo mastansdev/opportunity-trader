@@ -75,7 +75,7 @@ KIND_PATTERNS = [
         r"financial\s+result|unaudited\s+result|audited\s+result|"
         r"quarterly\s+result|outcome\s+of\s+board\s+meeting.*result", re.I)),
     ("ORDER_WIN", re.compile(
-        r"\border\b|\bcontract\b|letter\s+of\s+(intent|award)|\bLOI\b|"
+        r"\border(s)?\b|\bcontract(s)?\b|letter\s+of\s+(intent|award)|\bLOI\b|"
         r"work\s+order|bags\b|secures\b|awarded", re.I)),
     ("APPROVAL", re.compile(
         r"approval|USFDA|\bFDA\b|\bCDSCO\b|licen[cs]e|patent|"
@@ -87,6 +87,9 @@ KIND_PATTERNS = [
         r"fund\s+rais|preferential\s+issue|\bQIP\b|rights\s+issue|"
         r"debenture|allotment\s+of\s+(equity|shares)", re.I)),
     ("PAYOUT", re.compile(r"dividend|buyback|bonus\s+issue|stock\s+split", re.I)),
+    ("CONCALL", re.compile(r"investor\s+meet|analysts?\s*/?\s*institutional"
+                            r"|con\.?\s*call|earnings\s+call|investor\s+"
+                            r"presentation", re.I)),
     ("RATING", re.compile(r"credit\s+rating|rating\s+(action|revision)", re.I)),
     ("GOVERNANCE", re.compile(
         r"resignation|appointment|cessation|change\s+in\s+(management|"
@@ -138,7 +141,33 @@ def classify(subject, body=""):
     for kind, pattern in KIND_PATTERNS:
         if pattern.search(text):
             return kind
-    return None
+
+    # ---- 468 OF 602 WERE BEING THROWN AWAY. 21 August 2026 ----
+    #
+    #     "even 100 qty on today top gainers 5 stocks would have bring
+    #      profit of 10-20 k today . check that."     -- operator
+    #
+    # It was Rs 30,556, and WELCORP was Rs 11,420 of it. Its filing:
+    #
+    #     "Analysts/Institutional Investor Meet/Con. Call Updates"
+    #     classify() -> None
+    #
+    # No KIND_PATTERN matches an investor call, so the biggest gainer
+    # of the day had its filing fetched, classified as nothing, and
+    # DISCARDED -- after which the ranker refused the stock for having
+    # "no event behind it".
+    #
+    # Measured the same afternoon against NSE's own feed: of 602
+    # filings in 24 hours, 134 classified and 468 were dropped. The
+    # bot was seeing 22% of what the exchange published.
+    #
+    # UNRECOGNISED IS NOT NOISE. NOISE has its own test above and is
+    # still refused. Everything else is now KEPT as OTHER, which
+    # core/why_moving.FILING_WEIGHT scores below the reason bar -- so
+    # this changes what the bot can SEE without changing what it will
+    # BUY, and the subjects can be measured before any of them are
+    # promoted.
+    return "OTHER"
 
 
 def _parse_stamp(value):

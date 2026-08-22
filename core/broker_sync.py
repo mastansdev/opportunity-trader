@@ -281,7 +281,41 @@ class BrokerSync:
         Only wired when an Engine was handed over, and it only ever
         DELETES from the bot's own book -- it places no order and
         touches nothing at the broker.
+
+        ---- NEVER IN PAPER. 21 August 2026. ----
+
+        A PAPER position does not exist at Dhan and never will. That
+        is not a discrepancy, it is the definition of a simulation.
+
+        On 21 August the bot was given a read-only broker view in
+        PAPER for the first time (trading/broker_view.py, so it could
+        finally see his nine real holdings). Ninety seconds after the
+        restart:
+
+            11:19:09  NCC: the bot still holds 230, Dhan has none --
+                      it was closed elsewhere.
+            11:19:09  NCC: removed from the bot's book. It will not be
+                      managed or exited.
+            11:19:09  URBANCO: ... removed from the bot's book.
+
+        Two live paper positions, deleted for the crime of being
+        simulated. Before the view existed this could not fire in
+        PAPER because there was no reader at all, so the reconciler
+        had never once been asked this question outside LIVE.
+
+        READING the broker is safe in every mode. RECONCILING against
+        it is only meaningful when the two books are supposed to
+        describe the same money. Read at call time -- the mode is
+        edited between sessions.
         """
+        try:
+            from config import TRADING_MODE
+            live = str(TRADING_MODE).upper() == "LIVE"
+        except Exception:                                   # noqa: BLE001
+            live = False
+        if not live:
+            return None
+
         engine = getattr(self, "engine", None)
         if engine is None:
             return None

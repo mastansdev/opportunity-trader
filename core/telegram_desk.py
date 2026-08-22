@@ -131,6 +131,7 @@ _HELP = """*Opportunity Trader*
 
 `STATUS`      bot on/off, positions, day P&L
 `POSITIONS`   what is open, with stops
+`HOLDINGS`    everything you hold at Dhan, worst first
 `PNL`         today, closed only
 `TOP`         what the bot likes right now
 `ALERTS`      every alert raised today
@@ -447,6 +448,60 @@ class TelegramDesk:
             card += f"\n\n`{verb} {symbol}`   _(then_ `YES`_)_"
         return card
 
+    def send_plain(self, text):
+        """A message that is NOT an opportunity alert. True if it went.
+
+        ---- WHY IT DOES NOT GO THROUGH push() ----
+
+        push() builds a CARD and spends the day's alert budget
+        (PUSH_MAX_PER_DAY). A holdings crossing is neither: it is not
+        a stock to buy, it carries no `BUY SYM` line, and it must not
+        be able to exhaust the budget that the morning's opportunities
+        need. On 20 August the unranked lane spent 24 of 34 alerts
+        before the ranked picks arrived, which is exactly the failure
+        to avoid repeating here.
+
+        Plain by choice too -- these carry his own P&L figures and
+        Markdown has eaten characters out of this desk once already
+        (21 August, "12_5cr" arriving as "125cr").
+        """
+        try:
+            return send(str(text))
+        except Exception as exc:                            # noqa: BLE001
+            diagnostic(f"[TG] send_plain failed: {type(exc).__name__}")
+            return False
+
+    def _holdings(self):
+        """Everything he holds at Dhan -- not just what the bot opened.
+
+        ---- HIS SPECIFICATION, 21 August 2026 ----
+
+            "bot trading - ON/OFF = ON > bot trades + track old
+             positions ; OFF > Bot Observe the markets & alerts about
+             opportunities + track old positions"
+
+        TRACKING IS UNCONDITIONAL. This deliberately does not consult
+        alert_only, TRADING_MODE, or anything else -- reading his
+        account is safe in every one of those states, and the two
+        weeks his nine real positions went unwatched were the cost of
+        pretending otherwise.
+
+        POSITIONS is the bot's own book. HOLDINGS is his.
+        """
+        try:
+            from core import holdings_watch
+            executor = getattr(
+                getattr(self.engine, "execution", None), "executor", None)
+            reader = getattr(executor, "holdings", None)
+            if reader is None:
+                return ("No broker view in this session -- the bot "
+                        "cannot see your Dhan account right now.")
+            rows = holdings_watch.watch(
+                reader(), on_date=datetime.now().strftime("%Y-%m-%d"))
+            return holdings_watch.digest(rows)
+        except Exception as exc:                            # noqa: BLE001
+            return f"Could not read your holdings: {type(exc).__name__}"
+
     def _budget_allows(self, kind=""):
         """Two counters, reset by date. Each says so once when it stops.
 
@@ -534,6 +589,8 @@ class TelegramDesk:
                 return self._status()
             if verb in ("POSITIONS", "POS"):
                 return self._positions()
+            if verb in ("HOLDINGS", "HOLD", "HOLDING"):
+                return self._holdings()
             if verb in ("TOP", "PICKS"):
                 return self._top()
             if verb in ("ALERTS", "ALERT"):

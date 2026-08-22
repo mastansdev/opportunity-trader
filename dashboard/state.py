@@ -3408,7 +3408,28 @@ class DashboardState:
         # the stock, grades yesterday's result and measures the gap --
         # it is a mechanism, and on 6 August it was the difference
         # between 0 candidates and a real list.
+        # ---- AND THE THIRD STORE. 21 August 2026. ----
+        #
+        #     "the top gainers/ movers itself proves something is
+        #      happening inside the stock right?"      -- operator
+        #
+        # It does, and the bot was holding the proof. Seven of the
+        # 21 August gainers were refused "no event behind it" while
+        # data/feeds.db held their NSE filings -- KRONOX's open offer,
+        # NETWEB's Rs 1,200 crore QIP, RHETAN's solar project. This
+        # function asked the PRO channels and the newswire and had
+        # never once opened the filing store.
+        #
+        # Same fault as 5 August, one store further on.
+        filing = None
+        watcher = getattr(self, "announcement_watcher", None)
+        if watcher is not None:
+            try:
+                filing = watcher.for_symbol(symbol)
+            except Exception:                              # noqa: BLE001
+                filing = None
         return why(events=events, news_hits=hits, symbol=symbol,
+                   filing=filing,
                    on_date=datetime.now().strftime("%Y-%m-%d"))
 
     def _safe_opportunity_memory(self):

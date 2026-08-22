@@ -1729,6 +1729,21 @@ def main():
     # see the note there for why. Nothing to do here.
 
     squared_off = False
+    # ---- TRACKING IS UNCONDITIONAL. 21 August 2026. ----
+    #
+    #   "bot trading - ON/OFF = ON > bot trades + track old positions ;
+    #    OFF > Bot Observe the markets & alerts about opportunities +
+    #    track old positions"                        -- operator
+    #
+    # His specification, and the switch is nowhere near this. It reads
+    # his Dhan account and speaks when a position CROSSES a line; it
+    # has no order path at all (core/holdings_watch.py).
+    try:
+        from core.holdings_watch import HoldingsMonitor
+        holdings_monitor = HoldingsMonitor()
+    except Exception as _exc:                              # noqa: BLE001
+        holdings_monitor = None
+        warn(f"[HOLDINGS] Not watching your Dhan book ({_exc}).")
     last_heartbeat = time.monotonic()
     last_dashboard_refresh = time.monotonic()
     last_tick_count = 0
@@ -1938,6 +1953,26 @@ def main():
                              f"Reconcile before trading it again.")
             except Exception as _exc:                      # noqa: BLE001
                 diagnostic(f"[LIVE] in-flight sweep skipped ({_exc}).")
+
+            # HIS OWN POSITIONS, WATCHED. Same reasoning as the sweep
+            # above: a REST call on his account belongs on the
+            # heartbeat, not the tick loop. Never raises -- watching
+            # his book must not be able to stop the session.
+            try:
+                if holdings_monitor is not None:
+                    _ex = getattr(engine, "execution", None)
+                    _ex = getattr(_ex, "executor", _ex)
+                    _read = getattr(_ex, "holdings", None)
+                    if _read is not None:
+                        _rows, _says = holdings_monitor.sweep(
+                            _read(),
+                            on_date=datetime.now().strftime("%Y-%m-%d"))
+                        for _msg in _says:
+                            decision(f"[HOLDINGS] {_msg.splitlines()[0]}")
+                            if telegram_desk is not None:
+                                telegram_desk.send_plain(_msg)
+            except Exception as _exc:                      # noqa: BLE001
+                diagnostic(f"[HOLDINGS] sweep skipped ({_exc}).")
 
             if time.monotonic() - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
                 tick_count = market_data.get_tick_count()

@@ -94,6 +94,7 @@ from core.rules import (
     MIN_TRADABLE_PRICE_RS,
     NOT_A_REASON,
     is_a_reason,
+    REQUIRE_A_REASON_ALWAYS,
     UNEXPLAINED_MIN_VOLUME_RATIO,
     UNEXPLAINED_WEIGHT,
     RANKER_W_EXCESS_SECTOR as W_EXCESS_SECTOR,
@@ -668,6 +669,16 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
             # This is NOT the old "buy anything that moves". Price
             # alone still proves nothing: without volume confirming
             # that money actually changed hands, the refusal stands.
+            # ---- THE TAPE IS NOT A REASON. 21 August 2026 ----
+            # rules.REQUIRE_A_REASON_ALWAYS. NCC, 8.54x normal volume
+            # and no event of any kind, was bought twice on 21 August
+            # through the lane below. His instruction has always been
+            # "an event or real opportunity ... NEVER in to random
+            # stocks", and volume says money moved, not why.
+            if REQUIRE_A_REASON_ALWAYS:
+                refuse(symbol, "no event behind it -- the tape is not "
+                               "a reason")
+                continue
             if vratio is None or vratio < UNEXPLAINED_MIN_VOLUME_RATIO:
                 refuse(symbol, "no reason found, and no volume behind it")
                 continue

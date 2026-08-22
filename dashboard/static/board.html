@@ -365,9 +365,25 @@ impressive -- if there is no store behind it, it is not on the list.
     6. the reason as SOURCE.PHRASE -- "Earnings.Excellent Results" --
        not a sentence assembled on the page.
   -->
+  <!-- ---- HE COULD NOT SEE HIS OWN TRADES. 21 August 2026. ----
+
+       "those 4 paper trades also not visible to me in dashboard? if
+        they r not visible how i can see & why bot is programmed like
+        this?"                                     -- operator
+
+       They were rendered correctly, on the POST tab, inside
+       <div id="post-pane" style="display:none">. The board opens on
+       LIVE. So the tab he actually looks at showed him the market and
+       never once showed him what the bot had done in it -- four round
+       trips and Rs -873 realised, invisible unless he knew to click.
+
+       One line, on the tab that is already open. It links to POST for
+       the detail rather than duplicating the table. -->
   <div class="bar" style="margin-bottom:10px;">
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
       <span style="font-size:13px;" id="counts">&mdash;</span>
+      <span id="todayline" style="font-size:12px;cursor:pointer;"
+            title="click for the full list on the Post tab"></span>
       <span style="font-size:12px;color:var(--muted);">sort</span>
       <button class="tab sortb on" data-sort="activity">Activity</button>
       <button class="tab sortb" data-sort="change">Change%</button>
@@ -1100,13 +1116,34 @@ start of day limit: Rs ${bf.sod}` : "");
   // as a live one is worse than no table at all, so it is labelled
   // here, with its date, in the one place he already looks for the
   // freshness of the screen.
+  // ---- EMPTY AND BUILDING LOOK THE SAME. 21 August 2026. ----
+  //
+  //     "restarted but dashboard is not showing any data. all empty"
+  //
+  // Nothing was broken. dashboard/state.py takes ABOUT FOUR MINUTES
+  // to publish its first snapshot after a restart -- it loads 2,646
+  // liquidity symbols, a 2,401-symbol shortlist reference and a
+  // 1,298-symbol circuit poll before updated_at is set at all.
+  //
+  // Until then every table renders its own empty state -- "no trades
+  // closed today", "no pre-open prices yet" -- which is exactly what
+  // a DEAD bot looks like. He restarted, looked, and drew the only
+  // reasonable conclusion.
+  //
+  // The freshness line already had a FROZEN state for a board that
+  // stopped updating. It had none for one that has not STARTED,
+  // because `built` is empty and every branch here assumed it was
+  // not. Now it says which of the two it is.
   const gl0 = s.gainers_losers || {};
-  $("clock").textContent = gl0.at_close
-    ? `${built} \u2014 showing the ${gl0.as_of || "last"} CLOSE (not live)`
-    : (frozen
-        ? `${built} \u2014 FROZEN (market closed, prices are not updating)`
-        : built);
-  $("clock").style.color = (frozen || gl0.at_close)
+  const starting = !built;
+  $("clock").textContent = starting
+    ? "starting up \u2014 first build takes about a minute; the tables below are not empty, they are not filled in yet"
+    : (gl0.at_close
+        ? `${built} \u2014 showing the ${gl0.as_of || "last"} CLOSE (not live)`
+        : (frozen
+            ? `${built} \u2014 FROZEN (market closed, prices are not updating)`
+            : built));
+  $("clock").style.color = (frozen || gl0.at_close || starting)
     ? "var(--warn-fg)" : "var(--muted)";
 
   // ---- A KEY THAT WAS NEVER PUBLISHED. 11 August 2026. ----
@@ -1347,6 +1384,32 @@ function drawPost(s){
   // gross: brokerage and STT are already subtracted, so the number on
   // the screen is the number that reached the account.
   const done = s.closed_positions || [];
+
+  // The one line on the LIVE tab. Same array as the table below, so
+  // the summary and the detail cannot disagree.
+  const tl = $("todayline");
+  if (tl){
+    if (!done.length){
+      tl.innerHTML = "";
+    } else {
+      let net = 0;
+      for (const t of done){
+        const v = (t.net_pnl !== null && t.net_pnl !== undefined)
+          ? t.net_pnl : t.pnl;
+        net += Number(v) || 0;
+      }
+      const col = net >= 0 ? "var(--up)" : "var(--down)";
+      tl.innerHTML = `<span style="color:var(--muted);">today</span> `
+        + `<b>${done.length}</b> closed `
+        + `<b style="color:${col};">${rs(net)}</b>`
+        + ` <span style="color:var(--muted);">&rarr; Post</span>`;
+      tl.onclick = () => {
+        const b = document.querySelector('.tab[data-tab="post"]');
+        if (b) b.click();
+      };
+    }
+  }
+
   $("done").innerHTML = done.length ? done.map(t => {
     const net = (t.net_pnl !== null && t.net_pnl !== undefined) ? t.net_pnl : t.pnl;
     const why = [t.entry_reason, t.exit_reason].filter(Boolean).join(" → ") || "—";

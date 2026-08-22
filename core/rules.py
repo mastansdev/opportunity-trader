@@ -231,6 +231,37 @@ MIN_VOLUME_RATIO = 2.5
 # up at close against 44.3% under 2x. Not 10x -- that bucket is 1,267
 # of 13,272 signals, and a bar that high would close the lane rather
 # than tighten it.
+# ---- HIS CONCEPT, MADE ENFORCEABLE. 21 August 2026 ----
+#
+#     "Opportunity Trader Bot = only trades when an event or real
+#      opportunity arised in markets, NEVER in to random stocks &
+#      only long positions."                    -- standing instruction
+#
+#     "i gave u my concept & reasons to enter into trade with evidence
+#      & underlying supports. still u cannot give me the wanted
+#      output."                                 -- 21 August 2026
+#
+# He was right, and this is the line that proved it. 21 August, the
+# bot took 3 signals out of 962:
+#
+#     JSFB     vol 6.03x   news=NEWS      evidence
+#     URBANCO  vol 5.18x   news=NEWS      evidence
+#     NCC      vol 8.54x   news=None filing=None results=None
+#
+# NCC was bought TWICE with nothing behind it, through the lane below
+# -- "exceptional volume standing in for an event". That lane was
+# built on real measurement (5-10x volume closed up 54.2% against
+# 44.3% under 2x) and it is still a thin edge, and it is NOT the thing
+# he asked for. Volume is evidence that money moved. It is not
+# evidence of WHY, and "why" is his entire premise.
+#
+# With this True the tape can no longer stand in for a reason. A stock
+# with no published event is refused however much volume it carries.
+# UNEXPLAINED_MIN_VOLUME_RATIO below is left exactly as measured, so
+# setting this False restores the old behaviour with its evidence
+# intact rather than losing the number.
+REQUIRE_A_REASON_ALWAYS = True
+
 UNEXPLAINED_MIN_VOLUME_RATIO = 5.0
 UNEXPLAINED_WEIGHT = 0.35
 
@@ -440,7 +471,35 @@ BREAKOUT_MAX_OFF_HIGH_PCT = 0.25
 
 # A stock must trade at least this much on an average day, or the
 # operator IS the volume and getting out costs more than getting in.
-MIN_LIQUIDITY_CR = 8.0
+# ---- SIZED FOR SOMEONE ELSE'S ACCOUNT. 21 August 2026 ----
+#
+#     "2 - too thin ? we are trading with most max - 100 qty right?"
+#
+# He was right, and the old justification was arithmetically wrong.
+# It read: "at Rs 1.2 lakh of MTF buying power a stock doing Rs 3
+# crore a day means the operator IS the volume". Rs 1.2 lakh of Rs 3
+# crore is 0.4% of a day. He is nowhere near being the volume.
+#
+# 21 August this refused THOMASCOOK at +12.81% -- ADV Rs 6.26 cr,
+# under the Rs 8 cr bar. His actual size in it:
+#
+#     100 shares x 113.62 = Rs 11,362  =  0.018% of a day
+#
+# WHAT THE NUMBER SHOULD BE, FROM HIS BOOK
+#
+#     purse           Rs   93,463
+#     MTF ~3x         Rs 2,80,000 of buying power
+#     3 seats         Rs   93,000 a position, at the very most
+#
+# To stay under 1% of a stock's daily turnover he needs an ADV of
+# Rs 0.93 cr. Rs 2 cr keeps his largest possible position under HALF
+# a percent of the day, which is the point the gate was built to
+# protect -- getting out costing more than getting in.
+#
+# Raise it again when the account does. It is a function of HIS size,
+# not a property of the market, and it was never re-derived when the
+# account was.
+MIN_LIQUIDITY_CR = 2.0
 
 # What a stock must average per day to enter the universe at all.
 #

@@ -1854,7 +1854,50 @@ TREND_RANK_REFRESH_SECONDS = 5   # recompute the leaderboard at most this often
 #
 # HAS NEVER RUN IN PRODUCTION. Thursday is its first live session, on
 # paper, with a hard cap below.
-ENABLE_SLOT_ROTATION = True
+#
+# ---- THE FRIDAY MEASUREMENT, AND IT SAYS OFF. 21 Aug 2026 ----
+#
+# The note below asked for exactly this: "read tools/refused_review.py
+# on Friday and set it from the data." This is Friday. Every
+# ROTATED_OUT trade on record, data/trade_memory.db:
+#
+#     ROTATED_OUT        n= 15   net -Rs  1,860   won  3 of 15  (20%)
+#     every other exit   n=122   net -Rs 80,379   won 48 of 122 (39%)
+#
+#     median holding time      2.3 minutes
+#     closed inside 5 minutes  10 of 12
+#
+# It is the worst win rate of any exit reason in the book, and the
+# holding time says why. A position sold 2.3 minutes after entry was
+# not sold on information -- the setup had no time to work or to fail.
+# That is not "a stronger breakout needs the slot", it is noise
+# crossing a 0.4% edge back and forth.
+#
+# 21 August, live, in 32 minutes:
+#
+#     10:14  SELL URBANCO -> BUY JSFB
+#     10:18  SELL JSFB    -> BUY URBANCO    (sold 4 minutes earlier)
+#     10:22  SELL NCC     -> BUY JSFB       (sold 4 minutes earlier)
+#     10:31  SELL JSFB    -> BUY NCC        (sold 9 minutes earlier)
+#
+#     four legs, four losses, -Rs 873 realised
+#
+# It bought back what it had just sold, three times. Nothing forbids
+# that: ROTATED_OUT deliberately never arms BLOCK_REENTRY_AFTER_
+# STOPOUT so a rotated name can return "if it climbs back up the
+# leaderboard" -- written for a name that recovers over a session, not
+# one oscillating on a four-minute cycle. And ONE_TRADE_PER_SYMBOL_PER
+# _DAY, which would have stopped it, was assessed on 29 July against
+# RE-ENTRY AFTER A STOP-OUT, where a stock must fall 2.5% and break
+# out again. URBANCO was sold at -0.48%. That assessment never covered
+# this case.
+#
+# n=15 is small and this is not a permanent verdict. But the mechanism
+# is demonstrably churning rather than upgrading, and every leg pays
+# slippage and charges. OFF until a rotation is shown to beat holding.
+#
+# To put it back: set this True. The cap below is untouched.
+ENABLE_SLOT_ROTATION = False
 
 # At most this many swaps a day.
 #

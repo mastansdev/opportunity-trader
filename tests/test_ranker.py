@@ -254,10 +254,35 @@ def test_a_stock_with_no_measurement_is_never_a_candidate():
 
 
 def test_a_genuinely_thin_stock_is_refused_even_on_a_perfect_setup():
+    """---- THE BAR MOVED WITH HIS ACCOUNT. 21 August 2026 ----
+
+        "2 - too thin ? we are trading with most max - 100 qty right?"
+
+    MIN_LIQUIDITY_CR was 8.0 and refused THOMASCOOK at +12.81% on a
+    Rs 6.26 cr average day -- while his 100 shares were Rs 11,362, or
+    0.018% of that day. The gate is a function of HIS size and had
+    never been re-derived when the account was; it is now 2.0.
+
+    What this test defends has not changed: a stock nobody trades must
+    still be refused however good the setup looks, because getting out
+    of it costs more than getting in. Only the number that counts as
+    "nobody trades it" moved. Rs 50 lakh a day is thin at any size.
+    """
     rows = [mover("THIN", 12.0, "IT")] + [mover(f"P{i}", 1.0, "IT")
                                           for i in range(4)]
-    assert run(rows, adv=2.0)["rows"] == []
-    assert ranker.MIN_LIQUIDITY_CR >= 5
+    assert run(rows, adv=0.5)["rows"] == []
+    assert ranker.MIN_LIQUIDITY_CR >= 1.0, (
+        "the size gate has been opened far enough to stop being one")
+
+
+def test_the_bar_clears_a_stock_he_can_actually_trade():
+    """The other half, and the one that was costing him names.
+
+    THOMASCOOK's Rs 6.26 cr day must now reach the board: his largest
+    possible position in it is under half a percent of the volume."""
+    rows = [mover("THOMASCOOK", 12.0, "IT")] + [mover(f"P{i}", 1.0, "IT")
+                                                for i in range(4)]
+    assert [r["symbol"] for r in run(rows, adv=6.26)["rows"]] == ["THOMASCOOK"]
 
 
 def test_a_blocked_symbol_is_refused():

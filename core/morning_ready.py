@@ -89,10 +89,41 @@ def _rows(db_path, sql, args=()):
 
 
 def _parse(value):
+    """A stored timestamp as LOCAL naive time, or None.
+
+    ---- THE STORE IS UTC AND THE MARKET IS IST. 21 Aug 2026 ----
+
+    This used to delete the offset and keep the digits:
+
+        datetime.fromisoformat(str(value).replace("+00:00", ""))
+
+    data/telegram.db stamps "2026-08-21T07:00:34+00:00". That is
+    12:30:34 IST -- six minutes ago. Stripping the offset made it
+    07:00:34, which check() then compared against a LOCAL
+    datetime.now() of 12:36. Every message read exactly 5h30m older
+    than it was.
+
+    CATCH_UP_STILL_RUNNING_HOURS is 6.0, so the real gate became
+    "posts older than THIRTY MINUTES" instead of six hours, and on a
+    quiet channel that is most of the day. The operator could not arm
+    the bot from the dashboard:
+
+        "not ready to trade: STILL RECOVERING history -- it is
+         storing posts up to 6h old"
+
+    while the collector was six minutes behind.
+
+    The same UTC/IST confusion cost a day in the events store on
+    19 August (tests/test_the_news_reaches_the_record.py). Converting
+    is the fix; deleting the offset never was.
+    """
     try:
-        return datetime.fromisoformat(str(value).replace("+00:00", ""))
+        got = datetime.fromisoformat(str(value).strip())
     except Exception:                                      # noqa: BLE001
         return None
+    if got.tzinfo is not None:
+        got = got.astimezone().replace(tzinfo=None)
+    return got
 
 
 def check(now=None, telegram_db=TELEGRAM_DB, results_db=RESULTS_DB):

@@ -72,6 +72,7 @@ Author : H&M Opportunity Trader
 ==========================================================
 """
 
+from datetime import datetime, timedelta
 import re
 
 POSITIVE = "POSITIVE"
@@ -308,6 +309,132 @@ def from_events(events, on_date=None):
     return None
 
 
+# What an NSE filing is WORTH, by the kind core/feed_store.py stamps.
+# A binding corporate action is not the same evidence as an AGM notice,
+# and flattening them would put "Corrigendum to EGM notice" beside an
+# open offer on his phone.
+# ---- THE KINDS ARE THE STORE'S, NOT MINE. 21 Aug 2026 ----
+# The first version of this table guessed "ORDER" and "RESULT".
+# core/feed_store.py actually stamps ORDER_WIN and RESULTS, so the two
+# most valuable kinds fell through to a permissive default -- and so
+# did every kind nobody had thought about. "Press Release" reached his
+# board as a reason to buy. Read off the live store:
+#
+#     GOVERNANCE 57   Resignation of Director/KMP/SMP
+#     DEAL       24   Disclosure under SEBI Takeover Regulations
+#     PAYOUT     23   Record Date
+#     ORDER_WIN  23   Bagging/Receiving of orders/contracts
+#     RATING     20   Credit Rating- New
+#     RESULTS    16   Analysts/Institutional Investor Meet/Con. Call
+#     APPROVAL   10   Press Release
+#     FUND_RAISE  9   Allotment of Securities
+FILING_WEIGHT = {
+    "DEAL": 0.85, "ORDER_WIN": 0.85, "FUND_RAISE": 0.80,
+    "RESULTS": 0.80, "CONCALL": 0.60, "RATING": 0.65,
+    # OTHER is every filing core/announcement_watcher.classify() does
+    # not recognise. From 21 August those are KEPT rather than thrown
+    # away -- 468 of 602 a day were being discarded -- but kept below
+    # the bar, so the bot can SEE them without being allowed to BUY on
+    # them until a subject has earned it.
+    "OTHER": 0.30,
+    "APPROVAL": 0.40, "PAYOUT": 0.45, "GOVERNANCE": 0.35,
+}
+
+# An UNRECOGNISED kind is not a reason. The default used to be 0.55 --
+# above the bar -- so a kind nobody had classified counted as evidence
+# by accident. His rule is "an event or real opportunity", and a
+# subject line we cannot categorise is neither.
+FILING_DEFAULT_WEIGHT = 0.40
+
+# Below this a filing is recorded but is not, on its own, a reason to
+# buy. AGM notices and board-meeting intimations sit here.
+FILING_MIN_WEIGHT = 0.50
+
+
+def from_filing(filing, on_date=None, now=None):
+    """The NSE filing behind today's move, or None.
+
+    ==========================================================
+    IT READ TWO STORES OUT OF THREE. 21 August 2026.
+    ==========================================================
+
+        "the top gainers/ movers itself proves something is happening
+         inside the stock right?"                    -- operator
+
+    He was right, and the bot's own feed proved it. 21 August, seven
+    of the day's gainers were refused "no event behind it":
+
+        KRONOX     +9.3%   Public Announcement-Open Offer
+        NETWEB     +4.2%   Rs 1,200 crore QIP
+        RHETAN     +9.1%   1 MW solar project operational
+        IIFL       +6.2%   credit rating reaffirmed
+        THOMASCOOK +12.7%  AGM, Rs 0.50 dividend
+
+    Every one of those is a PUBLISHED NSE FILING, and data/feeds.db
+    was holding them -- 31 stored that day, newest at 13:05. The
+    trading path never opened it.
+
+    dashboard/state.py's _mechanism_for() asks core/stock_events.py
+    (the PRO channels) and core/news_impact.py (the newswire). It has
+    never asked the filing store. That is the SAME fault as 5 August,
+    when it read one store out of two and refused SHILPAMED all day
+    while three channels had graded it GOOD -- one store further on.
+
+    THE EVENING FILING IS THE POINT
+
+    KRONOX's open offer was filed at 18:43 on the 20th -- after the
+    close, which is exactly when the ones that move a stock get filed.
+    A same-day filter would miss precisely the filings that matter, so
+    the window runs from the PREVIOUS CLOSE, the same rule
+    Engine._channel_event_kind() already uses.
+    """
+    if not isinstance(filing, dict):
+        return None
+    subject = str(filing.get("subject") or "").strip()
+    if not subject:
+        return None
+
+    kind = str(filing.get("kind") or "").upper()
+    weight = FILING_WEIGHT.get(kind, FILING_DEFAULT_WEIGHT)
+    if weight < FILING_MIN_WEIGHT:
+        return None
+
+    # WINDOW: from the previous close to now. Anything older belongs
+    # to an earlier session's move, however important it was.
+    stamp = filing.get("_filed_dt") or filing.get("filed_at")
+    when = None
+    for text in (stamp, filing.get("at")):
+        if not text:
+            continue
+        try:
+            when = datetime.fromisoformat(str(text).replace("+00:00", ""))
+            break
+        except (TypeError, ValueError):
+            continue
+    if when is not None:
+        clock = now or datetime.now()
+        if on_date:
+            try:
+                clock = datetime.fromisoformat(str(on_date) + "T23:59:59")
+            except (TypeError, ValueError):
+                pass
+        # Previous close: 15:30 on the day before the session.
+        cutoff = clock.replace(hour=15, minute=30, second=0, microsecond=0)
+        if clock.hour < 15 or (clock.hour == 15 and clock.minute < 30):
+            cutoff -= timedelta(days=1)
+        else:
+            cutoff -= timedelta(days=1)
+        if when < cutoff:
+            return None
+        if when > clock:
+            return None
+
+    return {"text": subject,
+            "weight": weight,
+            "direction": UNKNOWN,
+            "source": f"NSE filing ({kind})" if kind else "NSE filing"}
+
+
 def from_news(hits):
     """The best newswire answer for ONE symbol, or None.
 
@@ -531,7 +658,7 @@ def _events_for(symbol):
 
 
 def _why_before_payoff(events=None, news_hits=None, on_date=None,
-                       symbol=None):
+                       symbol=None, filing=None):
     """The single answer, or None.
 
     PRO channels first -- they are the source he trusts and, on
@@ -546,8 +673,14 @@ def _why_before_payoff(events=None, news_hits=None, on_date=None,
     shape core/ranker.py's mechanism_of() already expects, so the
     ranker needs no new field to read.
     """
+    # ---- THE FILING STORE IS THE THIRD SOURCE. 21 August 2026 ----
+    # data/feeds.db holds the NSE announcements and no part of the
+    # trading path had ever opened it. See from_filing().
+    filed = from_filing(filing, on_date=on_date) if filing else None
+
     if not symbol:
-        return from_events(events, on_date=on_date) or from_news(news_hits)
+        return (from_events(events, on_date=on_date)
+                or filed or from_news(news_hits))
 
     # A result due TOMORROW is a warning, never a reason -- and it
     # outranks everything, because he holds overnight on MTF and
@@ -581,7 +714,11 @@ def _why_before_payoff(events=None, news_hits=None, on_date=None,
     if events is None:
         events = _events_for(symbol)
 
+    # The FILING sits between the PRO channels and the newswire: it is
+    # a primary document, so it beats a keyword match, but the channels
+    # carry a graded direction that a bare subject line does not.
     return (from_events(events, on_date=on_date)
+            or filed
             or from_news(news_hits)
             # ---- ORDER WINS AND BUSINESS UPDATES. 8 August 2026. ----
             #
@@ -656,7 +793,8 @@ def from_catalysts(symbol, on_date=None):
 # core/opportunity.payoff_weight() for why it stops well short of
 # letting a measurement decide anything on its own.
 
-def why(events=None, news_hits=None, on_date=None, symbol=None):
+def why(events=None, news_hits=None, on_date=None, symbol=None,
+        filing=None):
     """The reason this stock is moving, weighted by what that KIND of
     reason has actually been worth.
 
@@ -670,7 +808,8 @@ def why(events=None, news_hits=None, on_date=None, symbol=None):
     exactly as it was.
     """
     got = _why_before_payoff(events=events, news_hits=news_hits,
-                             on_date=on_date, symbol=symbol)
+                             on_date=on_date, symbol=symbol,
+                             filing=filing)
     if not isinstance(got, dict):
         return got
     try:

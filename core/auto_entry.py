@@ -59,6 +59,7 @@ Author : H&M Opportunity Trader
 ==========================================================
 """
 
+from config import ENABLE_SLOT_ROTATION
 from datetime import time as dtime
 
 LONG = "LONG"
@@ -695,7 +696,30 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None):
         # it since it was written. This one never called it, so the
         # tenth setup of the morning permanently outranked the best
         # setup of the afternoon.
-        rotate = getattr(engine, "_maybe_rotate_out", None)
+        # ---- ONE SWITCH, TWO DOORS. 21 August 2026. ----
+        #
+        #     "do u understand how stupid trade were bot trading?"
+        #
+        # 12:49:37  PAPER BUY  CDSL 47 @ 1390.80
+        # 12:49:48  [ROTATE] CDSL rotated OUT for URBANCO
+        # 12:49:48  PAPER SELL CDSL 47 @ 1391.50
+        #
+        # ELEVEN SECONDS. Gross +Rs 32.90, charges Rs 69.34, net
+        # -Rs 36.44 -- a winning trade turned into a loss by its own
+        # brokerage. Four of the day's five closed trades exited
+        # ROTATED_OUT, holding 0.2 to 23 minutes, for -Rs 1,029.33.
+        #
+        # ENABLE_SLOT_ROTATION was set False that morning, on the
+        # measurement the config file itself asked for (n=15, 20% win,
+        # median hold 2.3 minutes). It was honoured in core/engine.py
+        # and NOT here. Two call sites, one guard, and the unguarded
+        # one is the RANKED lane -- the lane he actually trades.
+        #
+        # A switch that turns something off in one place and not the
+        # other is worse than no switch: it reports a decision that
+        # was never carried out.
+        rotate = (getattr(engine, "_maybe_rotate_out", None)
+                  if ENABLE_SLOT_ROTATION else None)
         freed = False
         if callable(rotate):
             try:
