@@ -1347,7 +1347,20 @@ VOLATILITY_SCALED_STOP = True
 # core/rules.MIN_STOP_DISTANCE_PCT / MAX_STOP_DISTANCE_PCT (0.75% and
 # 6.0%), so no reading -- however strange -- can produce a stop that
 # is either meaningless or ruinous.
-DAILY_ATR_STOP_MULT = 1.2
+# ---- MEASURED, 22 August 2026 ----
+# 16,186 scored signals, identical history, only the multiple changed:
+#
+#     ATR x 1.2 (was)   avg -0.414%   stopped 15.1%
+#     ATR x 2.0         avg -0.256%   stopped  8.0%
+#     ATR x 2.5         avg -0.255%   stopped  8.0%   (plateau)
+#
+# It improves EVERY bucket -- evidence, no-evidence, high volume -- and
+# flattens at 2.0, so this is the measured value and not a guess. The
+# reason it matters: reason-backed stocks move further in both
+# directions (best move 2.04% against 1.25% for unexplained), so the
+# stop sized for a calm stock is the wrong stop for the ones his own
+# rule selects. It was cutting the winners before the thesis played out.
+DAILY_ATR_STOP_MULT = 2.0
 
 # ==========================================================
 # YOUR TRADES ARE YOURS  (2026-07-29, operator-found live)

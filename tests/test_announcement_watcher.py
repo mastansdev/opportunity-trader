@@ -137,7 +137,18 @@ def test_the_seven_real_filings_of_2026_07_27_are_caught(symbol, subject, body):
 def test_subject_alone_is_not_enough_and_that_is_the_point():
     """Kept as evidence, not as approval: this is what the feed really
     gives us, and why body must be read."""
-    assert classify("Outcome of Board Meeting") is None
+    # ---- None BECAME "OTHER". 21 August 2026 ----
+    # classify() used to DROP anything it could not name, and that was
+    # discarding 468 of NSE's 602 filings a day -- including WELCORP's
+    # investor-call intimation on the morning it rose 15%. Unrecognised
+    # filings are now KEPT as OTHER and scored below the buy bar by
+    # core/why_moving.FILING_WEIGHT.
+    #
+    # What this test is FOR is unchanged and is the important half: a
+    # bare "Outcome of Board Meeting" must NOT be read as a results
+    # filing. The words that identify it live in the attachment.
+    assert classify("Outcome of Board Meeting") == "OTHER"
+    assert classify("Outcome of Board Meeting") != "RESULTS"
 
 
 def test_the_filing_reaches_the_panel_end_to_end():

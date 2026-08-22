@@ -69,7 +69,23 @@ def test_the_railtel_case(monkeypatch):
     monkeypatch.setattr("core.atr.daily_atr_pct", lambda s, **kw: 2.08)
     got = plan(288.1, "BUY", day_low=287.8, symbol="RAILTEL")
     assert got["ok"] is True, "the best setup of the day is still dropped"
-    assert got["stop_pct"] == pytest.approx(2.496, abs=0.01)
+    # ---- DERIVED FROM THE RULE. 22 August 2026 ----
+    # This read 2.496 -- 1.2 x RAILTEL's 2.08% ATR. The multiple moved
+    # to 2.0 on a 16,186-signal measurement (x1.2 lost 0.414% and
+    # stopped out 15.1%; x2.0 lost 0.256% and stopped out 8.0%), and a
+    # hardcoded constant failed for describing the old value rather
+    # than the rule.
+    #
+    # What the RAILTEL case is FOR is the line above: the best setup of
+    # the day was DROPPED for a structural stop a tenth of a percent
+    # from entry, and it must be widened to the stock's own range
+    # instead of refused. That holds at any multiple.
+    from config import DAILY_ATR_STOP_MULT
+    from core.rules import MAX_STOP_DISTANCE_PCT
+    assert got["stop_pct"] == pytest.approx(
+        min(DAILY_ATR_STOP_MULT * 2.08, MAX_STOP_DISTANCE_PCT), abs=0.01)
+    assert got["stop_pct"] > 0.5, (
+        "the stop is back to being noise rather than a stop")
     assert got["qty"] >= 1
 
 

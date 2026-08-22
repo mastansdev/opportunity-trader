@@ -98,8 +98,35 @@ def test_a_calm_stock_and_a_wild_one_do_not_get_the_same_stop(
     calm = engine._hard_stop_pct("CALMCO")
     wild = engine._hard_stop_pct("WILDCO")
     assert wild > calm, "the whole point of the change"
-    assert calm == pytest.approx(0.018, abs=1e-6)      # 1.2 x 1.5%
-    assert wild == pytest.approx(0.054, abs=1e-6)      # 1.2 x 4.5%
+
+    # ---- DERIVED, NOT HARDCODED. 22 August 2026 ----
+    # These read 0.018 and 0.054 -- 1.2 x the two ATRs. The multiple
+    # moved to 2.0 on a measurement over 16,186 signals (x1.2 lost
+    # 0.414% and stopped out 15.1%; x2.0 lost 0.256% and stopped out
+    # 8.0%, flattening there), and this failed for describing the old
+    # constant rather than the rule.
+    #
+    # What the test is FOR is that a wild stock gets a wider stop than
+    # a calm one, in proportion to its own range. Pinning the arithmetic
+    # to the config keeps that true at any multiple, so a future
+    # measurement does not have to edit a test to land.
+    from config import DAILY_ATR_STOP_MULT
+    from core.rules import MAX_STOP_DISTANCE_PCT
+
+    def want(atr_pct):
+        return min(DAILY_ATR_STOP_MULT * atr_pct,
+                   MAX_STOP_DISTANCE_PCT) / 100
+
+    assert calm == pytest.approx(want(1.5), abs=1e-6)
+    assert wild == pytest.approx(want(4.5), abs=1e-6)
+
+    # ---- THE CEILING BINDS AT x2.0, AND THAT IS INTENDED ----
+    # A 4.5% ATR stock asks for 9% at the new multiple and is held to
+    # MAX_STOP_DISTANCE_PCT (6%). The 16,186-signal measurement that
+    # chose 2.0 was run WITH this ceiling in place, so the improvement
+    # it found is the improvement this code delivers -- the cap is not
+    # a surprise the number did not account for.
+    assert wild == pytest.approx(MAX_STOP_DISTANCE_PCT / 100, abs=1e-6)
 
 
 def test_an_unmeasurable_stock_falls_back_to_the_flat_number():
