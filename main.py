@@ -1738,6 +1738,32 @@ def main():
     # His specification, and the switch is nowhere near this. It reads
     # his Dhan account and speaks when a position CROSSES a line; it
     # has no order path at all (core/holdings_watch.py).
+    # ---- THE FINDERS, REPORTING ONLY. 23 August 2026. ----
+    #
+    #     "we will build all in different finders ... that report to
+    #      trade brain engine which will sort the stocks & select best
+    #      of best"                          -- operator
+    #
+    # Wired but NOT deciding. The live entry path is unchanged; this
+    # runs beside it and records what the finders WOULD have picked,
+    # so the switchover is made on a session of evidence rather than
+    # on hope. It places nothing and gates nothing.
+    trade_brain = None
+    try:
+        from core.finders import TradeBrain
+        from core.finder_set import build as _build_finders
+        trade_brain = TradeBrain(_build_finders(
+            ranked_rows=lambda: (dashboard_state.snapshot()
+                                 .get("ranked", {}) or {}).get("rows") or [],
+            # StockEvents.recent() is the real API -- there is no
+            # for_date(). The finders filter to today themselves; this
+            # only has to hand over what has arrived recently.
+            events_for=lambda d: (events_store.recent(limit=200, hours=12)
+                                  if events_store is not None else []),
+            volume_of=None), seats=MAX_OPEN_POSITIONS)
+    except Exception as _exc:                              # noqa: BLE001
+        warn(f"[BRAIN] Not reporting this session ({_exc}).")
+
     try:
         from core.holdings_watch import HoldingsMonitor
         holdings_monitor = HoldingsMonitor()
@@ -1973,6 +1999,20 @@ def main():
                                 telegram_desk.send_plain(_msg)
             except Exception as _exc:                      # noqa: BLE001
                 diagnostic(f"[HOLDINGS] sweep skipped ({_exc}).")
+
+            # WHAT THE FINDERS WOULD HAVE PICKED. Report only -- it
+            # decides nothing and places nothing. Compared against what
+            # the live path actually took, one session of this is what
+            # the switchover will be judged on.
+            try:
+                if trade_brain is not None:
+                    _said = trade_brain.report()
+                    if _said.get("candidates"):
+                        decision(f"[BRAIN] {_said['candidates']} candidate(s) "
+                                 f"{_said['by_finder']} -> would back "
+                                 f"{_said['picked']}")
+            except Exception as _exc:                      # noqa: BLE001
+                diagnostic(f"[BRAIN] report skipped ({_exc}).")
 
             if time.monotonic() - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
                 tick_count = market_data.get_tick_count()
