@@ -250,6 +250,11 @@ _SURVEILLANCE = re.compile(r"\bGSM\b|\bASM\b|SURVEILLANCE", re.I)
 # the sector. This is the reason text that keeps them out.
 UNCLASSIFIED_REASON = "new listing -- awaiting sector classification"
 
+# An unclassified stock is WATCHED when it trades at least this
+# much -- deliberately higher than MIN_TURNOVER_RS, because we
+# know less about it. Below this it stays off the feed.
+UNCLASSIFIED_MIN_TURNOVER_RS = 5 * 10 ** 7      # Rs 5 crore
+
 
 def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
            corporate_actions=None, min_turnover=MIN_TURNOVER_RS,
@@ -276,8 +281,37 @@ def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
     if symbol in excluded or looks_like_a_fund(symbol):
         return False, "ETF / SGB / SME -- not on our board"
 
+    # ---- A BLANK SECTOR CELL IS OUR GAP, NOT THE MARKET'S ----
+    #
+    #     "fix the coverage first"          -- operator, 23 August 2026
+    #
+    # 20 August: 22 of the day's top 50 gainers were INVISIBLE to the
+    # bot. KRONOX went +20% -- the same KRONOX whose open-offer filing
+    # was wired in the day before -- and there was no tick data for it,
+    # because its SECTOR cell is empty.
+    #
+    # 262 symbols carried this reason. Six are genuinely trusts/ETFs.
+    # The other 256 are ordinary companies whose master row was never
+    # filled in, and 100 of those trade over Rs 2cr a day -- JNPR at
+    # Rs 82.8cr, SYNCOMF Rs 17.4cr, ONMOBILE Rs 16.7cr. BANARISUG was
+    # in there labelled a "new listing"; it has been listed for
+    # decades.
+    #
+    # The rule conflated two different questions: may we WATCH this
+    # stock, and may we TRADE it. The original intent -- "never traded
+    # until a human fills in the sector" -- is about the second. It is
+    # enforced downstream, where the sector gates live.
+    #
+    # NSE has no industry field to fill these from (equityMetaInfo
+    # returns name and ISIN only), and guessing a sector from a company
+    # name would be inventing data. So the honest answer is: watch it
+    # if it is liquid enough to trade, and let the sector-dependent
+    # checks skip it. A stock nobody can see cannot be picked by any
+    # rule, however good.
     if not str(sector or "").strip():
-        return False, UNCLASSIFIED_REASON
+        turnover = float((bhav or {}).get("turnover") or 0)
+        if turnover < UNCLASSIFIED_MIN_TURNOVER_RS:
+            return False, UNCLASSIFIED_REASON
 
     if symbol in corporate_actions:
         return False, ("corporate action today -- price scale changes, "

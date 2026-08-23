@@ -117,8 +117,33 @@ def test_corporate_action_today_is_blocked():
     assert "corporate action today" in reason
 
 
-def test_unclassified_stock_is_blocked():
-    ok, reason = decide("NEWIPO", bhav=GOOD, sector="")
+def test_an_unclassified_stock_is_WATCHED_when_it_is_liquid():
+    """---- THE RULE CHANGED. 23 August 2026 ----
+
+    This asserted that a blank sector blocks the stock outright. On
+    20 August that meant 22 of the day's top 50 gainers were invisible
+    to the bot -- KRONOX +20% among them, the same KRONOX whose
+    open-offer filing had been wired in the day before.
+
+    262 symbols carried that reason; SIX were genuinely trusts. The
+    rest were ordinary companies with an unfilled master row, 100 of
+    them trading over Rs 2cr a day.
+
+    The gate conflated "may we WATCH this" with "may we TRADE it". The
+    intent -- never trade an unclassified stock -- is enforced
+    downstream where the sector gates live. A stock nobody can see
+    cannot be picked by any rule, however good.
+    """
+    assert decide("NEWIPO", bhav=GOOD, sector="")[0] is True
+
+
+def test_an_unclassified_stock_answers_a_HIGHER_bar():
+    """Not no bar. A feed slot is a real resource and we know less
+    about these, so they must trade more than a classified name to
+    earn one."""
+    from core.subscribe_list import UNCLASSIFIED_MIN_TURNOVER_RS
+    thin = dict(GOOD, turnover=UNCLASSIFIED_MIN_TURNOVER_RS - 1)
+    ok, reason = decide("NEWIPO", bhav=thin, sector="")
     assert ok is False
     assert reason == UNCLASSIFIED_REASON
 
