@@ -213,6 +213,11 @@ AT_CIRCUIT_PCT = 0.5
 #
 # Empty for fifteen minutes is the correct answer, and it is his:
 #     "no trade is far more than a bad pick/wrong pick trade"
+# Above this the denominator is broken, not the market. See
+# volume_ratio(): the field is SORTED ON, so corrupt values are picked
+# preferentially rather than diluted.
+MAX_SANE_VOLUME_RATIO = 50.0
+
 RANK_FROM_TIME = "09:30"
 
 
@@ -348,7 +353,36 @@ def volume_ratio(row, adv_cr):
     if volume is None or price is None or not adv_cr:
         return None
     traded_cr = volume * price / 1e7
-    return round(traded_cr / adv_cr, 2)
+
+    # ---- A BAD DENOMINATOR LANDS AT THE TOP OF THE SORT. 23 Aug ----
+    #
+    #     "first are you sure about the stocks traded are having
+    #      underlying reason in move"        -- operator, checking the
+    #                                           picks and finding them
+    #                                           reasonless
+    #
+    # 276 of 16,581 recorded multiples were over 50x. VINATIORGA read
+    # 7,799x when its real day was 7.4x; MIDHANI 1,782x against a true
+    # 14.7x; WAKEFIT 2,736x on a day it traded HALF its normal. The
+    # numerator was right every time -- data/liquidity.json's adv_cr
+    # was wrong for that symbol on that morning.
+    #
+    # 1.7% corrupt sounds survivable. It is not, because seats are
+    # filled by SORTING ON THIS FIELD and taking the top three: the
+    # broken values are picked preferentially, every single day. The
+    # measured "+Rs 565/trade for volume ordering" was partly this.
+    #
+    # No real stock trades 50x its own normal value. Above that the
+    # DENOMINATOR is broken, not the market, and the honest answer is
+    # UNMEASURED -- which core/finders.TradeBrain already sorts last.
+    # Returning a number here would be inventing one.
+    ratio = traded_cr / adv_cr
+    if ratio > MAX_SANE_VOLUME_RATIO:
+        diagnostic(f"[VOLUME] {row.get('symbol')}: {ratio:,.0f}x is not a "
+                   f"market event -- adv_cr {adv_cr} is wrong. Treating "
+                   f"the multiple as unmeasured.")
+        return None
+    return round(ratio, 2)
 
 
 def _at_circuit(row, side):
