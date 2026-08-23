@@ -72,8 +72,11 @@ Author : H&M Opportunity Trader
 ==========================================================
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
+
+# Indian market time. Stored stamps are UTC; the session is not.
+IST = timezone(timedelta(hours=5, minutes=30))
 
 POSITIVE = "POSITIVE"
 NEGATIVE = "NEGATIVE"
@@ -222,6 +225,53 @@ def _says_something(headline, symbol=None):
     return meat >= 3
 
 
+def _local_naive(text):
+    """A stored stamp as IST wall-clock, or None.
+
+    ---- THERE IS ONE CLOCK AND IT ALREADY EXISTED. 23 Aug 2026 ----
+    #
+    #     "why simple timing is still not resolved. we are in IST &
+    #      its +05:30 asian timing"     -- operator, 23 August 2026
+    #
+    # Because +05:30 was written out TEN separate times in this repo,
+    # and core/feed_clock.to_ist() -- built on 10 August from his own
+    # instruction, "create a mechanism if bot doesn't know" -- was
+    # used by almost none of them. Each fresh copy is a fresh chance
+    # to strip the offset instead of applying it, and stripping is
+    # what core/morning_ready.py, core/reaction.py, core/telegram_feed.py
+    # and the first draft of this function all did.
+    #
+    # 16,247 of 16,407 stored events carry "+00:00". Deleting that
+    # moves a stamp 5h30m earlier, so a post at 20:00 IST reads 14:30
+    # and falls BEFORE a 15:30 close -- throwing away the whole
+    # evening window this module exists to preserve.
+    #
+    # Naive comparisons here, so the offset is applied and then shed.
+    """
+    from core.feed_clock import to_ist
+    moment = to_ist(text)
+    return None if moment is None else moment.replace(tzinfo=None)
+
+
+def previous_trading_close(clock):
+    """15:30 on the last session before `clock`. Never raises.
+
+    One rule for every evidence source. Anything published after this
+    moment belongs to the session `clock` is in; anything before it
+    belonged to a session that has already been traded.
+    """
+    fallback = clock.replace(hour=15, minute=30, second=0,
+                             microsecond=0) - timedelta(days=1)
+    try:
+        from core.market_calendar import default_calendar
+        previous = default_calendar().previous_trading_day(clock.date())
+    except Exception:                                       # noqa: BLE001
+        return fallback
+    if previous is None:
+        return fallback
+    return datetime(previous.year, previous.month, previous.day, 15, 30)
+
+
 def from_events(events, on_date=None):
     """The best PRO channel answer for ONE symbol, or None.
 
@@ -232,11 +282,54 @@ def from_events(events, on_date=None):
     Yesterday's result is not why a stock is moving today, so callers
     on the live path should always pass on_date.
     """
+    # ---- LAST NIGHT'S NEWS IS WHY IT GAPS THIS MORNING. 23 Aug ----
+    #
+    #     "after market hours news/telegram channels updates will
+    #      recevie , store & use them when the opportunity occurs"
+    #                                    -- operator, 23 August 2026
+    #
+    # `on_date` was an exact date-string match, so an event carried
+    # the session it was POSTED in rather than the session it acts on.
+    # Everything the channels published after 15:30 was collected,
+    # stored, and then discarded the next morning:
+    #
+    #     Monday 21:00 order win, read on Tuesday   ->  LOST
+    #     Monday 16:10 result,    read on Tuesday   ->  LOST
+    #     Friday 18:30 news,      read on Monday    ->  LOST
+    #
+    # That is the whole after-hours channel feed -- which is when the
+    # exchange publishes, when the desks post, and when the stock that
+    # gaps tomorrow is decided. The bot then had no reason for the gap
+    # and REQUIRE_A_REASON_ALWAYS refused the stock.
+    #
+    # The window is now the same one filings use: the previous trading
+    # close to the end of the session being asked about. The docstring
+    # rule is unchanged and still enforced -- yesterday's IN-SESSION
+    # result is not why a stock moves today, because 14:00 Monday is
+    # before Monday's close.
+    window_from = window_to = None
+    if on_date:
+        try:
+            end = datetime.fromisoformat(str(on_date) + "T23:59:59")
+            window_from = previous_trading_close(end)
+            window_to = end
+        except (TypeError, ValueError):
+            window_from = window_to = None
+
     for event in (events or []):
         if not isinstance(event, dict):
             continue
         at = str(event.get("at") or "")
-        if on_date and not at.startswith(str(on_date)):
+        if window_from is not None:
+            when = _local_naive(at)
+            if when is None:
+                # No usable stamp. Fall back to the old exact-date
+                # match rather than letting an undated event through.
+                if not at.startswith(str(on_date)):
+                    continue
+            elif not (window_from < when <= window_to):
+                continue
+        elif on_date and not at.startswith(str(on_date)):
             continue
         if str(event.get("kind") or "").upper() not in _STOCK_KINDS:
             continue
@@ -406,11 +499,9 @@ def from_filing(filing, on_date=None, now=None):
     for text in (stamp, filing.get("at")):
         if not text:
             continue
-        try:
-            when = datetime.fromisoformat(str(text).replace("+00:00", ""))
+        when = _local_naive(text)
+        if when is not None:
             break
-        except (TypeError, ValueError):
-            continue
     if when is not None:
         clock = now or datetime.now()
         if on_date:
@@ -418,12 +509,29 @@ def from_filing(filing, on_date=None, now=None):
                 clock = datetime.fromisoformat(str(on_date) + "T23:59:59")
             except (TypeError, ValueError):
                 pass
-        # Previous close: 15:30 on the day before the session.
-        cutoff = clock.replace(hour=15, minute=30, second=0, microsecond=0)
-        if clock.hour < 15 or (clock.hour == 15 and clock.minute < 30):
-            cutoff -= timedelta(days=1)
-        else:
-            cutoff -= timedelta(days=1)
+        # ---- THE PREVIOUS TRADING CLOSE, NOT YESTERDAY. 23 Aug ----
+        #
+        #     "after market hours news/telegram channels updates will
+        #      recevie , store & use them when the opportunity occurs"
+        #                                    -- operator, 23 August 2026
+        #
+        # This was `clock - 1 day`, and both arms of the branch that
+        # chose it did the same thing -- which is what a session-aware
+        # rule looks like after it has been flattened. Across a weekend
+        # it threw away exactly the news he means: measured on Monday
+        # 11:00, a Friday 18:30 order win and a Saturday filing were
+        # both LOST, while Sunday 20:00 survived. Friday evening is
+        # when the exchange publishes and when the channels post, and
+        # Monday morning is when the stock gaps on it. The bot had no
+        # reason for the move and REQUIRE_A_REASON_ALWAYS then refused
+        # the stock.
+        #
+        # Holidays behave the same way and are worse -- a Thursday
+        # holiday puts three nights between two sessions.
+        #
+        # Falls back to the old answer if the calendar cannot be read.
+        # This runs on the trading loop and must not raise.
+        cutoff = previous_trading_close(clock)
         if when < cutoff:
             return None
         if when > clock:

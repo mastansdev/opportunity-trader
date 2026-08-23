@@ -121,6 +121,13 @@ STEPS = [
      "the whole point of Phase 1. Without it the bot records 27 picks "
      "a day and nobody ever finds out whether they were right."),
 
+    ("volumeprofile", "Learn each stock's own normal pace by each minute",
+     ["tools/build_volume_profile.py"],
+     "without it volume_x divides a PART day by a WHOLE day, so at "
+     "09:30 the busiest stock on the board reads 0.7x and every "
+     "volume gate refuses the entire field. The bot could not see a "
+     "stock moving until the afternoon had caught up with it."),
+
     ("liquidity", "Measure how much money trades in each stock",
      ["tools/measure_liquidity.py"],
      "decides which names lead a sector list before anything has "

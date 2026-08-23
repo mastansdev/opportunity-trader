@@ -523,8 +523,26 @@ MAX_OPEN_POSITIONS = 3
 EARLY_ENTRY_FROM = "09:15"
 FIRST_NEW_ENTRY = "09:30"
 
-# After this, a new position has no room left to work.
-LAST_NEW_ENTRY = "15:15"
+# ---- 15:15 WAS THE SQUARE-OFF CLOCK, NOT A TRADING RULE. 23 Aug ----
+#
+#     "for bot from 09 - 15:30 complete trading whenever opportunity
+#      saw"                            -- operator, 23 August 2026
+#
+# "No room left to work" is true only for a position that MUST be
+# closed by the bell. It was set to config.SQUARE_OFF_TIME (15:15),
+# which is MIS/intraday machinery -- and config.FORCE_SQUARE_OFF_AT_CLOSE
+# has been False since 28 July. The bot buys MTF and holds overnight,
+# so a 15:20 entry has the whole of the next session to work; it is
+# not short of room, it just isn't flat by the close, which was never
+# the requirement.
+#
+# INDOBORAX on 21 August is what this cost: a DEAL filing, 35x its own
+# normal volume, refused at 14:42 as "after 15:15 -- too late to give
+# a new position room to work" once the clock rolled on.
+#
+# The window is now the session: nothing new starts after the market
+# stops trading.
+LAST_NEW_ENTRY = "15:30"
 
 
 # ==========================================================

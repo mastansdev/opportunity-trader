@@ -55,7 +55,7 @@ from datetime import datetime
 
 import pytest
 
-from core.ranker import RANK_FROM_TIME, rank
+from core.ranker import OPENING_RANGE_ENDS, rank
 
 
 def mover(symbol, change_pct, ltp, **extra):
@@ -87,14 +87,27 @@ def call(movers, **kwargs):
 
 
 # ---------------------------------------------------------------
-# RULE 1 -- NOTHING BEFORE THE OPENING RANGE EXISTS
+# RULE 1 -- THE CLOCK IS NOT WHAT DECIDES
 # ---------------------------------------------------------------
-def test_nothing_is_named_at_twenty_eight_seconds_past_the_open():
-    """DEEPAKNTR, 09:15:28."""
+#     "09:30 is part of trading its not ultimate to trade ... whenever
+#      opportunity arrives bot must identify , analyse & trade not
+#      avoid or wait for some time."   -- operator, 23 August 2026
+#
+# This rule used to blank the board until 09:30. It justified itself
+# on measurement -- 28 seconds of tape is not a volume reading -- and
+# that defect now lives where it belongs, in core/volume_pace.py,
+# which reports UNMEASURED until there is enough of the stock's own
+# day to divide by. The opening range is still built and still real.
+def test_an_opportunity_inside_the_opening_range_is_looked_at():
+    """DEEPAKNTR, 09:15:28 -- named or refused on its evidence, not
+    dismissed for what the clock says."""
     got = call([mover("DEEPAKNTR", 6.79, 1834.40)],
                now=datetime(2026, 8, 5, 9, 15, 28))
-    assert got["rows"] == []
-    assert RANK_FROM_TIME in got["note"]
+    assert "opening range" not in str(got.get("note") or "")
+
+
+def test_the_opening_range_boundary_is_still_a_known_fact():
+    assert OPENING_RANGE_ENDS == "09:30"
 
 
 def test_the_boundary_belongs_to_the_ranker():
@@ -104,10 +117,10 @@ def test_the_boundary_belongs_to_the_ranker():
     assert [r["symbol"] for r in got["rows"]] == ["CASTROLIND"]
 
 
-def test_one_minute_early_is_still_early():
+def test_one_minute_early_is_no_longer_a_refusal_by_itself():
     got = call([mover("CASTROLIND", 3.06, 193.00)],
                now=datetime(2026, 8, 5, 9, 29, 59))
-    assert got["rows"] == []
+    assert [r["symbol"] for r in got["rows"]] == ["CASTROLIND"]
 
 
 def test_the_afternoon_is_fine():

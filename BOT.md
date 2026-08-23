@@ -1,4 +1,4 @@
-<!-- generated: 2026-08-22 07:58 by tools/bot_doc.py -- do not edit by hand -->
+<!-- generated: 2026-08-23 22:15 by tools/bot_doc.py -- do not edit by hand -->
 # Opportunity Trader — what the bot is, and what it does
 
 **This file is generated.** Every number below is read out of `config.py` and `core/rules.py` when it is written, so it cannot drift away from the running bot. To change a rule, change the code and run `py tools/bot_doc.py --write`.
@@ -81,7 +81,7 @@ Since 12 August **both require a reason** — `core/rules.py`'s `is_a_reason()`,
 | 14 | Book is not full | <3 open | `core/rules.py` |
 | 15 | Day's loss is under the cap | ₹12,000 | `config.py` |
 
-**The clock.** Early lane from 09:15, ranker from 09:30, nothing new after 15:15.
+**The clock.** Early lane from 09:15, ranker from 09:30, nothing new after 15:30.
 
 ## 6 · What the bot knows, and whether it may use it
 

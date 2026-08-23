@@ -2727,7 +2727,7 @@ class DashboardState:
                        # 5 August 2026. Nothing is named before the
                        # opening range closes, and a long below its own
                        # open is a falling stock whatever yesterday
-                       # did. See core/ranker.py RANK_FROM_TIME and the
+                       # did. See core/ranker.py OPENING_RANGE_ENDS and the
                        # "below its own open" gate -- DEEPAKNTR and
                        # ICICIGI, the only two entries that day trading
                        # under their open, were also the only two he

@@ -218,18 +218,33 @@ AT_CIRCUIT_PCT = 0.5
 # preferentially rather than diluted.
 MAX_SANE_VOLUME_RATIO = 50.0
 
-RANK_FROM_TIME = "09:30"
-
-
-def _hhmm(now):
-    """A clock reading as "HH:MM", or None if there isn't one."""
-    if now is None:
-        return None
-    try:
-        return f"{now.hour:02d}:{now.minute:02d}"
-    except AttributeError:
-        text = str(now).strip()
-        return text[:5] if len(text) >= 5 and text[2] == ":" else None
+# ---- 09:30 IS PART OF TRADING, NOT PERMISSION TO TRADE. 23 Aug ----
+#
+#     "09:30 is part of trading its not ultimate to trade & this
+#      statement ive said enough times ... whenever opportunity
+#      arrives bot must identify , analyse & trade not avoid or wait
+#      for some time. all rules are set by our understanding which no
+#      one knows, follows."          -- operator, 23 August 2026
+#
+# The opening range is still built, still real, and still feeds the
+# structural lane. What it is NOT is a blackout on looking.
+#
+# The blackout below it justified itself on measurement, not on the
+# clock: "volume_x 1.23 on 28 seconds of tape is not a volume
+# measurement". That was true, and it is now handled where the defect
+# actually was -- core/volume_pace.py returns UNMEASURED until a stock
+# has traded enough of its own normal day to divide by, so the early
+# minutes disqualify themselves on evidence instead of on time.
+#
+# The -2.71% measured across five pre-09:30 picks on 5 August was
+# taken through the broken instrument: those picks were made with a
+# volume field that could not see the morning at all. It cannot be
+# used to justify keeping a gate that the fix has made redundant.
+#
+# What still stops a bad early pick, unchanged: a published reason is
+# mandatory (REQUIRE_A_REASON_ALWAYS), a long below its own open is
+# refused, and unmeasured volume sorts last everywhere it is read.
+OPENING_RANGE_ENDS = "09:30"
 
 
 def _num(value):
@@ -342,11 +357,35 @@ def market_move(gainers_losers, indices=None, movers=None):
     return round(sum(sectors.values()) / len(sectors), 2)
 
 
-def volume_ratio(row, adv_cr):
+def volume_ratio(row, adv_cr, symbol=None, now=None):
     """Today's traded value against this stock's own normal day.
 
     None when we cannot say -- which is NOT the same as 'quiet', and
     must never be scored as if it were.
+
+    ---- A PART DAY OVER A WHOLE DAY MEASURES THE CLOCK. 23 Aug ----
+
+        "i want bot trade by finding opportunity as they arrives not
+         by its own timing limitations"          -- operator
+
+    adv_cr is a WHOLE day. Before the close the numerator is a part
+    day, so this answered "what time is it", not "how busy is this
+    stock". From each stock's own 1-minute history, the share of a
+    normal day already traded:
+
+        SBIN      09:30  7.0%    11:00 28.7%    15:00 85.1%
+        RAILTEL   09:30 16.7%    11:00 46.7%    15:00 83.2%
+
+    A stock at FIVE TIMES its normal pace at 09:30 read 0.5x and was
+    refused as quiet, while a dull stock at 15:00 read 0.85x and
+    outranked it. Seats are filled by SORTING ON THIS FIELD, so the
+    hour was outranking the stock every single day -- and that, not
+    patience, is most of why committing later measured better.
+
+    With `symbol` and `now` the divisor becomes what THIS stock
+    normally has traded BY THIS MINUTE (core/volume_pace.py, one
+    curve per symbol -- never a pooled one). Without them the old
+    whole-day answer stands, so every existing caller is unchanged.
     """
     volume = _num(row.get("volume"))
     price = _num(row.get("ltp"))
@@ -376,7 +415,19 @@ def volume_ratio(row, adv_cr):
     # DENOMINATOR is broken, not the market, and the honest answer is
     # UNMEASURED -- which core/finders.TradeBrain already sorts last.
     # Returning a number here would be inventing one.
-    ratio = traded_cr / adv_cr
+    # Pace first: today so far against this stock's own normal BY NOW.
+    # Falls through to the whole-day answer when the stock has no
+    # curve of its own -- inventing one from other stocks' days is
+    # exactly the pooling his rule forbids.
+    ratio = None
+    if symbol is not None and now is not None:
+        try:
+            from core.volume_pace import pace_ratio
+            ratio = pace_ratio(traded_cr, adv_cr, symbol, now)
+        except Exception:                                   # noqa: BLE001
+            ratio = None
+    if ratio is None:
+        ratio = traded_cr / adv_cr
     if ratio > MAX_SANE_VOLUME_RATIO:
         diagnostic(f"[VOLUME] {row.get('symbol')}: {ratio:,.0f}x is not a "
                    f"market event -- adv_cr {adv_cr} is wrong. Treating "
@@ -514,10 +565,11 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
     adv_of(symbol)       -> average daily traded value in crore
     blocked              -> symbols the risk layer has already refused
     held                 -> symbols already in the book
-    now                  -> the clock. Before RANK_FROM_TIME nothing is
-                            named at all. None skips the check, so
-                            every existing caller and test behaves as
-                            before.
+    now                  -> the clock. Used to measure volume against
+                            this stock's own pace by this minute
+                            (core/volume_pace.py). It is not a gate:
+                            an opportunity is named whenever it can be
+                            evidenced. None skips the pace lookup.
     open_of(symbol)      -> today's opening price. A long below its own
                             open is a falling stock whatever yesterday
                             did. None skips the check.
@@ -527,14 +579,6 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
     rows = list(movers or [])
     if not rows:
         return {"rows": [], "market_pct": 0.0, "note": "nothing is moving"}
-
-    # ---- BEFORE 09:30 THERE IS NOTHING TO SAY ----
-    clock = _hhmm(now)
-    if clock is not None and clock < RANK_FROM_TIME:
-        return {"rows": [], "market_pct": 0.0,
-                "note": f"the opening range closes at {RANK_FROM_TIME} -- "
-                        f"nothing is ranked before then",
-                "refusals": {}}
 
     sectors = sector_moves(gainers_losers, rows)
     market = market_move(gainers_losers, indices, rows)
@@ -663,7 +707,7 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
         # missing reason simply refused the stock. Now the tape can
         # qualify a stock on its own, and the tape means volume -- so
         # the number has to exist before the question is asked.
-        vratio = volume_ratio(row, adv)
+        vratio = volume_ratio(row, adv, symbol=symbol, now=now)
 
         mech = mechanism_of(symbol)
         text = str((mech or {}).get("text") or "").strip()

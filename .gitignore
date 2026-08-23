@@ -91,3 +91,11 @@ data/*.csv.bak_*
 data/telegram_reader.lock
 data/preopen_history/
 logs/*.log.[0-9]*
+
+# Each stock's own intraday volume curve, rebuilt nightly by
+# tools/build_volume_profile.py from data/history_candles.db. 8 MB and
+# regenerated every night -- tracking it would add that much to the
+# history daily. data/liquidity.json is tracked because it is 47 KB.
+# core/volume_pace.py falls back to the whole-day ratio when it is
+# missing, and nightly's health step reports a stale store.
+data/volume_profile.json

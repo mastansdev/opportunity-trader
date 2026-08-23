@@ -114,7 +114,9 @@ try:
 except Exception:                                          # noqa: BLE001
     LAST_NEW_ENTRY = dtime(15, 15)
 
-# The ranker publishes nothing before its own RANK_FROM_TIME (09:30).
+# The ranker names an opportunity whenever it can be evidenced --
+# see core/ranker.py OPENING_RANGE_ENDS. It no longer blacks out the
+# 09:15-09:30 window; the opening range is a signal, not permission.
 # This is a second, independent floor so a change there can never
 # silently re-open first-minute entries here.
 FIRST_NEW_ENTRY = dtime(9, 30)
@@ -289,7 +291,7 @@ def _faded(mover):
     return ((ltp - low) / (high - low)) < FADED_FROM_HIGH
 
 
-def _volume_supports(mover):
+def _volume_supports(mover, now=None):
     """Is today's traded value at least MIN_VOLUME_RATIO x this stock's
     own normal day -- the third of his three conditions (see above).
 
@@ -311,7 +313,15 @@ def _volume_supports(mover):
         return False
     symbol = str(mover.get("symbol") or "").upper()
     try:
-        ratio = volume_ratio(mover, adv(symbol))
+        # ---- 2.5x OF A WHOLE DAY, MEASURED AT 09:20. 23 Aug ----
+        # This lane runs 09:15-09:30, when a stock has traded roughly
+        # 4-7% of its normal day. Against a WHOLE-day divisor, clearing
+        # 2.5 here demanded FIFTY times normal pace -- which is also
+        # MAX_SANE_VOLUME_RATIO, the value above which the denominator
+        # is presumed broken. The gate could not be passed by a real
+        # stock. Measured against this stock's own pace by this minute
+        # (core/volume_pace.py) 2.5 means what it reads.
+        ratio = volume_ratio(mover, adv(symbol), symbol=symbol, now=now)
     except Exception as exc:                                # noqa: BLE001
         _broke("volume_ratio", exc)
         return False
@@ -437,7 +447,7 @@ def early_rows(movers, now=None, plan_of=None, evidence_of=None):
 
         # "+ volume supports" -- see _volume_supports(). A good quarter
         # nobody is trading yet is a card, not a mover.
-        if not _volume_supports(mover):
+        if not _volume_supports(mover, now=now):
             continue
 
         if graded:

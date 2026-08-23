@@ -105,15 +105,17 @@ def _all_older_than(messages, hours):
     dated = 0
     for message in messages:
         when = message.get("at")
-        if hasattr(when, "tzinfo"):
-            when = when.replace(tzinfo=None) if when.tzinfo else when
-        elif isinstance(when, str) and when:
-            try:
-                when = datetime.fromisoformat(
-                    when.replace("Z", "").split("+")[0])
-            except ValueError:
-                when = None
-        else:
+        # ---- A UTC STAMP READ AS IST IS 5h30m STALE. 23 Aug 2026 ----
+        # Both arms discarded the offset rather than applying it, so
+        # data/telegram.db's "+00:00" stamps made a live feed look
+        # five and a half hours behind. core/feed_clock.to_ist() is
+        # the one converter; naive after, as the caller compares
+        # against a naive clock.
+        try:
+            from core.feed_clock import to_ist
+            moment = to_ist(when)
+            when = None if moment is None else moment.replace(tzinfo=None)
+        except Exception:                                   # noqa: BLE001
             when = None
         if when is None:
             continue

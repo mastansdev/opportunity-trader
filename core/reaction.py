@@ -93,6 +93,29 @@ def _as_datetime(value):
     text = str(value or "").strip()
     if not text:
         return None
+
+    # ---- THE OFFSET DECIDES WHICH SESSION ANSWERED. 23 Aug 2026 ----
+    #
+    #     "we are in IST & its +05:30 asian timing"     -- operator
+    #
+    # This split the offset off and kept the digits. data/telegram.db
+    # stamps "2026-08-23T15:22:30+00:00", which is 20:52 IST -- after
+    # the close, so the session that answers it is TOMORROW's. Read as
+    # 15:22 it lands eight minutes before the close, and move_after()
+    # below scored the news against the session it could not have
+    # moved. Every outcome measured through this was attributed to the
+    # wrong day.
+    #
+    # core/feed_clock.to_ist() is the one converter and handles all
+    # three stored shapes. Naive here, because the hour/minute
+    # comparisons against CLOSE_HOUR are naive.
+    try:
+        from core.feed_clock import to_ist
+        moment = to_ist(text)
+        if moment is not None:
+            return moment.replace(tzinfo=None)
+    except Exception:                                       # noqa: BLE001
+        pass
     text = text.replace("Z", "").split("+")[0]
     for shape in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
                   "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
