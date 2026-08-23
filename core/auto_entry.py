@@ -787,9 +787,43 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
     #
     # The ranker already scored every row. Sorting by it here is the
     # difference between the best ten setups and the earliest ten.
+    # ---- THE SCORE DOES NOT ORDER THEM. VOLUME DOES. 22 Aug 2026 ----
+    #
+    #     "this mere 100 +/- 150 rs per trade is not at all feasible"
+    #                                     -- operator, 22 August 2026
+    #
+    # He was right, and the reason was here. Sorting by score was a
+    # real improvement over arrival order (5 August, above) and it is
+    # still not the best key available. Measured over 15 sessions,
+    # every ordering the bot could compute at alert time, three seats,
+    # entry at the alert, exit at the close:
+    #
+    #     highest volume x      +Rs 565/trade   62.2% up
+    #     best grade first      +Rs 225         55.6%
+    #     most confirmations    +Rs  15         55.6%
+    #     first to fire         -Rs  36         44.4%
+    #     HIGHEST SCORE         -Rs  68         42.2%
+    #     random draw           -Rs 226
+    #     LOWEST volume x       -Rs 823         26.7%
+    #
+    # The score is WORSE THAN RANDOM at ordering its own list. Volume
+    # against the stock's own normal is better than everything, and
+    # the mirror image at the bottom (-Rs 823, 26.7% up) is what says
+    # it is signal rather than a lucky cut.
+    #
+    # Held in both halves (+21,323 then +4,088) and at 3, 5 and 10
+    # seats. Two things it is NOT: rank 1 is weaker than the top 3, so
+    # this is a coarse sort and not a precise one; and 7 August alone
+    # was 40% of the total, so the size of the edge is far less certain
+    # than its direction.
+    #
+    # The score still breaks ties -- it carries the reason weight and
+    # the sector work, which volume knows nothing about.
     rows = sorted(
         [r for r in (rows or []) if isinstance(r, dict)],
-        key=lambda r: -(_num(r.get("score")) or 0.0))
+        key=lambda r: (-(_num(r.get("volume_x"))
+                         or _num(r.get("volume_ratio")) or 0.0),
+                       -(_num(r.get("score")) or 0.0)))
 
     # ---- A SEAT YOU ARE NOT USING CANNOT RUN OUT. 18 Aug 2026. ----
     #
