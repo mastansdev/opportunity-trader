@@ -380,7 +380,22 @@ DASHBOARD_AFTER_CLOSE_EXIT_AT = "09:00"
 # Kept in lockstep with STAGED_NO_ENTRY_AFTER.
 # Kept in lockstep with STAGED_NO_ENTRY_AFTER -- both moved to
 # 15:15 on 8 August when the square-off argument stopped applying.
-LAST_ENTRY_TIME = "15:15"
+#
+# ---- 15:30. THE WINDOW IS THE SESSION. 23 August 2026 ----
+#
+#     "for bot from 09 - 15:30 complete trading whenever opportunity
+#      saw"                            -- operator, 23 August 2026
+#
+# The 8 August note above already retired the square-off argument.
+# The last 15 minutes were left behind by habit, not by a reason.
+# FORCE_SQUARE_OFF_AT_CLOSE is False and entries are MTF held
+# overnight, so a 15:20 entry has the whole of the next session.
+#
+# THIS is the value the live path reads -- core/auto_entry.py imports
+# it directly. core/rules.py's LAST_NEW_ENTRY is derived from it, and
+# on 23 August I edited that one instead and reported the window as
+# widened when nothing had changed. Nothing reads rules' copy.
+LAST_ENTRY_TIME = "15:30"
 
 # Any tick timestamped before MARKET_OPEN must never be
 # treated as live data for ORB building or entries. This is
@@ -2136,7 +2151,10 @@ STAGED_POSITION_LIMITS = [
 # FORCE_SQUARE_OFF_AT_CLOSE is False and positions are held on MTF
 # overnight, so a 15:10 entry is not a coin flip with a deadline --
 # it is a position that carries. The gate outlived its argument.
-STAGED_NO_ENTRY_AFTER = "15:15"
+# 23 August 2026: 15:30, in lockstep with LAST_ENTRY_TIME above. This
+# one is the harder gate of the two -- _position_ceiling() returns 0
+# past it, so the book is shut regardless of what auto_entry allows.
+STAGED_NO_ENTRY_AFTER = "15:30"
 
 # --- One trade per stock per day --------------------------
 # A symbol gets ONE attempt per direction per day. Kills the

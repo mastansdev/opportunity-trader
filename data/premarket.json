@@ -31,7 +31,7 @@
    "symbol": "^DJI"
   },
   "russell": {
-   "last": 3017.8708,
+   "last": 3017.871,
    "currency": "USD",
    "market_state": null,
    "change_pct": -0.5,
@@ -61,10 +61,10 @@
    "symbol": "^FVX"
   },
   "dxy": {
-   "last": 98.839,
+   "last": 98.8,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 0.04,
+   "change_pct": 0.0,
    "previous": 98.8,
    "label": "Dollar index",
    "group": "RATES",
@@ -211,7 +211,7 @@
    "symbol": "JPY=X"
   }
  },
- "fetched_at": "2026-08-23 22:27:47",
- "last_success_at": "2026-08-23 22:27:47",
+ "fetched_at": "2026-08-23 22:48:50",
+ "last_success_at": "2026-08-23 22:48:50",
  "failed": []
 }

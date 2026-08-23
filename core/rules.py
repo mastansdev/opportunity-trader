@@ -542,7 +542,16 @@ FIRST_NEW_ENTRY = "09:30"
 #
 # The window is now the session: nothing new starts after the market
 # stops trading.
-LAST_NEW_ENTRY = "15:30"
+# DERIVED, never set here. core/auto_entry.py reads config directly,
+# so a value typed into this file is documentation that nothing obeys
+# -- which is exactly what happened on 23 August, when I changed this
+# line, ran the suite, and told him the window was open to 15:30 while
+# the live gate sat at 15:15.
+try:
+    from config import LAST_ENTRY_TIME as _LAST_ENTRY_TIME
+    LAST_NEW_ENTRY = _LAST_ENTRY_TIME
+except Exception:                                          # noqa: BLE001
+    LAST_NEW_ENTRY = "15:30"
 
 
 # ==========================================================

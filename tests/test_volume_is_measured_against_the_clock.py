@@ -104,8 +104,32 @@ def test_missing_adv_is_unmeasured():
 #      opportunity saw"          -- operator, 23 August 2026
 
 def test_a_new_entry_is_allowed_until_the_market_stops_trading():
-    from core import rules
+    # THE LIVE GATE, not the documentation copy. core/auto_entry.py
+    # imports config.LAST_ENTRY_TIME; core/rules.py is derived from it.
+    # On 23 August I changed only rules and reported the window as
+    # widened while the gate that runs sat at 15:15.
+    import config
+    from core import auto_entry, rules
+    assert auto_entry.LAST_NEW_ENTRY.strftime("%H:%M") == "15:30"
+    assert config.LAST_ENTRY_TIME == "15:30"
     assert rules.LAST_NEW_ENTRY == "15:30"
+
+
+def test_the_three_entry_clocks_can_never_disagree():
+    import config
+    from core import auto_entry, rules
+    assert (config.LAST_ENTRY_TIME
+            == rules.LAST_NEW_ENTRY
+            == auto_entry.LAST_NEW_ENTRY.strftime("%H:%M"))
+
+
+def test_the_book_is_not_shut_before_the_bell():
+    # _position_ceiling() returns 0 past STAGED_NO_ENTRY_AFTER, which
+    # shuts the book regardless of what auto_entry allows. It sat at
+    # 15:15 and would have silently defeated the change above.
+    import config
+    assert config.STAGED_NO_ENTRY_AFTER == "15:30"
+    assert config.STAGED_NO_ENTRY_AFTER == config.LAST_ENTRY_TIME
 
 
 def test_the_entry_window_is_not_the_square_off_clock():
