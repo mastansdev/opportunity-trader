@@ -97,9 +97,28 @@ W_UPDATE_MONTHLY = 0.25
 HUGE_CR, LARGE_CR, MID_CR = 500.0, 100.0, 25.0
 
 # "Rs. 1.05 crore", "₹37.79 crore", "Rs 990.16 Cr", "₹4.88 crore"
+# ---- THE PREFIX WAS NOT OPTIONAL AND THE FEED DOES NOT WRITE ONE ----
+#
+#     "small company getting a big order is far different to big
+#      company getting the same order types. bot must distinguish
+#      that."                        -- operator, 22 August 2026
+#
+# It cannot distinguish them without the figure, and only 330 of 619
+# ORDER events carried one. This pattern REQUIRED a currency marker
+# before the number. What the channels actually publish:
+#
+#     POWERGRID  "CO HAS WON LARGE ORDER WORTH 26000 CRS"
+#     CEIGALL    "CO WINS ORDER WORTH RUPEES 225 CR"
+#     WELCORP    "INVESTOR CALL ON 217,200 CR ORDER"
+#
+# No symbol, RUPEES spelled out, and CRS as the unit. The currency
+# marker is now OPTIONAL -- the UNIT identifies a money figure, and
+# "225 CR" is not ambiguous in an order headline. crs, crores and
+# the spelled-out rupees are all recognised now.
 _VALUE = re.compile(
-    r"(?:Rs\.?|₹|INR)\s*([\d][\d,]*(?:\.\d+)?)\s*"
-    r"(crore|cr\b|lakh|lakhs)", re.I)
+    r"(?:(?:Rs\.?|₹|INR|RUPEES)\s*)?"
+    r"([\d][\d,]*(?:\.\d+)?)\s*"
+    r"(crores|crore|crs|cr\b|lakhs|lakh)", re.I)
 
 # The recap board -- "Orderbook Recap, Daily Highlights - AUGUST 06".
 # It lists the day's orders and belongs to no single stock.

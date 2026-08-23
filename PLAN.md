@@ -103,6 +103,23 @@ The gap is entirely in ordering, not in finding. So the work is:
 
 ---
 
+## The measurement rule
+
+**Any trade entered mid-session is compared against what the rest of
+the market did between the SAME entry minute and the SAME close.**
+
+Absolute rupees are valid only when every trade in the comparison
+starts at the same time. 56% of ORDER events land after 12:00, so an
+event trade is held ~90 minutes while a 09:30 comparison is held six
+hours -- and the market drifts +0.30% across a full day. Comparing
+them measures HOLDING TIME, not selection.
+
+This was found by the operator, not by me, after I had reported a
+day's worth of "events lose money" that was largely the clock:
+
+    kind NEWS     -Rs 102 absolute   ->  +Rs 14 same-window
+    ALL events    -Rs 268 absolute   ->  -Rs 61 same-window
+
 ## Honesty log, 22 August
 
 Four measurements were wrong before they were caught, all the same
@@ -112,6 +129,9 @@ fault -- the test seeing what the bot cannot:
 2. a rule paid for a 2% move that happened before entry
 3. seats given to the day's best performers, chosen after the close
 4. buying on news that had not yet arrived
+5. comparing a 90-minute hold against a six-hour one and calling the
+   difference stock selection -- and then repeating it in the next
+   script an hour after fixing it
 
 Every one looked like a discovery. Any future finding gets a
 look-ahead check before it reaches this file.
