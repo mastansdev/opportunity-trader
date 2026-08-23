@@ -460,8 +460,30 @@ _STORY_MARKS = re.compile(
     "[\U0001F4CC\U0001F6E2\U0001F1EE\U0001F1F3\U0001F4C8\U0001F4CA"
     "\U0001F30D\U0001F680\U0001F4B1\u26FD\U0001F3E6\u2B50]")
 
-AMOUNT = re.compile(r"""(?:₹|rs\.?|inr|usd|\$)\s*([\d,]+(?:\.\d+)?)\s*
-                        (cr(?:ore)?s?|lakhs?|mn|million|bn|billion)?""",
+# ---- THE CURRENCY MARKER WAS MANDATORY. 22 August 2026. ----
+#
+# This required ₹ / rs / inr / usd / $ BEFORE the number, and the
+# channels do not write one:
+#
+#     POWERGRID   "CO HAS WON LARGE ORDER WORTH 26000 CRS"
+#     ASTRAMICRO  "wins order worth RUPEES 2205 CR"
+#     WELCORP     "INVESTOR CALL ON 217,200 CR ORDER"
+#
+# So value_cr was read off barely half the ORDER events, and the bot
+# could not tell a transformative order from a routine one -- the
+# operator's point on 22 August, and he was right.
+#
+# The marker is OPTIONAL now and the UNIT is REQUIRED. That is not a
+# loosening: amount_in_crore() already did `continue` on a match with
+# no unit ('a bare number is not an amount'), so requiring it here
+# changes nothing except where the decision is made. 'rupees' spelled
+# out is recognised; 'crs' already was, via cr(?:ore)?s?.
+#
+# USD still detected the same way -- a bare figure has no prefix, so
+# dollars stays False and it is read as rupees, which is correct.
+AMOUNT = re.compile(r"""(?:(?:₹|rs\.?|inr|rupees|usd|\$)\s*)?
+                        ([\d,]+(?:\.\d+)?)\s*
+                        (cr(?:ore)?s?|lakhs?|mn|million|bn|billion)""",
                     re.I | re.X)
 COUNTERPARTY = re.compile(r"\bfrom\s+((?:[A-Z][\w&.\-]*\s+){0,4}[A-Z][\w&.\-]*)")
 GRADE = re.compile(r"(excellent|great|good|weak|poor|ok)", re.I)
@@ -2114,7 +2136,33 @@ def _events_from_message(matcher, typed, read, body, at, channel,
                    if s.upper() not in who.upper().split()
                    and not who.upper().startswith(s.upper())]
 
+    # ---- ONE ORDER HAS ONE WINNER. 22 August 2026. ----
+    #
+    #     "fix the multi symbol attribution bug"   -- operator
+    #
+    # `common` carries value_cr, and this handed the SAME dict to every
+    # symbol the card mentioned. Live rows that produced:
+    #
+    #     VIKRAN      2,120.7 cr  |  POWERGRID   2,120.7 cr
+    #     ASTRAMICRO  2,205.2 cr  |  HAL         2,205.2 cr
+    #     WEALTH / LANDMARK / NUVAMA  15,840 cr each, one garbled card
+    #
+    # VIKRAN's order became POWERGRID's. The counterparty rule above
+    # catches the buyer when it is NAMED as the buyer; it cannot help
+    # when a card simply mentions several companies, which is what an
+    # OCR'd news-channel screenshot does constantly.
+    #
+    # A figure that cannot be pinned to ONE company is not that
+    # company's order value. The EVENT is still recorded against each
+    # symbol -- the card did mention them, and that is worth knowing --
+    # but the RUPEE FIGURE is dropped, because attributing it is a
+    # guess and a wrong value is worse than none.
+    #
+    # Same doctrine as symbols_first(): one tag means one subject,
+    # several means none. This applies it to the money.
     if scope == "STOCK" and symbols:
+        if len(symbols) > 1 and common.get("value_cr") is not None:
+            common = dict(common, value_cr=None)
         return [dict(common, symbol=s, scope="STOCK") for s in symbols]
     # Market context, deliberately symbol-less: a Fed hold explains why
     # everything moved, and pinning it to six housing-finance names is
