@@ -82,6 +82,7 @@ from config import (
     BREAKOUT_MIN_MARGIN_PCT,
     ENABLE_TREND_RANK_ENTRY, TREND_RANK_TOP_N, TREND_RANK_REFRESH_SECONDS,
     ENABLE_SLOT_ROTATION, ROTATION_MIN_STRENGTH_EDGE,
+    ROTATION_MIN_HOLD_MINUTES,
     ENABLE_RS_BAND, RS_BAND_MIN, RS_BAND_MAX, MAX_ABS_MOVE_PCT,
     ENABLE_STILL_TRENDING, STILL_TRENDING_MIN_POSITION,
     ENABLE_STAGED_ENTRY, STAGED_POSITION_LIMITS, STAGED_NO_ENTRY_AFTER,
@@ -2870,6 +2871,34 @@ class Engine:
         if weakest is None:
             return False
         w_sym, w_strength = weakest
+
+        # ---- A POSITION GETS TIME TO WORK. 23 August 2026. ----
+        #
+        # Rotation had no minimum holding period at all, which is how
+        # 21 August produced this:
+        #
+        #     12:49:37  PAPER BUY  CDSL 47 @ 1390.80
+        #     12:49:48  CDSL rotated OUT for URBANCO
+        #
+        # Eleven seconds. Median hold across every ROTATED_OUT trade on
+        # record was 2.3 minutes, 20% of them won, and they lost
+        # Rs 1,860 between them. A swap decided that fast is not an
+        # upgrade, it is noise crossing a threshold.
+        #
+        # The seat-timing problem this mechanism exists for is real and
+        # slow: SOLARA reached rank 1 at 10:24 on 20 August and closed
+        # +16.4%, an HOUR after the seats were filled. Forty-five
+        # minutes is long enough that a genuine hand-over survives it
+        # and a twitch does not.
+        held_position = self.open_positions.get(w_sym) or {}
+        entry_time = held_position.get("entry_time")
+        if entry_time is not None and tick_time is not None:
+            try:
+                held_min = (tick_time - entry_time).total_seconds() / 60.0
+            except TypeError:                               # noqa: BLE001
+                held_min = None
+            if held_min is not None and held_min < ROTATION_MIN_HOLD_MINUTES:
+                return False
         if challenger_strength <= w_strength + edge:
             return False
 

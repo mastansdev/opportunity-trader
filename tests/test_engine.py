@@ -2908,11 +2908,14 @@ def _snap(**pcts):
             for sym, p in pcts.items()}
 
 
-def _long_breakout(engine, sym, sid):
+def _long_breakout(engine, sym, sid, hour=9, minute=31):
+    """`hour`/`minute` let a caller place the breakout LATER in the
+    session -- rotation now requires the sitting position to have been
+    held ROTATION_MIN_HOLD_MINUTES before its seat can be taken."""
     _feed_orb_range(engine, sym, sid, low=100.0, high=110.0)
-    engine.process_tick(sym, sid, 108.0, _t(9, 31, 0))
-    engine.process_tick(sym, sid, 112.0, _t(9, 31, 30))
-    engine.process_tick(sym, sid, 111.0, _t(9, 32, 0))
+    engine.process_tick(sym, sid, 108.0, _t(hour, minute, 0))
+    engine.process_tick(sym, sid, 112.0, _t(hour, minute, 30))
+    engine.process_tick(sym, sid, 111.0, _t(hour, minute + 1, 0))
 
 
 def test_trend_rank_blocks_a_long_that_is_not_a_top_gainer(monkeypatch):
@@ -2963,13 +2966,41 @@ def test_slot_rotation_evicts_the_weakest_for_a_stronger_breakout(monkeypatch):
     _long_breakout(engine, "WEAK", "8")
     assert "WEAK" in engine.open_positions               # took the only slot
 
-    _long_breakout(engine, "STRONG", "9")
+    # ---- THE SEAT IS HELD FOR 45 MINUTES. 23 August 2026 ----
+    # Rotation had no minimum hold, which is how CDSL was bought and
+    # sold ELEVEN SECONDS apart on 21 August. STRONG must now arrive
+    # after ROTATION_MIN_HOLD_MINUTES -- which is what the real case
+    # looks like anyway: SOLARA reached rank 1 at 10:24, an hour after
+    # the seats were filled, and closed +16.4%.
+    _long_breakout(engine, "STRONG", "9", hour=10, minute=31)
     # STRONG (+5%) is decisively stronger than WEAK (+0.5%) -> rotate.
     assert "STRONG" in engine.open_positions
     assert "WEAK" not in engine.open_positions
     rotated = [c for c in engine.closed_positions
                if c["symbol"] == "WEAK" and c["exit_reason"] == "ROTATED_OUT"]
     assert len(rotated) == 1
+
+
+def test_a_seat_cannot_be_taken_in_the_first_minutes(monkeypatch):
+    """THE CDSL CASE. Same setup, challenger arrives immediately --
+    and the sitting position keeps its seat."""
+    import core.engine as em
+    monkeypatch.setattr(em, "MAX_OPEN_POSITIONS", 1)
+    monkeypatch.setattr(em, "TREND_RANK_TOP_N", 5)
+    monkeypatch.setattr(em, "TREND_RANK_REFRESH_SECONDS", 0)
+    monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)
+    snap = _snap(STRONG=0.05, WEAK=0.005,
+                 F1=-0.01, F2=-0.02, F3=-0.03, F4=-0.04, F5=-0.05,
+                 F6=-0.06, F7=-0.07, F8=-0.08)
+    engine = _engine(circuit_monitor=_FakeTrendCircuit(snap))
+
+    _long_breakout(engine, "WEAK", "8")
+    assert "WEAK" in engine.open_positions
+
+    _long_breakout(engine, "STRONG", "9", hour=9, minute=35)
+    assert "WEAK" in engine.open_positions, (
+        "a seat was taken inside the minimum hold -- the CDSL bug")
+    assert "STRONG" not in engine.open_positions
 
 
 class _RecordingMemory:

@@ -1932,7 +1932,26 @@ TREND_RANK_REFRESH_SECONDS = 5   # recompute the leaderboard at most this often
 # slippage and charges. OFF until a rotation is shown to beat holding.
 #
 # To put it back: set this True. The cap below is untouched.
-ENABLE_SLOT_ROTATION = False
+# ---- BACK ON, WITH THE CONSTRAINTS THAT WERE MISSING. 23 Aug ----
+#
+#     "fix the seat timing"          -- operator, 23 August 2026
+#
+# It was switched OFF on 22 August because it churned: a 0.4% edge and
+# NO minimum holding period gave a 2.3-minute median hold, 20% winners
+# and -Rs 1,860 over 15 trades. CDSL was bought and sold ELEVEN
+# SECONDS apart.
+#
+# But OFF leaves the real problem unsolved. Seats are spent in the
+# first minutes and the good names arrive later: 20 August, the first
+# rank-1 was STAR at 09:30 which lost, and SOLARA did not lead the
+# board until 10:24 and closed +16.4%. With rotation off, that seat
+# could never have been handed over.
+#
+# The edge is now 2.0% and a position gets 45 minutes to work. Both
+# numbers are set so that the SOLARA hand-over passes and the CDSL
+# twitch does not. Leaving the switch off would have been shipping a
+# fix that never runs.
+ENABLE_SLOT_ROTATION = True
 
 # At most this many swaps a day.
 #
@@ -1947,7 +1966,45 @@ ENABLE_SLOT_ROTATION = False
 # floor for two paper sessions, not a considered answer -- read
 # tools/refused_review.py on Friday and set it from the data.
 ROTATION_MAX_PER_DAY = 5
-ROTATION_MIN_STRENGTH_EDGE = 0.004   # challenger must lead by >0.4% move
+ROTATION_MIN_STRENGTH_EDGE = 0.020   # challenger must lead by >2.0% move
+
+# ---- WHY THE EDGE MOVED, AND WHY A HOLD TIME EXISTS NOW ----
+#
+#     "fix the seat timing"            -- operator, 23 August 2026
+#
+# THE PROBLEM IS REAL. 20 August: the bot's first rank-1 was STAR at
+# 09:30, which lost. SOLARA did not reach rank 1 until 10:24 and closed
+# +16.4%. Seats are spent in the first minutes and the good names
+# surface later. Measured over 20 sessions, filling the same three
+# seats from the board as it stood at each hour:
+#
+#     commit at   Rs/trade   win%
+#     09:45         -279     31.8
+#     10:30         -115     40.0
+#     13:00          -64     46.7
+#     14:00          -19     51.7
+#
+# Patience raises the win rate steadily. Nothing is reliably positive,
+# so this is a direction, not a discovery.
+#
+# A TIME LADDER IS NOT THE ANSWER. STAGED_POSITION_LIMITS was exactly
+# that and was flattened on 27 July: "a strongly bullish tape produced
+# two trades before 10:00 and nothing after, because both early seats
+# were spent by 09:26". It throttles the whole day to fix one hour.
+#
+# Rotation is the right mechanism -- give a seat up when something
+# clearly better appears -- and it churned because it was allowed to
+# swap on almost nothing:
+#
+#     0.4% edge, no minimum hold  ->  median hold 2.3 minutes,
+#                                     20% win rate, -Rs 1,860 over 15
+#     21 Aug: CDSL bought and sold ELEVEN SECONDS apart
+#
+# So the edge is 2.0% -- five times what it was -- and a position must
+# be given ROTATION_MIN_HOLD_MINUTES to work before its seat can be
+# taken. SOLARA at 10:24 beat STAR by far more than 2%; the 11-second
+# CDSL swap cleared 0.4% and nothing else.
+ROTATION_MIN_HOLD_MINUTES = 45
 
 # ==========================================================
 # 2026-07-25 STRATEGY PACKAGE (from the replay-bench study)
