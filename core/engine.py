@@ -98,6 +98,7 @@ from config import (
     EARLY_ENTRY_MAX_POSITIONS,
     ENABLE_VOLUME_FILTER, VOLUME_SURGE_MULT, VOLUME_AVG_CANDLES,
     MIN_VOLUME_CANDLES,
+    MANUAL_BUY_TARGET_RS, MANUAL_BUY_TRAILS,
 )
 from core.atr import compute_atr, daily_atr_pct
 # ---- ONE RISK BUDGET, NOT TWO. 12 August 2026. ----
@@ -1040,9 +1041,30 @@ class Engine:
                                          symbol, security_id,
                                          cap_by_risk=False),
                     asked=asked_qty)
+                # ---- HIS COMMAND, HIS RULES. 23 August 2026. ----
+                #
+                #     "BUY SBIN = then bot must buy SBIN MTF with
+                #      assigned rules (capital, target, stoploss,
+                #      trailling)"                    -- operator
+                #
+                # Capital and stop were already applied. TARGET and
+                # TRAILING were not -- _enter() has accepted both since
+                # it was written and this call passed neither, so every
+                # dashboard and Telegram buy ran bare.
+                #
+                # Only HIS entries get them. The bot's own keep holding
+                # to the close: seven target widths were measured on
+                # 22-23 August and every one underperformed holding. He
+                # was asked and chose that split.
+                target = None
+                if MANUAL_BUY_TARGET_RS and qty:
+                    target = price + (MANUAL_BUY_TARGET_RS / abs(int(qty)))
                 self._enter(
                     symbol, security_id, price, seed_low, tick_time,
                     ENTRY_REASON_MANUAL_DASHBOARD, LONG, qty=qty,
+                    target=target,
+                    stop_mode=(STOP_MODE_ATR_TRAILING if MANUAL_BUY_TRAILS
+                               else STOP_MODE_SWING_TRAILING),
                 )
 
         # Manual short request (dashboard's per-row SHORT button on
@@ -4801,7 +4823,35 @@ class Engine:
         # config flag, so an already-open trade keeps behaving
         # exactly as it was opened even if the flag/mode changes
         # mid-session.
-        if position.get("fixed_target") is not None:
+        # ---- A MANUAL BUY CARRIES BOTH. 23 August 2026. ----
+        #
+        #     "BUY SBIN = then bot must buy SBIN MTF with assigned rules
+        #      (capital, target, stoploss, trailling)"   -- operator
+        #
+        # Target and trailing used to be mutually exclusive: setting
+        # fixed_target routed here and RETURNED, so the ratchet below
+        # never ran. A position that carries both -- which is what a
+        # Telegram BUY now creates -- books the target when it is
+        # reached, and until then trails like any other.
+        #
+        # His command, his rules. The bot's OWN entries are untouched
+        # and still hold to the close, because every target width
+        # measured on 22-23 August underperformed holding. He chose
+        # that split deliberately.
+        target = position.get("fixed_target")
+        if target is not None and                 position.get("stop_mode") == STOP_MODE_ATR_TRAILING:
+            direction = position.get("direction", LONG)
+            hit = price >= target if direction == LONG else price <= target
+            if hit:
+                decision(f"[TARGET] {symbol} reached {target:.2f} -- "
+                         f"booking it. Your Rs target on a manual buy.")
+                self._exit(symbol, price, EXIT_REASON_FIXED_TARGET,
+                           tick_time)
+                return
+            self._check_atr_trailing(symbol, position, price, tick_time)
+            return
+
+        if target is not None:
             self._check_fixed_bracket(symbol, position, price, tick_time)
             return
 

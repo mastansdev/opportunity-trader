@@ -1447,7 +1447,14 @@ def test_manual_buy_seeds_trailing_stop_from_last_closed_candle_low():
     engine.process_tick("TCS", "1", 106.0, _t(9, 21, 30))
 
     assert "TCS" in engine.open_positions
-    assert engine.trailing_stop.get_stop("TCS") == 100.0
+    # ---- THE STOP MOVED HOUSE. 23 August 2026 ----
+    # A manual buy now trails via the ATR engine, so the level lives
+    # in position["atr_stop"] rather than in trailing_stop. Asking
+    # _live_stop_price() instead of one particular mechanism is what
+    # this test was always about -- "is the seeded stop the candle
+    # low" -- and it keeps working whichever engine owns the position.
+    position = engine.open_positions["TCS"]
+    assert engine._live_stop_price("TCS", position) == 100.0
 
 
 def test_manual_buy_falls_back_to_a_buffer_when_candle_low_is_stale_or_inverted():
@@ -1467,7 +1474,9 @@ def test_manual_buy_falls_back_to_a_buffer_when_candle_low_is_stale_or_inverted(
     engine.process_tick("TCS", "1", 96.0, _t(9, 21, 30))
 
     assert "TCS" in engine.open_positions
-    stop = engine.trailing_stop.get_stop("TCS")
+    # See the note above: a manual buy trails via the ATR engine now,
+    # so ask for the stop IN FORCE rather than one mechanism's copy.
+    stop = engine._live_stop_price("TCS", engine.open_positions["TCS"])
     assert stop < 96.0
     # The buffer is HARD_STOP_FROM_ENTRY_PCT -- 2.5%, the same stop the
     # bot's own entries use. It read MIN_STOP_DISTANCE_PCT (1%) until

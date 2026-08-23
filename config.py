@@ -1240,6 +1240,28 @@ MAX_NOTIONAL_PER_TRADE_RS = 200_000.0
 #
 # The margin % is NOT estimated. dhanhq exposes /margincalculator with
 # product_type="MTF", which returns the same figure the order screen
+
+# ==========================================================
+# WHAT A TELEGRAM / DASHBOARD BUY GETS
+# ==========================================================
+#
+#     "BUY SBIN = then bot must buy SBIN MTF with assigned rules
+#      (capital, target, stoploss, trailling)"
+#                                     -- operator, 23 August 2026
+#
+# Three of the four already applied: the desk refuses a non-MTF stock
+# before it quotes, the quantity is risk-sized from RISK_PER_TRADE_RS,
+# and the stop is the volatility-scaled one. TARGET and TRAILING did
+# not exist on any entry at all.
+#
+# These apply to HIS commands only. The bot's own entries keep holding
+# to the close, because every target width measured on 22-23 August
+# underperformed holding -- seven widths, all worse. He chose that
+# split when asked, and it keeps Monday's paper session a clean read
+# of the bot's own behaviour.
+MANUAL_BUY_TARGET_RS = 2000.0     # book it when the position shows this
+MANUAL_BUY_TRAILS = True          # and ratchet the stop until it does
+
 # shows -- so the bot asks Dhan rather than guessing, and self-corrects
 # when Dhan changes a stock's rate or drops it from the MTF list.
 #
