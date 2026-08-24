@@ -308,10 +308,41 @@ def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
     # if it is liquid enough to trade, and let the sector-dependent
     # checks skip it. A stock nobody can see cannot be picked by any
     # rule, however good.
+    # ---- AND IT BRICKED THE BOT. 24 August 2026. ----
+    #
+    # The paragraph above is mine and its reasoning was wrong in one
+    # decisive way: core/master_loader.py holds the OPPOSITE as a hard
+    # invariant and RAISES on it --
+    #
+    #     "Master database has 20 TRADEABLE row(s) with missing
+    #      classification ... a tradeable stock with no SECTOR
+    #      silently breaks the sector-strength gate. Either classify
+    #      them or mark them SUBSCRIBE=NO."
+    #
+    # So letting a liquid unclassified stock through here MANUFACTURES
+    # the state the loader forbids. On 24 August the nightly produced
+    # twenty of them -- JNPR, SIGACHI, TNPETRO, MILKYMIST, SHIPROCKET
+    # and the rest, all bare symbols with no sector -- and at 16:20
+    # NOTHING would start:
+    #
+    #     Could not start: Master database has 20 TRADEABLE row(s)
+    #     with missing classification
+    #
+    # The collector was down and main.py would have died on its next
+    # restart. Two rules in direct contradiction, resolved by a crash.
+    #
+    # The invariant wins. Not because it is better reasoned than mine,
+    # but because the failure modes are not comparable: an unwatched
+    # stock costs one missed opportunity, while a stock inside the
+    # sector-strength gate with no sector mis-ranks silently, with
+    # real money, and says nothing.
+    #
+    # The coverage this gives up is real and should come back through
+    # a SECTOR, not through an exception. NSE's equityMetaInfo returns
+    # name and ISIN only, so that needs a different source -- and
+    # guessing a sector from a company name would be inventing data.
     if not str(sector or "").strip():
-        turnover = float((bhav or {}).get("turnover") or 0)
-        if turnover < UNCLASSIFIED_MIN_TURNOVER_RS:
-            return False, UNCLASSIFIED_REASON
+        return False, UNCLASSIFIED_REASON
 
     if symbol in corporate_actions:
         return False, ("corporate action today -- price scale changes, "

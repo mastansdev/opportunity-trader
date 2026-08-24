@@ -128,6 +128,22 @@ def release_if_mine(path=None):
         return False
 
 
+def _pid_alive(who):
+    """Is the pid named in a lock line still running? True if unsure.
+
+    `who` looks like "collector pid=18540 2026-08-24 15:31:08".
+    """
+    import re
+    match = re.search(r"pid=(\d+)", str(who or ""))
+    if not match:
+        return True                 # nothing to check -> assume held
+    try:
+        import psutil
+        return psutil.pid_exists(int(match.group(1)))
+    except Exception:                                       # noqa: BLE001
+        return True                 # cannot tell -> assume held
+
+
 def held_by_another(path=None):
     path = _path(path)
     """(True, description) when a live reader is already running.
@@ -175,6 +191,27 @@ def held_by_another(path=None):
         if _is_me(who):
             diagnostic("[LOCK] The lock on file belongs to this process. "
                        "Not a second reader.")
+            return False, ""
+
+        # ---- A LOCK IS NOT A PROCESS. 24 August 2026. ----
+        #
+        # Staleness was decided by FILE AGE alone -- two hours. The
+        # lock names its owner's pid and never asked whether that pid
+        # still existed, so a collector killed at 15:34 locked the
+        # next one out until 17:31:
+        #
+        #     ALREADY RUNNING: collector pid=18540 (started 4 min ago)
+        #
+        # 18540 had been dead for thirty seconds. The two-hour window
+        # is the right answer for a process that died WITHOUT clearing
+        # its lock; it is the wrong answer once we can simply look.
+        #
+        # Fails OPEN, like everything else here: if the pid cannot be
+        # read or psutil is missing, the age rule stands unchanged. A
+        # lock that cannot be checked must never stop the night's work.
+        if not _pid_alive(who):
+            warn(f"[LOCK] {who} is not running any more. Its lock was "
+                 f"left behind; carrying on.")
             return False, ""
 
         return True, f"{who} (started {age / 60:.0f} min ago)"

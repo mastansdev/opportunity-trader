@@ -117,24 +117,66 @@ def test_corporate_action_today_is_blocked():
     assert "corporate action today" in reason
 
 
-def test_an_unclassified_stock_is_WATCHED_when_it_is_liquid():
-    """---- THE RULE CHANGED. 23 August 2026 ----
+def test_an_unclassified_stock_is_NOT_watched():
+    """---- AND THE RULE CHANGED BACK. 24 August 2026 ----
 
-    This asserted that a blank sector blocks the stock outright. On
-    20 August that meant 22 of the day's top 50 gainers were invisible
-    to the bot -- KRONOX +20% among them, the same KRONOX whose
-    open-offer filing had been wired in the day before.
+    On 23 August I made a blank sector stop blocking a liquid stock,
+    for a reason that was real: on 20 August, 22 of the day's top 50
+    gainers were invisible to the bot, KRONOX +20% among them, and 100
+    of the 262 blocked symbols traded over Rs 2cr a day. That cost is
+    NOT disputed and this test is not a claim that it was imaginary.
 
-    262 symbols carried that reason; SIX were genuinely trusts. The
-    rest were ordinary companies with an unfilled master row, 100 of
-    them trading over Rs 2cr a day.
+    What that change did not check is that core/master_loader.py holds
+    the OPPOSITE as a hard invariant, and RAISES:
 
-    The gate conflated "may we WATCH this" with "may we TRADE it". The
-    intent -- never trade an unclassified stock -- is enforced
-    downstream where the sector gates live. A stock nobody can see
-    cannot be picked by any rule, however good.
+        Master database has 20 TRADEABLE row(s) with missing
+        classification ... a tradeable stock with no SECTOR silently
+        breaks the sector-strength gate. Either classify them or mark
+        them SUBSCRIBE=NO.
+
+    So the change manufactured the exact state the loader forbids. On
+    24 August the nightly produced twenty such rows -- JNPR, SIGACHI,
+    TNPETRO, MILKYMIST, SHIPROCKET and the rest -- and at 16:20 the
+    collector could not start at all:
+
+        Could not start: Master database has 20 TRADEABLE row(s)
+        with missing classification
+
+    main.py would have died on its next restart too.
+
+    The invariant wins, and not because it is better reasoned. The
+    failure modes are not comparable. An unwatched stock costs one
+    missed opportunity, visibly. A stock inside the sector-strength
+    gate with no sector mis-ranks silently, with real money -- and a
+    bot that will not start costs every opportunity there is.
+
+    The coverage must come back through a SECTOR, not an exception.
+    NSE's equityMetaInfo returns name and ISIN only, so that needs a
+    different source; guessing a sector from a company name would be
+    inventing data.
     """
-    assert decide("NEWIPO", bhav=GOOD, sector="")[0] is True
+    ok, reason = decide("NEWIPO", bhav=GOOD, sector="")
+    assert ok is False
+    assert "awaiting sector classification" in reason
+
+
+def test_a_classified_stock_on_the_same_data_is_watched():
+    # So the assertion above is failing on the SECTOR and nothing else.
+    assert decide("NEWIPO", bhav=GOOD, sector="CHEMICALS")[0] is True
+
+
+def test_the_loader_invariant_and_this_gate_now_agree():
+    """The contradiction itself, pinned.
+
+    Any symbol this gate lets through must be one master_loader.py
+    will accept. It refuses SUBSCRIBE=YES with a blank SECTOR, so this
+    must never return True on a blank sector -- at any liquidity.
+    """
+    rich = dict(GOOD)
+    for key in ("turnover", "value", "traded_value"):
+        if key in rich:
+            rich[key] = 10 ** 12
+    assert decide("HUGE", bhav=rich, sector="")[0] is False
 
 
 def test_an_unclassified_stock_answers_a_HIGHER_bar():

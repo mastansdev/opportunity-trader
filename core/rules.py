@@ -160,7 +160,34 @@ MIN_REWARD_MULTIPLE = 2.0
 
 # core/ranker.py: measured against YESTERDAY'S CLOSE. Below this,
 # nothing has happened worth looking at.
-MIN_MOVE_FROM_PREV_CLOSE_PCT = 1.0
+#
+# ---- 1.0% IS NOT "MOVING". 24 August 2026. ----
+#
+#     "we never settled the MIN_MOVE_PCT = 1.0. any random stock may
+#      move in this range. pls raise that from 1.0 to 3.0"
+#                                    -- operator, 24 August 2026
+#
+# His rule has always been "trade only if stock is moving ACTIVELY +
+# volume + some support for the movement". 1.0% is not active; it is
+# the noise a stock makes standing still, and every stock in the
+# universe crosses it on an ordinary day.
+#
+# Reading the 28 order-win trades of 10-24 August one by one -- not
+# as an average, which is what hid this -- the split is plain:
+#
+#     entered while moving          entered while drifting
+#     WELCORP   15.3%  +4,926       NCC        2.0%  -2,500
+#     BALUFORGE 10.6%  +5,496       NTPCGREEN  2.3%  -2,500
+#     URBANCO    9.0%  +6,747       GHCL       3.1%  -2,500
+#     RATNAMANI  7.4%  +8,161       RAILTEL    4.9%  -2,500
+#
+# RAILTEL had FOURTEEN times its normal volume and still stopped out,
+# so volume does not rescue a stock that is not going anywhere.
+#
+# 3.0 is his number, not one fitted to those 28 trades. A threshold
+# picked to fit that list would be the same mistake as the "8-12%
+# band" it replaced -- which fit the past and nothing else.
+MIN_MOVE_FROM_PREV_CLOSE_PCT = 3.0
 
 # core/select.py: measured against TODAY'S OPEN. This is the one that
 # answers "is it moving NOW", which is a different question -- a stock

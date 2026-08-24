@@ -392,6 +392,21 @@ def _is_circuit_locked(last_price, upper_limit, lower_limit):
     return False
 
 
+_DAILY_STORE = []
+
+
+def _daily_store():
+    """core/daily_store.DailyStore, opened once per process. None on
+    failure -- a panel must never take the snapshot down."""
+    if not _DAILY_STORE:
+        try:
+            from core.daily_store import DailyStore
+            _DAILY_STORE.append(DailyStore())
+        except Exception:                                  # noqa: BLE001
+            _DAILY_STORE.append(None)
+    return _DAILY_STORE[0]
+
+
 def _rr(direction, entry_price, exit_or_last_price, initial_stop):
     """
     Risk:Reward, computed honestly from the stop actually seeded
@@ -523,6 +538,11 @@ class DashboardState:
         # never a wrong number.
         self.trade_memory = trade_memory
         self.premarket = premarket        # core/premarket.py  overnight world
+
+        # core/results_calendar.py, opened on first use. Engine never
+        # had a results_calendar attribute; see build_watchlist().
+        self._results_calendar = None
+        self._results_calendar_warned = False
         self.preopen = preopen            # core/preopen.py    09:00-09:12
 
         from core.stock_card import StockCard
@@ -2928,6 +2948,10 @@ class DashboardState:
                 # footprint that comes BEFORE the move, which is the one
                 # thing nothing else on this screen can see.
                 row["delivery"] = self._delivery_for(row.get("symbol"))
+                # The 7-day structure, beside the delivery reading --
+                # both answer "what has this stock been doing", which
+                # neither the price nor the volume column can say.
+                row["trend"] = self._trend_for(row.get("symbol"))
                 source = by_symbol.get(row.get("symbol")) or {}
                 mtf = self._mtf_for(row.get("symbol"), source) or {}
                 row["plan"] = position_plan(
@@ -3212,6 +3236,65 @@ class DashboardState:
             return {"available": False, "note": str(exc)}
 
         return {"available": True, "rows": rows}
+
+    def _trend_for(self, symbol):
+        """This stock's 7-day structure, or None.
+
+            "as bot knows about stock trend, delivery % why can't it
+             show in dashboard"          -- operator, 24 August 2026
+
+        core/trend_structure.py has classified every stock as
+        STRONG_UP / UPTREND / RANGE / DOWNTREND / STRONG_DOWN since it
+        was written, and tools/trend_report.py printed it to a CSV that
+        had to be run by hand. It reached no screen and no alert, so
+        the bot knew the shape of every stock and he did not.
+
+        Only the rows on the board are computed -- eight daily bars for
+        twenty-odd symbols, not 1,290 -- and cached per DAY, because a
+        daily-bar structure cannot change until tomorrow's close.
+        """
+        if not symbol:
+            return None
+        from datetime import date
+        today = date.today().isoformat()
+        cache = getattr(self, "_trend_cache", None)
+        if cache is None or cache.get("day") != today:
+            cache = {"day": today, "rows": {}}
+            self._trend_cache = cache
+        if symbol in cache["rows"]:
+            return cache["rows"][symbol]
+
+        result = None
+        try:
+            from core.trend_structure import analyse
+            # DashboardState has NO daily_store attribute -- the first
+            # draft of this used self.daily_store behind a getattr
+            # guard, which would have made every trend silently None,
+            # forever. Exactly the fault
+            # tests/test_the_code_reads_keys_that_exist.py was written
+            # to catch, written the same evening. core/daily_store.py
+            # is opened directly, once, and held on the instance.
+            # ONE store per PROCESS, not one per DashboardState.
+            # core/daily_store.py is SQLAlchemy and pools connections,
+            # so an instance-level store leaks a pool for every state
+            # object built -- which in a full test run is a lot of open
+            # handles on data/daily_candles.db, and three tests failed
+            # only when the whole suite ran.
+            store = _daily_store()
+            bars = store.history(symbol, days=8) if store else None
+            if bars:
+                got = analyse(bars) or {}
+                structure = got.get("structure")
+                if structure and structure != "UNKNOWN":
+                    result = {
+                        "structure": structure,
+                        "hh_streak": got.get("hh_streak"),
+                        "broke": got.get("broke_structure"),
+                    }
+        except Exception:                                  # noqa: BLE001
+            result = None       # a panel must never take the snapshot down
+        cache["rows"][symbol] = result
+        return result
 
     def _delivery_for(self, symbol):
         """{"reading", "pct", "avg", "text"} or None.
@@ -3704,10 +3787,28 @@ class DashboardState:
                 pct = round((last - entry) / entry * 100, 2)
                 if str(position.get("direction", "LONG")).upper() == "SHORT":
                     pct = -pct
+            # ---- pnl WAS ALWAYS None. 24 August 2026. ----
+            #
+            # A stored position has entry_price, qty, initial_stop,
+            # atr_stop, stop_mode -- and no "pnl" key, so this read
+            # returned None every time and the shock banner showed his
+            # open positions with a blank P&L during the one event
+            # where it matters. `change_pct` on the line above already
+            # had a fallback to the computed `pct`; this one did not.
+            #
+            # Found by tests/test_the_code_reads_keys_that_exist.py,
+            # which was written after the same fault printed
+            # "[CARRY] ... stop None" for three protected positions.
+            qty = position.get("qty")
+            pnl = position.get("pnl")
+            if pnl is None and entry and last and qty:
+                pnl = round((last - entry) * qty, 2)
+                if str(position.get("direction", "LONG")).upper() == "SHORT":
+                    pnl = -pnl
             held.append({"symbol": symbol,
-                         "qty": position.get("qty"),
+                         "qty": qty,
                          "change_pct": position.get("change_pct", pct),
-                         "pnl": position.get("pnl")})
+                         "pnl": pnl})
 
         try:
             return assess(headlines=self._recent_headlines(),
@@ -4001,6 +4102,32 @@ class DashboardState:
             resting = stop.resting()
             held = list(open_positions or {})
             unprotected = [s for s in held if s not in resting]
+
+            # ---- "NO STOP AT DHAN" IS PAPER'S DEFINITION. 24 Aug ----
+            #
+            #     "3 POSITIONS WITH NO STOP AT DHAN: JBMA, NCC, CDSL.
+            #      why?"                -- operator, 24 August 2026
+            #
+            # Because the broker stop is DISABLED in PAPER, on purpose:
+            # "BROKER_STOP_ENABLED is on but TRADING_MODE is PAPER".
+            # Nothing rests at Dhan, so held-minus-resting is the whole
+            # book, every cycle, in red.
+            #
+            # Those three were simulated fills carried from Friday.
+            # They are not unprotected: their stops are live in this
+            # process, which is exactly what the panel's OWN next
+            # branch says -- "broker stop OFF, stops live in this
+            # process only" -- and which it could never reach, because
+            # the red branch fires first.
+            #
+            # This is the third place the same mistake was made: the
+            # bot's simulated book compared against the real account.
+            # core/broker_sync.py stopped DELETING paper positions on
+            # 21 August and stopped WARNING about them on 24 August.
+            # A missing resting order is a real alarm only when one was
+            # supposed to be there.
+            if not stop.enabled:
+                unprotected = []
             return {
                 "available": True,
                 "enabled": bool(stop.enabled),
@@ -5604,11 +5731,33 @@ class DashboardState:
 
         # ---- THE RESULTS HALF ----
         today = datetime.now().strftime("%Y-%m-%d")
+        # ---- Engine HAS NO results_calendar. 24 August 2026. ----
+        #
+        #     "its printing same thing multiple times"
+        #                                    -- operator, 24 Aug 2026
+        #
+        # 487 identical AttributeErrors in the 37-minute pre-open of
+        # 24 August, one per cycle. The attribute has never existed on
+        # Engine, so the RESULTS HALF of this watchlist has never once
+        # populated -- the message was filed as a diagnostic and read
+        # as "no results today", which during results season it was
+        # not. core/results_calendar.py owns the store; it is opened
+        # here directly and cached, exactly as the other stores are.
+        #
+        # Reported once per process, not once per cycle: a condition
+        # that cannot change between ticks does not need re-announcing
+        # every 2.6 seconds.
+        due = []
         try:
-            calendar = self.engine.results_calendar
-            due = calendar.symbols_on(today) or []
+            if self._results_calendar is None:
+                from core.results_calendar import ResultsCalendar
+                self._results_calendar = ResultsCalendar()
+            due = self._results_calendar.symbols_on(today) or []
         except Exception as exc:                           # noqa: BLE001
-            diagnostic(f"[WATCHLIST] No results calendar ({exc}).")
+            if not self._results_calendar_warned:
+                self._results_calendar_warned = True
+                diagnostic(f"[WATCHLIST] No results calendar ({exc}). "
+                           f"Said once; not repeated each cycle.")
             due = []
 
         for symbol in sorted({str(s).upper() for s in due}):

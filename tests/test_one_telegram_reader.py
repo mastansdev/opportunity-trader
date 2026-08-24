@@ -38,6 +38,8 @@ import time
 
 import pytest
 
+import sys
+
 from core.runlock import (LOCK_PATH, STALE_AFTER_SECONDS,
                           TelegramReaderLock, held_by_another)
 
@@ -53,6 +55,32 @@ def lock_path(tmp_path):
 def test_no_lock_means_free(lock_path):
     busy, _ = held_by_another(lock_path)
     assert busy is False
+
+
+
+# ---- A SECOND READER HAS TO BE ALIVE. 24 August 2026. ----
+#
+# These tests used `os.getpid() + 9999` to stand in for another
+# process. core/runlock.py now asks whether the pid in the lock is
+# still running -- because a collector killed at 15:34 locked the next
+# one out until 17:31, the lock having been judged on FILE AGE alone.
+#
+# A pid that never existed is not a second reader, so the stand-in had
+# to become a real one. Spawns a child that sleeps, uses its pid, and
+# reaps it.
+import contextlib
+import subprocess
+
+
+@contextlib.contextmanager
+def _a_live_other_process():
+    child = subprocess.Popen([sys.executable, "-c",
+                              "import time; time.sleep(60)"])
+    try:
+        yield child.pid
+    finally:
+        child.kill()
+        child.wait(timeout=10)
 
 
 def test_a_live_lock_is_seen(lock_path):
@@ -74,14 +102,27 @@ def test_a_live_lock_is_seen(lock_path):
     A green test made it invisible. The lock is meant to stop a SECOND
     reader, so the test has to involve a second one.
     """
-    import os
     import time
-    with open(lock_path, "w", encoding="utf-8") as handle:
-        handle.write(f"telegram_catchup pid={os.getpid() + 9999} "
-                     f"{time.strftime('%Y-%m-%d %H:%M:%S')}")
-    busy, who = held_by_another(lock_path)
+    with _a_live_other_process() as other_pid:
+        with open(lock_path, "w", encoding="utf-8") as handle:
+            handle.write(f"telegram_catchup pid={other_pid} "
+                         f"{time.strftime('%Y-%m-%d %H:%M:%S')}")
+        busy, who = held_by_another(lock_path)
     assert busy is True
     assert "telegram_catchup" in who
+
+
+def test_a_lock_left_by_a_dead_process_is_not_a_second_reader(lock_path):
+    """The collector killed at 15:34 blocked its replacement until
+    17:31. Staleness was file age alone; the pid was never checked."""
+    import time
+    with _a_live_other_process() as gone_pid:
+        pass                                # now certainly dead
+    with open(lock_path, "w", encoding="utf-8") as handle:
+        handle.write(f"collector pid={gone_pid} "
+                     f"{time.strftime('%Y-%m-%d %H:%M:%S')}")
+    busy, _ = held_by_another(lock_path)
+    assert busy is False
 
 
 def test_and_my_own_lock_is_not_a_second_reader(lock_path):

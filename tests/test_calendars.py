@@ -367,12 +367,45 @@ def test_refresh_from_nse_skips_the_download_when_covered(cal, monkeypatch):
 
 # --- results season -------------------------------------------
 
-def test_results_season_months():
+def test_results_season_follows_the_sebi_deadlines():
+    """SEBI (LODR) Reg 33, not calendar months.
+
+    Quarterly results are due within 45 days of quarter end, the last
+    quarter and the annual within 60 days:
+
+        Q1 Apr-Jun  due 14 Aug     Q3 Oct-Dec  due 14 Feb
+        Q2 Jul-Sep  due 14 Nov     Q4+annual   due 30 May
+
+    The old check was month-based and called 24 August "results
+    season" -- ten days after Q1 filing had closed. That is what put
+    a blocking gate on a gapper card nobody was publishing.
+    """
     from core.results_calendar import in_results_season
-    for month in (1, 2, 4, 5, 7, 8, 10, 11):
-        assert in_results_season(date(2026, month, 15)) is True
+
+    # Filing clusters in the four weeks before each deadline.
+    for day in (date(2026, 1, 15), date(2026, 2, 14),      # Q3
+                date(2026, 4, 15), date(2026, 5, 30),      # Q4 + annual
+                date(2026, 7, 15), date(2026, 8, 14),      # Q1
+                date(2026, 10, 15), date(2026, 11, 14)):   # Q2
+        assert in_results_season(day) is True, day
+
+    # The day AFTER a deadline is not the season -- this is the whole
+    # point, and the month check got every one of these wrong.
+    for day in (date(2026, 2, 15), date(2026, 5, 31),
+                date(2026, 8, 15), date(2026, 11, 15)):
+        assert in_results_season(day) is False, day
+
+    # And the quiet months stay quiet.
     for month in (3, 6, 9, 12):
         assert in_results_season(date(2026, month, 15)) is False
+
+
+def test_the_day_he_named_is_off_season():
+    #     "results season completed & will re occur on oct 2nd week"
+    #                                 -- operator, 21 August 2026
+    from core.results_calendar import in_results_season
+    assert in_results_season(date(2026, 8, 24)) is False
+    assert in_results_season(date(2026, 10, 15)) is True
 
 
 def test_first_ever_run_always_refreshes(results):

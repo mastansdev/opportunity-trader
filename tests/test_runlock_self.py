@@ -105,11 +105,40 @@ def test_the_real_tool_order_is_take_then_check(lock_path):
 def test_a_genuinely_different_process_is_still_refused(lock_path):
     """The reason the lock exists. Two readers share one Telethon
     session and one store, and both end up damaged."""
-    _write(lock_path, f"telegram_catchup pid={os.getpid() + 9999} "
-                      f"{time.strftime('%Y-%m-%d %H:%M:%S')}")
-    busy, who = held_by_another(lock_path)
+    # A LIVE other process. core/runlock.py now checks whether the pid
+    # in the lock is still running, so `os.getpid() + 9999` -- a pid
+    # that never existed -- is no longer a second reader. It became a
+    # real one rather than the check being weakened: the two-hour
+    # age-only rule locked a restarted collector out for two hours.
+    import subprocess
+    import sys
+    child = subprocess.Popen([sys.executable, "-c",
+                              "import time; time.sleep(60)"])
+    try:
+        _write(lock_path, f"telegram_catchup pid={child.pid} "
+                          f"{time.strftime('%Y-%m-%d %H:%M:%S')}")
+        busy, who = held_by_another(lock_path)
+    finally:
+        child.kill()
+        child.wait(timeout=10)
     assert busy is True
     assert "pid=" in who
+
+
+def test_a_lock_whose_owner_has_died_is_released(lock_path):
+    """The other half of the same rule, 24 August 2026.
+
+    "ALREADY RUNNING: collector pid=18540 (started 4 min ago)" was
+    printed thirty seconds after 18540 was killed.
+    """
+    import subprocess
+    import sys
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait(timeout=10)
+    _write(lock_path, f"collector pid={child.pid} "
+                      f"{time.strftime('%Y-%m-%d %H:%M:%S')}")
+    busy, _ = held_by_another(lock_path)
+    assert busy is False
 
 
 def test_a_lock_with_no_pid_is_somebody_elses(lock_path):

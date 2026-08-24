@@ -368,6 +368,32 @@ check("ON lights GREEN and says BOT TRADING; OFF lights YELLOW and says BOT OBSE
     throw new Error("OFF shows '" + NODES["switchlabel"]._text + "'");
 });
 
+check("the board says whose money this is", () => {
+  // "now bot is in paper mode or real trading with dhan? & still why
+  //  can't i get the difference while ttrading"   -- operator, 24 Aug
+  //
+  // The page never showed the mode at all. PAPER appeared only in
+  // comments and a tooltip, while the console announced "Orders
+  // placed from here are REAL" during a PAPER session.
+  draw(Object.assign({}, SNAP, {
+    mode: "PAPER",
+    bot_trading: {on: true, known: true, placing_real_orders: false}}));
+  if (NODES["mode"]._text !== "PAPER")
+    throw new Error("PAPER session shows '" + NODES["mode"]._text + "'");
+
+  draw(Object.assign({}, SNAP, {
+    mode: "LIVE",
+    bot_trading: {on: true, known: true, placing_real_orders: true}}));
+  if (NODES["mode"]._text !== "REAL MONEY")
+    throw new Error("LIVE session shows '" + NODES["mode"]._text + "'");
+
+  // Silence is the one answer it must never give. An unknown mode
+  // reads as real money, not as nothing.
+  draw(Object.assign({}, SNAP, {bot_trading: {on: false, known: true}}));
+  if (NODES["mode"]._text !== "MODE UNKNOWN")
+    throw new Error("unknown mode shows '" + NODES["mode"]._text + "'");
+});
+
 check("the lit button and the words can never disagree", () => {
   // They were set in two different places, which is how BOT TRADING
   // ended up beside a bot that was observing.

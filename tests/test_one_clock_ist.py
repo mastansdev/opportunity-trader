@@ -61,13 +61,28 @@ def test_a_datetime_passes_through_reaction():
 
 
 def test_the_feed_is_not_five_and_a_half_hours_stale():
-    # core/telegram_feed._all_older_than() decides whether the channel
-    # feed has gone quiet. Reading UTC as IST made a live feed look
-    # 5h30m behind, which is more than most staleness thresholds.
+    """core/telegram_feed._all_older_than() decides whether the feed
+    has gone quiet. Reading UTC as IST made a live feed look 5h30m
+    behind -- more than most staleness thresholds.
+
+    The stamp is built RELATIVE TO NOW. The first version of this test
+    hard-coded "2026-08-23T15:22:30+00:00", which was twenty minutes
+    old when I wrote it and nineteen hours old the next afternoon. A
+    test whose answer depends on the day it runs is not a test.
+    """
+    from datetime import timedelta, timezone
     from core.telegram_feed import _all_older_than
-    now = datetime(2026, 8, 23, 21, 0)
-    fresh = [{"at": "2026-08-23T15:22:30+00:00"}]      # 20:52 IST
-    assert _all_older_than(fresh, hours=4) is not True
+
+    # Ten minutes ago, written the way the store writes it: UTC.
+    ten_min_ago = (datetime.now(timezone.utc)
+                   - timedelta(minutes=10)).isoformat()
+    assert _all_older_than([{"at": ten_min_ago}], hours=4) is not True
+
+    # And something genuinely old still reads as old, so the assertion
+    # above is not passing for want of a working comparison.
+    long_ago = (datetime.now(timezone.utc)
+                - timedelta(hours=30)).isoformat()
+    assert _all_older_than([{"at": long_ago}], hours=4) is True
 
 
 def test_why_moving_and_the_feed_agree_on_one_stamp():

@@ -510,9 +510,32 @@ def test_no_band_means_no_claim_either_way():
 
 
 def test_an_early_mover_on_fresh_results_is_a_candidate():
-    """The whole point. Up 2.5%, nowhere near the leaderboard, results
-    just filed, volume building -- this must be rankable."""
-    early = live("BASF", 2.5, 0.6, high=102.6, ltp=102.5)
+    """An early mover on fresh results must be rankable.
+
+    ---- THE NUMBER CHANGED, THE POINT DID NOT. 24 August 2026 ----
+
+    This said "up 2.5% ... this must be rankable", written when
+    MIN_MOVE_FROM_PREV_CLOSE_PCT was 1.0. It is 3.0 now:
+
+        "we never settled the MIN_MOVE_PCT = 1.0. any random stock may
+         move in this range ... make sure that a stock move atleast
+         3.0 % is mandatory below that range is not tradeable & will
+         fail (hit stoploss or waste our capital until book loss)"
+                                            -- operator, 24 Aug 2026
+
+    A DIRECT CONFLICT, recorded rather than quietly resolved: a stock
+    up 2.5% on fresh results is now refused, and this test used to
+    require the opposite. The operator's rule wins -- it is his money
+    and his stated rule since the first session -- but the case this
+    test was written for is real, and if results-season evidence turns
+    out to deserve a lower floor than the tape does, THIS is the test
+    that will have to change back.
+
+    The point it defends is unaltered: a stock nowhere near the
+    leaderboard, on fresh results with volume building, must rank.
+    Only the move it needs is bigger.
+    """
+    early = live("BASF", 3.5, 0.6, high=103.6, ltp=103.5)
     got = run([early] + quiet(), adv=10.0, mech=strong)
     assert got["rows"][0]["symbol"] == "BASF"
     assert got["rows"][0]["state"] == "alive"

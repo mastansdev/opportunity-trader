@@ -63,16 +63,39 @@ def _bhav(turnover_cr, close=300.0, series="EQ"):
 # THE STOCKS IT WAS MISSING
 # ---------------------------------------------------------------
 
+# ---- THE RULE THIS FILE WAS WRITTEN FOR WAS REVERTED. 24 Aug ----
+#
+# On 23 August a blank SECTOR stopped blocking a liquid stock, because
+# 22 of 20 August's top 50 gainers were invisible -- KRONOX +20% among
+# them. That cost was real and is not in dispute.
+#
+# core/master_loader.py holds the opposite as a hard invariant and
+# RAISES on it. On 24 August the nightly produced twenty such rows and
+# NOTHING would start -- collector down, main.py would have died on its
+# next restart. The invariant won, in core/subscribe_list.py.
+#
+# These two tests now assert the CURRENT rule. The coverage they were
+# written to protect has to come back through a real SECTOR source,
+# not through an exception, and until it does the loss stands.
 def test_a_liquid_unclassified_stock_is_watched():
     """THE KRONOX CASE. +20% on a filing the bot had already learned
     to read, and no tick data for it."""
     ok, why = decide("KRONOX", bhav=_bhav(9.3), sector="")
+    assert ok is False
+    assert "awaiting sector classification" in why
+    # The coverage this gives up, stated so it cannot be forgotten:
+    # KRONOX closed +20% on 20 August and the bot could not see it.
+    assert decide("KRONOX", bhav=_bhav(9.3),
+                  sector="CHEMICALS")[0] is True
+    return
     assert ok is True, why
 
 
 def test_jnpr_at_82_crore_a_day_is_watched():
     """The largest of the 100 liquid names that were excluded."""
-    assert decide("JNPR", bhav=_bhav(82.8), sector="")[0] is True
+    # Rs 82.8 crore a day and still refused, because it has no sector.
+    assert decide("JNPR", bhav=_bhav(82.8), sector="")[0] is False
+    assert decide("JNPR", bhav=_bhav(82.8), sector="TECHNOLOGY")[0] is True
 
 
 # ---------------------------------------------------------------
@@ -109,19 +132,19 @@ def test_an_etf_is_still_refused_however_liquid():
 
 def test_surveillance_still_refuses_an_unclassified_stock():
     """The governance question outranks liquidity, classified or not."""
-    ok, why = decide("SHADY", bhav=_bhav(50.0), sector="",
+    ok, why = decide("SHADY", bhav=_bhav(50.0), sector="CHEMICALS",
                      remarks={"SHADY": "GSM STAGE - 1"})
     assert ok is False and "surveillance" in why
 
 
 def test_a_corporate_action_still_refuses_it():
-    ok, why = decide("SPLITCO", bhav=_bhav(50.0), sector="",
+    ok, why = decide("SPLITCO", bhav=_bhav(50.0), sector="CHEMICALS",
                      corporate_actions={"SPLITCO"})
     assert ok is False and "corporate action" in why
 
 
 def test_a_narrow_price_band_still_refuses_it():
-    ok, why = decide("BANDED", bhav=_bhav(50.0), sector="",
+    ok, why = decide("BANDED", bhav=_bhav(50.0), sector="CHEMICALS",
                      bands={"BANDED": 5.0})
     assert ok is False and "band" in why
 

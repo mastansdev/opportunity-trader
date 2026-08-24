@@ -738,6 +738,33 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None):
                 _broke("rotation check", exc)
                 freed = False
         if not freed:
+            # ---- SAY WHY, NOT JUST NO. 24 August 2026. ----
+            #
+            # This claimed the challenger was "not decisively better
+            # than the weakest" whatever the real cause. On 24 August
+            # RATNAMANI arrived at +5.70% against a weakest holder at
+            # -1.60%, a 7.3-point gap over a 2.0-point bar -- it was
+            # decisively better by any reading. Rotation had refused
+            # on its FIRST line:
+            #
+            #     if getattr(self, "alert_only", True):
+            #         return False
+            #
+            # The bot was not trading. The message blamed the stock,
+            # and reading it you would conclude the bot had judged
+            # RATNAMANI inferior to a position sitting at -1.6%. It
+            # never got as far as judging.
+            #
+            # Same fault as "[CARRY] ... stop None" and the false
+            # "silent" feed warning: a sentence asserting something
+            # the code never established.
+            if getattr(engine, "alert_only", True):
+                return (f"book full ({len(held)} of {max_positions}) and "
+                        f"the bot is not trading -- no seat can be freed "
+                        f"while trading is OFF")
+            if not ENABLE_SLOT_ROTATION:
+                return (f"book full ({len(held)} of {max_positions}) and "
+                        f"slot rotation is OFF -- no seat can be freed")
             return (f"already holding {len(held)} of {max_positions} "
                     f"and not decisively better than the weakest")
 

@@ -61,15 +61,47 @@ REPORT_AT = dtime(9, 45)
 # would bury that.
 MAX_NAMED = 40
 
+# ---- HOW LONG HAVE WE BEEN LISTENING? 24 August 2026. ----
+#
+# The wall-clock gate above answers "is it late enough in the session",
+# and the 10% gate answers "has enough of the book spoken". Neither
+# answers the one that matters after a RESTART: has THIS process been
+# subscribed long enough for silence to mean anything?
+#
+# 24 August, main.py restarted at 14:45. One minute later:
+#
+#     [FEED] 1162 of 1291 subscriptions have delivered NOTHING by
+#            09:45 (129 are live). Dhan is not sending these
+#
+# Every one of those 1,291 symbols went on to tick in that same
+# process -- the log shows a closed candle for all of them. The feed
+# was perfectly healthy and the message named ATGL, ADANIENT,
+# ADANIGREEN, ADANIPOWER and 20MICRONS among 1,162 others as dead. He
+# read the terminal and asked why those stocks were not tradeable.
+#
+# 129 live was not a coincidence: it is exactly len(resolved) // 10,
+# the 10% threshold, cleared sixty seconds after subscribing.
+#
+# This module's own docstring already says why that matters: "a
+# diagnostic that cries wolf is worse than none". It had been taught
+# not to trust the tick's clock; it had not been taught that its own
+# uptime is part of the question.
+MIN_LISTEN_MINUTES = 30.0
+
 _seen = set()
 _said = False
+_first_tick_at = None
 
 
 def saw(security_id):
     """Call on every stock tick. Never raises."""
+    global _first_tick_at
     try:
         if security_id is not None:
             _seen.add(str(security_id))
+            if _first_tick_at is None:
+                from core.feed_clock import now_ist
+                _first_tick_at = now_ist()
     except Exception:                                          # noqa: BLE001
         pass
 
@@ -128,6 +160,14 @@ def report(resolved, now=None, log=None):
         # almost nothing has, the connection is the story, not the
         # instruments, and that is a different message.
         if len(_seen) < max(20, len(resolved) // 10):
+            return []
+        # And we must have been listening long enough that a quiet
+        # instrument is genuinely quiet -- not merely subscribed a
+        # minute ago. See MIN_LISTEN_MINUTES.
+        if _first_tick_at is None:
+            return []
+        listened = (now_ist() - _first_tick_at).total_seconds() / 60.0
+        if listened < MIN_LISTEN_MINUTES:
             return []
         silent = sorted(symbol for symbol, sid in resolved.items()
                         if str(sid) not in _seen)

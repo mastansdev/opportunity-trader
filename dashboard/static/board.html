@@ -199,6 +199,23 @@ SERVED ALONGSIDE, NOT INSTEAD
       <button id="btn-on"  class="segb" data-arm="on">ON</button>
       <button id="btn-off" class="segb" data-arm="off">OFF</button>
     </span>
+    <!-- ---- WHICH MONEY IS THIS? 24 August 2026. ----
+         "now bot is in paper mode or real trading with dhan? & still
+          why can't i get the difference while ttrading , its a simple
+          real to paper mode right."          -- operator
+
+         It is simple, and this board never said it. The word PAPER
+         appeared nowhere on the page -- only in comments and one
+         tooltip -- while the console announced "Orders placed from
+         here are REAL" during a PAPER session and he switched the bot
+         off, correctly, on what he was shown.
+
+         The snapshot has carried `mode` and `placing_real_orders`
+         all along. This draws them, permanently, next to the switch.
+         Never hidden: an absent badge would read as "no idea", and
+         the one thing this must never be is ambiguous. -->
+    <span id="mode" style="font-size:12px;font-weight:700;padding:2px 9px;
+          border-radius:7px;letter-spacing:.4px;">&mdash;</span>
     <span id="switchlabel" style="font-size:13px;font-weight:600;">&mdash;</span>
     <span id="switchwhy" style="font-size:12px;color:var(--warn-fg);
           background:var(--warn-bg);padding:2px 9px;border-radius:7px;
@@ -611,6 +628,30 @@ function paintState(on){
   lab.textContent = BOT_ON ? "BOT TRADING" : "BOT OBSERVING";
   lab.style.color = BOT_ON ? "#085041" : "#633806";
 }
+// ---- PAPER OR REAL, SAID OUT LOUD. 24 August 2026. ----
+// Driven by the snapshot's own fields, never inferred here. If the
+// snapshot cannot say, this says UNKNOWN in the LIVE colour: the safe
+// reading of "I do not know whose money this is" is to assume it is
+// his, not to go quiet.
+function paintMode(mode, real){
+  const el = $("mode");
+  if (!el) return;
+  const m = String(mode || "").toUpperCase();
+  const known = (m === "PAPER" || m === "LIVE");
+  if (known && m === "PAPER" && real !== true){
+    el.textContent = "PAPER";
+    el.title = "Simulated fills. Nothing is sent to Dhan.";
+    el.style.background = "#e6f4ea"; el.style.color = "#085041";
+  } else if (known && m === "LIVE"){
+    el.textContent = "REAL MONEY";
+    el.title = "Orders from this bot go to Dhan.";
+    el.style.background = "#fdecec"; el.style.color = "#b00020";
+  } else {
+    el.textContent = "MODE UNKNOWN";
+    el.title = "The snapshot did not say. Treat it as real money.";
+    el.style.background = "#fdecec"; el.style.color = "#b00020";
+  }
+}
 let sw_busy = false;
 // A dead bot and a working one look identical on a static page. This is
 // how the switch knows to say so. 11 August: his board sat frozen at
@@ -753,6 +794,30 @@ function reasonChips(r){
     add(Number(d.pct).toFixed(0) + "% deliv", heavy ? "earn" : "flat",
         d.text || (Number(d.pct).toFixed(0) + "% delivered"
                    + (d.avg ? ", usual " + Number(d.avg).toFixed(0) + "%" : "")));
+  }
+
+  // ---- THE 7-DAY STRUCTURE. 24 August 2026. ----
+  //
+  //     "as bot knows about stock trend, delivery % why can't it show
+  //      in dashboard in why it is moving ? section or new column as
+  //      trend = Strong_up / Uptrend/range/downtrend/strongdown"
+  //                                    -- operator, 24 August 2026
+  //
+  // core/trend_structure.py has classified every stock for weeks and
+  // tools/trend_report.py printed it to a CSV he had to run by hand.
+  // The same fault as delivery above: measured, stored, fresh, and on
+  // no screen.
+  //
+  // A chip, matching delivery. Colour carries the direction so it can
+  // be read without stopping: up green, down red, range neutral.
+  if (r.trend && r.trend.structure) {
+    const t = String(r.trend.structure);
+    const tone = /UP$/.test(t) ? "earn" : (/DOWN$/.test(t) ? "stop" : "flat");
+    const streak = r.trend.hh_streak
+      ? " (" + r.trend.hh_streak + "d higher highs)" : "";
+    add(t.replace("_", " ").toLowerCase(), tone,
+        "7-day structure: " + t + streak
+        + (r.trend.broke ? " -- structure just BROKE" : ""));
   }
 
   // ---- HOW FAR IT HAD ALREADY RUN. 16 August 2026. ----
@@ -962,6 +1027,7 @@ function draw(s){
   BOT_ON = on;
   const bOn = $("btn-on"), bOff = $("btn-off");
   paintState(on);
+  paintMode(s.mode, bt.placing_real_orders);
 
 
   // ---- WHY THE CLICK DID NOTHING, ON THE PAGE. 11 August 2026. ----

@@ -812,13 +812,30 @@ class Engine:
         )
 
         if closed_candle is not None:
-            diagnostic(
-                f"[CANDLE] {symbol} closed "
-                f"O={closed_candle['open']:.2f} "
-                f"H={closed_candle['high']:.2f} "
-                f"L={closed_candle['low']:.2f} "
-                f"C={closed_candle['close']:.2f}"
-            )
+            # ---- THE STORE ALREADY HAS THIS. 24 August 2026. ----
+            #
+            #     "too many repeated data prints"   -- operator
+            #
+            # 49,830 [CANDLE] lines in the 24 August session, 52% of a
+            # 95,933-line log -- one per symbol per minute across 1,291
+            # symbols. Every one of them is written to the replay
+            # bench's store immediately below, so the line restates a
+            # database row and nothing here reads it back.
+            #
+            # Kept for what is HELD, because that is the case where
+            # somebody is watching a specific stock minute by minute
+            # and wants it beside the exit decisions in the same file.
+            # Everything else is in data/backtest_candles.db, complete
+            # and queryable, exactly as before -- the recording below
+            # is untouched.
+            if symbol in getattr(self, "open_positions", {}):
+                diagnostic(
+                    f"[CANDLE] {symbol} closed "
+                    f"O={closed_candle['open']:.2f} "
+                    f"H={closed_candle['high']:.2f} "
+                    f"L={closed_candle['low']:.2f} "
+                    f"C={closed_candle['close']:.2f}"
+                )
 
             # Clean-corpus recording (2026-07-25) -- every real closed
             # candle goes to the replay bench's store so the strategy
@@ -5726,7 +5743,24 @@ class Engine:
             entry = position.get("entry_price")
             qty = position.get("qty") or 0
             direction = position.get("direction", LONG)
-            stop = position.get("stop")
+            # ---- THERE IS NO KEY CALLED "stop". 24 August 2026. ----
+            #
+            #     "[CARRY]   CDSL LONG qty 47 ... stop None"
+            #                                    -- operator, 24 Aug
+            #
+            # A position stores initial_stop, atr_stop and stop_mode.
+            # `position.get("stop")` has therefore returned None for
+            # every carried position since this line was written, so
+            # the overnight block reported three unprotected holdings
+            # while CDSL, JBMA and NCC each had a stop -- 1358.55,
+            # 648.90 and 145.55, visible in the dashboard snapshot the
+            # whole time.
+            #
+            # _live_stop_price() is the existing answer and knows all
+            # three mechanisms. Reused, not re-derived: a second
+            # opinion about where the stop is would be the same bug in
+            # a new place.
+            stop = self._live_stop_price(symbol, position)
             if price is None:
                 decision(f"[CARRY]   {symbol}: qty {qty} @ {entry} -- "
                          f"no live price to value it against.")

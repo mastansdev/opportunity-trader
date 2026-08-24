@@ -1231,8 +1231,33 @@ def build_app(dashboard_state, trade_controller, master_loader,
 
         held = len(getattr(engine, "open_positions", {}) or {})
         if want_trading:
+            # ---- IT SAID "REAL" IN PAPER, AND HE STOOD DOWN. ----
+            #      24 August 2026.
+            #
+            #     "I CLICKED OFF ON DASHBOARD AS IT SHOWED REAL TRADING"
+            #                                          -- operator
+            #
+            # This banner was hard-coded. Armed in PAPER at 14:45 it
+            # announced "Orders placed from here are REAL", so he
+            # disarmed the bot -- correctly, on what he was shown.
+            # The snapshot beside it said placing_real_orders: False.
+            #
+            # The mode is read at CALL time, the same rule
+            # _bot_trading_now() already follows: a value captured at
+            # import once told him the opposite lie, that a LIVE
+            # session was PAPER.
+            try:
+                from config import TRADING_MODE as _MODE
+                _live = str(_MODE).upper() == "LIVE"
+            except Exception:                              # noqa: BLE001
+                _live = True        # cannot tell -> say the scarier thing
             decision("=" * 62)
-            decision("  BOT TRADING IS ON. Orders placed from here are REAL.")
+            if _live:
+                decision("  BOT TRADING IS ON. Orders placed from here "
+                         "are REAL.")
+            else:
+                decision("  BOT TRADING IS ON -- PAPER. Fills are "
+                         "simulated; nothing reaches Dhan.")
             decision("  Switched from the dashboard. A restart returns to "
                      "watching.")
             decision("=" * 62)

@@ -93,13 +93,61 @@ _RESULT_MARKERS = ("result", "financial statement", "unaudited",
 # in the right part of the day.
 RELIABLE_SPREAD_MINUTES = 120
 
+# ---- THE SEASON ENDS ON A DAY, NOT AT A MONTH BOUNDARY ----
+#      24 August 2026.
+#
+#     "i told u that about results right? before asking me why didn't
+#      u checked online resources about indian markets & their working
+#      methods , results - their periods"
+#                                    -- operator, 24 August 2026
+#
+# He told me on 21 August that the season had ended and returns in the
+# second week of October. I did not check, and built a month check
+# that said 24 August WAS results season -- ten days after the Q1
+# deadline had passed.
+#
+# SEBI (LODR) Regulation 33: quarterly results are due within 45 days
+# of quarter end; the last quarter and the annual results within 60
+# days of the financial year end. That fixes four hard deadlines, and
+# reporting clusters in the weeks BEFORE each one:
+#
+#     Q1  Apr-Jun   due 14 August
+#     Q2  Jul-Sep   due 14 November
+#     Q3  Oct-Dec   due 14 February
+#     Q4  + annual  due 30 May       (60 days, audited)
+#
+# So the Q2 season builds from mid-October to 14 November, which is
+# exactly the "oct 2nd week" he named. Months cannot express this: by
+# 24 August the filings are done, and by 30 May they are done too,
+# while 1 May is the busiest part of the year.
+#
+# Windows open a month before each deadline -- companies file across
+# the four weeks running up to it, not on the last day.
+RESULTS_WINDOWS = (
+    ((1, 15), (2, 14)),        # Q3 (Oct-Dec)
+    ((4, 15), (5, 30)),        # Q4 and the audited annual
+    ((7, 15), (8, 14)),        # Q1 (Apr-Jun)
+    ((10, 15), (11, 14)),      # Q2 (Jul-Sep)
+)
+
+# Kept: callers and tests still read it, and it remains a true
+# statement of WHICH MONTHS contain a season. It is no longer what
+# in_results_season() decides on.
 RESULTS_SEASON_MONTHS = {1, 2, 4, 5, 7, 8, 10, 11}
 OFF_SEASON_REFRESH_DAYS = 7
 
 
 def in_results_season(day=None):
+    """Are companies filing results around now?
+
+    Day-level, from the SEBI Regulation 33 deadlines above. 24 August
+    is NOT results season; 14 August is.
+    """
     day = _as_date(day) or datetime.now().date()
-    return day.month in RESULTS_SEASON_MONTHS
+    for (m1, d1), (m2, d2) in RESULTS_WINDOWS:
+        if (m1, d1) <= (day.month, day.day) <= (m2, d2):
+            return True
+    return False
 
 
 # ...but the word "result" appears in the BODY of a great many

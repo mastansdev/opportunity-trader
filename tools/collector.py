@@ -4,7 +4,7 @@ The Telegram collector -- its own process, its own terminal
 ==========================================================
     py tools/collector.py              collect, forever
     py tools/collector.py --once       one pass, then stop
-    py tools/collector.py --catchup    fill the overnight gap first
+    py tools/collector.py --no-catchup live posts only, leave the gap
 
     "TODAY WORK BELONGS TO TELEGRAM REPAIR & KEEPING MAIN.PY AS
      STANDALONE RUN + REMAINING RUN IN OTHER TERMINALS ......
@@ -222,7 +222,7 @@ def build():
     return feed, events
 
 
-def main(once=False, catchup=False):
+def main(once=False, catchup=True):
     signal.signal(signal.SIGINT, _stop_on_signal)
 
     _line()
@@ -268,9 +268,30 @@ def main(once=False, catchup=False):
         _line()
 
     with TelegramReaderLock("collector"):
+        # ---- THE GAP IS FILLED BY DEFAULT. 24 August 2026. ----
+        #
+        #     "if run stopped at 08 & restarted at 10 , then bot must
+        #      get both news events info right . simultaneous or data
+        #      after 08 published in channels + current run data , by
+        #      dismissing the gaps."          -- operator, 24 Aug 2026
+        #
+        # He is describing what catch_up() already does. It only ran
+        # behind --catchup, so every restart without that flag lost
+        # everything published while the process was down -- silently,
+        # because a normal poll still returns the last 30 per channel
+        # and looks perfectly healthy. Day Trader Telugu alone posts
+        # ~25 an hour, so a two-hour outage loses the older half of it.
+        #
+        # Costs nothing when there is no gap: catch_up() stops the
+        # moment a page contains a post id already on file, so a
+        # restart thirty seconds after a stop reads one page and
+        # returns. The page budget only bites on a first-ever run.
+        #
+        # --no-catchup remains, for the case where somebody wants live
+        # posts only and knows they are leaving a hole.
         if catchup:
-            decision("  Filling the gap since the last run "
-                     "(--catchup). This walks back and is slow.")
+            decision("  Filling the gap since the last run. Stops as "
+                     "soon as it meets what is already on file.")
             try:
                 feed.catch_up()
             except Exception as exc:                       # noqa: BLE001
@@ -512,4 +533,5 @@ def _sleep(seconds):
 
 
 if __name__ == "__main__":
-    main(once="--once" in sys.argv, catchup="--catchup" in sys.argv)
+    main(once="--once" in sys.argv,
+         catchup="--no-catchup" not in sys.argv)

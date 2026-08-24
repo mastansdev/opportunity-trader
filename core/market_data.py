@@ -153,13 +153,33 @@ class MarketData:
         staleness = (now - tick_time).total_seconds()
         threshold = self._staleness_threshold(symbol, tick_time)
         if staleness > threshold:
+            # ---- ONCE PER TRANSITION, NOT ONCE PER TICK. 24 Aug ----
+            #
+            #     "too many repeated data prints"   -- operator
+            #
+            # This line sat OUTSIDE the membership guard while its
+            # partner below -- "recovered from stale ticks" -- sat
+            # inside one. So going stale logged on EVERY TICK for as
+            # long as it lasted, and recovering logged once.
+            #
+            # 24 August: 41,555 [MARKET_DATA] lines in one session,
+            # 43% of a 95,933-line log. GREENLAM alone flipped 452
+            # times, HARDWYN 373, GENESYS 347 -- thin stocks that tick
+            # irregularly, each flip previously worth a burst rather
+            # than a line.
+            #
+            # Behaviour is untouched: the same symbols go stale at the
+            # same moment, _stale_warning_count still counts them, the
+            # ORB-window flag below is unchanged, and
+            # _update_systemic_stale() still sees every tick. Only the
+            # repetition goes.
             if symbol not in self._stale_symbols:
                 self._stale_symbols.add(symbol)
                 self._stale_warning_count += 1
-            diagnostic(
-                f"[MARKET_DATA] {symbol} stale: {staleness:.1f}s old "
-                f"(tick_time={tick_time})."
-            )
+                diagnostic(
+                    f"[MARKET_DATA] {symbol} stale: {staleness:.1f}s old "
+                    f"(tick_time={tick_time})."
+                )
 
             # ORB-window integrity flag -- a genuine data-quality check
             # (the SONACOMS gap), kept ALWAYS-on and unchanged in

@@ -170,14 +170,19 @@ def check(now=None, telegram_db=TELEGRAM_DB, results_db=RESULTS_DB):
     # The tell is the POSTED time of what is being STORED right now.
     # While the walk is running the bot stores old material; once it
     # overlaps with what it already had, it stores only fresh posts.
+    # THE NEWEST POST ON FILE, not the newest WRITE. The 25 most
+    # recently written rows are all old material while a backfill is
+    # walking, which since 24 August is every start -- so that set can
+    # never show anything current, however healthy the live feed is.
     got = _rows(telegram_db,
-                "select at from messages where seen_at <= ? "
-                "order by seen_at desc limit 25", (cutoff,))
+                "select max(at) from messages where seen_at <= ?",
+                (cutoff,))
     ages = []
-    for (at,) in got:
-        posted = _parse(at)
+    if got and got[0] and got[0][0]:
+        posted = _parse(got[0][0])
         if posted is not None:
             ages.append((now - posted).total_seconds() / 3600.0)
+
     if not ages:
         add("catch-up finished", False, "no messages to judge from")
     else:
@@ -186,14 +191,35 @@ def check(now=None, telegram_db=TELEGRAM_DB, results_db=RESULTS_DB):
         # running catch-up: at 07:55 everything stored in the last
         # twenty minutes was current, and this said "104h old posts".
         # A real catch-up has MOST of its recent writes old, not one.
-        ages.sort()
-        oldest = ages[len(ages) // 2]
-        still = oldest > CATCH_UP_STILL_RUNNING_HOURS
-        add("catch-up finished", not still,
-            (f"storing current material (newest batch is "
-             f"{min(ages):.1f}h old)" if not still else
-             f"STILL RECOVERING history -- it is storing posts up to "
-             f"{oldest:.0f}h old. On 6 August this ran until 11:29."))
+        # ---- THE NEWEST, NOT THE MEDIAN. 24 August 2026. ----
+        #
+        # The median asked "is most of what we are writing old?" That
+        # was the right question while catch-up ran only behind
+        # --catchup: old writes then meant a recovery was in progress.
+        #
+        # Since 24 August catch-up runs on EVERY start, so the store
+        # legitimately fills with backfill on every restart. Measured
+        # at 16:42 that day: median age of the last 200 writes 98.9h,
+        # oldest 543h -- and this check refused to arm the bot, on a
+        # condition that is now permanent and correct.
+        #
+        # The question worth asking is narrower and answerable: IS
+        # LIVE COLLECTION CURRENT? A backfill running beside it does
+        # not make the live feed stale, and the depth it reaches back
+        # to says nothing about whether this minute's post arrived.
+        #
+        # So: the NEWEST write. If something recent is on file, live
+        # collection is working. Backfill depth is reported, never
+        # blocked on.
+        newest = min(ages)
+        if newest > CATCH_UP_STILL_RUNNING_HOURS:
+            add("catch-up finished", False,
+                f"NOTHING RECENT -- the newest post on file is "
+                f"{newest:.1f}h old. Live collection is not running.")
+        else:
+            add("catch-up finished", True,
+                f"live collection current -- newest post "
+                f"{newest * 60:.0f} min old")
 
     # ---- 3. TODAY'S PRE-OPEN GAPPER CARD ----
     got = _rows(telegram_db,
@@ -212,10 +238,53 @@ def check(now=None, telegram_db=TELEGRAM_DB, results_db=RESULTS_DB):
             f"not published yet -- it lands about {GAPPER_DUE_AFTER}",
             blocks=False)
     else:
-        add("pre-open gapper card", False,
-            "NOT in the store. Row 1 of the watchlist -- the Excellent "
-            "and Great results -- will be empty, and that will look "
-            "exactly like a morning with no good results.")
+        # ---- NO RESULTS, NO CARD, NO FAULT -- IN PAPER. 24 Aug ----
+        #
+        # The card is a digest of YESTERDAY'S RESULTS. When nobody
+        # reported there is nothing for it to say, and its absence is
+        # the correct output rather than a failure.
+        #
+        #     "results season completed & will re occur on oct 2nd
+        #      week"                    -- operator, 21 August 2026
+        #
+        # On 24 August this blocked arming at 09:17 with the market
+        # already open. The three "recent" sightings that made the
+        # check look healthy were STALE RE-POSTS: the card seen on 23
+        # August was headed "Yesterday's Results * 17 Aug 2026", and
+        # the one on 22 August said 16 Aug. No card had been published
+        # for days, and none would be until October.
+        #
+        # WHY THE MODE, AND NOT A CLEVERER TEST
+        #
+        # in_results_season() is month-based, so August reads as Q1
+        # season and cannot tell a season from its tail. Counting who
+        # reported does not settle it either -- one company on 22
+        # August is a trickle, and any threshold I picked to call that
+        # "out of season" would be a number I invented.
+        #
+        # So the rule is the one thing that is not a guess: what this
+        # gate protects. In LIVE it guards real money and keeps every
+        # bit of its blocking power. In PAPER an empty Row 1 costs
+        # nothing, and refusing to simulate for a month because a
+        # third party stopped publishing a card protects no one.
+        # Operator's decision, 24 August 2026.
+        try:
+            from config import TRADING_MODE
+            live = str(TRADING_MODE).upper() == "LIVE"
+        except Exception:                                   # noqa: BLE001
+            live = True         # cannot tell -> the safer answer
+        if live:
+            add("pre-open gapper card", False,
+                "NOT in the store. Row 1 of the watchlist -- the Excellent "
+                "and Great results -- will be empty, and that will look "
+                "exactly like a morning with no good results.")
+        else:
+            add("pre-open gapper card", False,
+                "not in the store -- Row 1 will be EMPTY. Not blocking in "
+                "PAPER: the card is a digest of yesterday's results and "
+                "nobody is reporting until October. In LIVE this still "
+                "blocks.",
+                blocks=False)
 
     # ---- 4. RESULTS CALENDAR ----
     got = _rows(results_db,

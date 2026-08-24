@@ -1,4 +1,4 @@
-<!-- generated: 2026-08-23 22:43 by tools/bot_doc.py -- do not edit by hand -->
+<!-- generated: 2026-08-24 22:59 by tools/bot_doc.py -- do not edit by hand -->
 # Opportunity Trader — what the bot is, and what it does
 
 **This file is generated.** Every number below is read out of `config.py` and `core/rules.py` when it is written, so it cannot drift away from the running bot. To change a rule, change the code and run `py tools/bot_doc.py --write`.
@@ -68,7 +68,7 @@ Since 12 August **both require a reason** — `core/rules.py`'s `is_a_reason()`,
 | 1 | A named event exists — filing, news or published grade | — | `core/rules.is_a_reason` |
 | 2 | Results are OUT, not pending | — | `core/results_gate.py` |
 | 3 | Grade is allowed | EXCELLENT/GREAT/GOOD | `core/results_gate.py` |
-| 4 | Moving, against yesterday's close | ≥1% | `core/ranker.py` |
+| 4 | Moving, against yesterday's close | ≥3% | `core/ranker.py` |
 | 5 | Moving, against today's open | ≥0.5% | `core/select.py` |
 | 6 | Money behind the move | ≥2.5× normal | `core/rules.py` |
 | 7 | …or, with no published reason | ≥5× normal | `core/rules.py` |

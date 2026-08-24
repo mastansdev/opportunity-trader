@@ -145,7 +145,11 @@ def test_an_empty_ranking_still_reports_refusals_not_a_crash():
 # ---------------------------------------------------------------
 # RULE 2 -- A GAP IS NOT MOMENTUM
 # ---------------------------------------------------------------
-ICICIGI = mover("ICICIGI", 2.68, 1687.80, sector="FINANCE")
+# 3.55, not the real 2.68: MIN_MOVE_FROM_PREV_CLOSE_PCT went to 3.0 on
+# 24 August ("any random stock may move in this range"). These tests are
+# about the BELOW-ITS-OWN-OPEN gate, so the fixture has to clear the
+# movement floor first or it never reaches the gate under test.
+ICICIGI = mover("ICICIGI", 3.55, 1687.80, sector="FINANCE")
 DEEPAKNTR = mover("DEEPAKNTR", 4.94, 1802.50)
 
 

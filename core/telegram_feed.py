@@ -444,6 +444,47 @@ class TelegramFeed:
                 continue
             seen |= keys
             self.channels.append(entry)
+
+        # ---- THE THREE THAT MATTER GO FIRST. 24 August 2026. ----
+        #
+        #     "daily focused channels: OrderBook Pulse, Day Trader
+        #      Telugu , RedboxGlobal India = these channels will get
+        #      posted on daily & event occuring times. so delay in
+        #      getting their data into bot will cost us money."
+        #                                    -- operator, 24 Aug 2026
+        #
+        # POLL_SECONDS is 90, but the MEASURED median lag on 24 August
+        # was 4.8 minutes, because one pass walks ten channels and
+        # OCRs every image before it comes back round. The three that
+        # carry the order wins were queued behind seven that he has
+        # told me are episodic or results-only -- WLPulseBot posts
+        # when its 100 tracked stocks move, Business Pulse when a
+        # company publishes, the Earnings channels in season.
+        #
+        # A stable sort, so nothing else changes order: the daily
+        # three are read first every pass, and a slow OCR on a
+        # promotional card can no longer delay an order win.
+        #
+        # Same list as core/feed_clock.DAILY_CHANNELS -- imported, not
+        # retyped, so the two cannot drift.
+        try:
+            from core.feed_clock import channel_kind
+
+            def _priority(entry):
+                # The folder hands over USERNAMES ("orders_pulse"),
+                # the store keeps TITLES ("OrderBook Pulse").
+                # channel_kind() resolves either through
+                # feed_clock.CHANNEL_ALIASES; matching raw strings
+                # would have prioritised nothing at all.
+                for key in ("handle", "name"):
+                    if channel_kind(entry.get(key)) == "daily":
+                        return 0
+                return 1
+
+            self.channels.sort(key=_priority)
+        except Exception:                                  # noqa: BLE001
+            pass        # order is an optimisation, never a requirement
+
         self.master_loader = master_loader
         self.db_path = db_path
         self.keep_hours = keep_hours

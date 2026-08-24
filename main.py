@@ -1753,7 +1753,13 @@ def main():
         from core.finders import TradeBrain
         from core.finder_set import build as _build_finders
         trade_brain = TradeBrain(_build_finders(
-            ranked_rows=lambda: (dashboard_state.snapshot()
+            # get_snapshot(), NOT snapshot(). The comment 90 lines
+            # below this one says "five method names in this project
+            # have been written from memory and every one was wrong".
+            # This was the sixth, written the same day I read that.
+            # MoversFinder never ran once: 487 AttributeErrors in the
+            # 37 minutes of the 24 August pre-open session.
+            ranked_rows=lambda: (dashboard_state.get_snapshot()
                                  .get("ranked", {}) or {}).get("rows") or [],
             # StockEvents.recent() is the real API -- there is no
             # for_date(). The finders filter to today themselves; this

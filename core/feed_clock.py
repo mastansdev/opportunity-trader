@@ -76,6 +76,111 @@ IST_OFFSET = timedelta(hours=5, minutes=30)
 # times a day during the week.
 STALE_HOURS = 6.0
 
+# ---- NOT EVERY CHANNEL IS SUPPOSED TO POST TODAY. 24 Aug 2026 ----
+#
+#     "how many times i need to tell you about Earnings Pulse = post
+#      data only at results time ... WLPulse bot = This channel will
+#      not give us updates daily , its premium bot with capacity of
+#      100 stocks to track . Business Pulse = this channel will post
+#      whenever they receive updates about any company business
+#      updates."
+#     "daily focused channels: OrderBook Pulse, Day Trader Telugu ,
+#      RedboxGlobal India = these channels will get posted on daily &
+#      event occuring times. so delay in getting their data into bot
+#      will cost us money."
+#                                    -- operator, 24 August 2026
+#
+# He has said this more than once. I read a 4-day-old watermark on
+# Business Pulse and reported it as a broken feed, when a quiet
+# Business Pulse means only that no company published a business
+# update. Calling that an outage is noise, and noise beside a real
+# outage is how a real one gets ignored.
+#
+# Written down here so it stops depending on my memory.
+
+# Post every session. Silence here is a FAULT, and lateness costs
+# money -- these carry the order wins and the news the bot trades on.
+DAILY_CHANNELS = (
+    "OrderBook Pulse",
+    "Day Trader Telugu",
+    "RedboxGlobal India",
+)
+
+# Results season only. Between seasons they are quiet or promotional,
+# and that is correct. See core/results_calendar.in_results_season(),
+# which is day-level off the SEBI Regulation 33 deadlines.
+RESULTS_CHANNELS = (
+    "Earnings Pulse",
+    "Earnings 360",
+    "Earnings Pro",
+)
+
+# Episodic by design. They post when there is something to post.
+# WLPulseBot is a premium tracker capped at 100 stocks; Business Pulse
+# fires only when a company publishes a business update.
+EPISODIC_CHANNELS = (
+    "WLPulseBot",
+    "Business Pulse",
+)
+
+
+# ---- THE FOLDER GIVES USERNAMES, THE STORE GIVES TITLES ----
+#      24 August 2026.
+#
+# core/telegram_client.channels_in_folder() returns `username or
+# title`, so the poller sees "orders_pulse" while data/telegram.db
+# stores "OrderBook Pulse". Matching the lists above against the
+# poller's names alone would have matched NOTHING for the three
+# channels that matter, and the prioritisation would have been a
+# change that never ran -- the second time in two days I nearly
+# shipped one. Read off the live folder, not guessed.
+CHANNEL_ALIASES = {
+    "orders_pulse": "OrderBook Pulse",
+    "daytradertelugu": "Day Trader Telugu",
+    "indiaredboxglobal": "RedboxGlobal India",
+    "earnings_pulse": "Earnings Pulse",
+    "news_pulse_ai": "News Pulse",
+}
+
+
+def canonical_channel(channel):
+    """The display name for any handle or title we might be handed."""
+    name = str(channel or "").strip()
+    return CHANNEL_ALIASES.get(name.lower(), name)
+
+
+def channel_kind(channel):
+    """"daily", "results", "episodic", or "other"."""
+    name = canonical_channel(channel)
+    if name in DAILY_CHANNELS:
+        return "daily"
+    if name in RESULTS_CHANNELS:
+        return "results"
+    if name in EPISODIC_CHANNELS:
+        return "episodic"
+    return "other"
+
+
+def expected_today(channel, day=None):
+    """Should this channel have posted by now? None = cannot say.
+
+    Only a "daily" channel going quiet is a fault. A results channel
+    is expected in season and not out of it; an episodic one is never
+    expected on a schedule.
+    """
+    kind = channel_kind(channel)
+    if kind == "daily":
+        return True
+    if kind == "episodic":
+        return False
+    if kind == "results":
+        try:
+            from core.results_calendar import in_results_season
+            return bool(in_results_season(day))
+        except Exception:                                      # noqa: BLE001
+            return None
+    return None
+
 
 def now_ist():
     """The one clock. Timezone-aware, always IST."""
@@ -225,13 +330,22 @@ def gaps(now=None, db_path=TELEGRAM_DB, stale_hours=STALE_HOURS):
     for channel, last_at, last_seen, last_poll, count in rows:
         when = to_ist(last_at)
         behind = (moment - when).total_seconds() / 3600.0 if when else None
+        late = behind is None or behind >= stale_hours
+        # A quiet channel is only STALE if it was supposed to post.
+        # See DAILY_CHANNELS above -- reporting Business Pulse as a
+        # broken feed because nobody published a business update is
+        # noise, and noise beside a real outage hides the real one.
+        expected = expected_today(channel)
         out.append({
             "channel": channel,
+            "kind": channel_kind(channel),
+            "expected_today": expected,
             "last_at_ist": when.strftime("%d %b %H:%M") if when else None,
             "behind_hours": round(behind, 2) if behind is not None else None,
             "last_poll_ist": last_poll,
             "messages": count or 0,
-            "stale": behind is None or behind >= stale_hours,
+            "quiet": late,
+            "stale": bool(late and expected is not False),
         })
     out.sort(key=lambda r: -(r["behind_hours"] or 1e9))
     return out

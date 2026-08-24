@@ -275,6 +275,20 @@ class BrokerSync:
         return (getattr(executor, "broker_book", None)
                 or getattr(executor, "positions", None))
 
+    def _is_live(self):
+        """Is this a LIVE session? Read at CALL time, never cached.
+
+        The mode is read fresh on every call for the same reason
+        core/engine.py's _bot_trading_now does: a value captured at
+        import told him the bot was "placing REAL orders" while
+        TRADING_MODE said PAPER.
+        """
+        try:
+            from config import TRADING_MODE
+            return str(TRADING_MODE).upper() == "LIVE"
+        except Exception:                                   # noqa: BLE001
+            return False
+
     def _drop_closed_fn(self):
         """How to remove a position Dhan no longer has, or None.
 
@@ -382,6 +396,30 @@ class BrokerSync:
         #
         # Only the second is a problem, and it is the bot's problem.
         stale = result["only_in_bot"] or result["quantity_differs"]
+
+        # ---- IN PAPER THERE IS NO SECOND CASE. 24 August 2026. ----
+        #
+        #     "old paper trades are treated as still dhan holdings"
+        #                                    -- operator, 24 Aug 2026
+        #
+        # _drop_closed_fn() below already refuses to DELETE a paper
+        # position, and its docstring states the principle: "A PAPER
+        # position does not exist at Dhan and never will. That is not
+        # a discrepancy, it is the definition of a simulation."
+        #
+        # The warning was never given the same rule. On the 24 August
+        # pre-open the bot carried three simulated positions from
+        # Friday -- CDSL, JBMA, NCC -- compared them against his real
+        # eight-holding Dhan account, and announced once a MINUTE for
+        # 37 minutes that each "was closed elsewhere". Nothing closed
+        # them. They were never open anywhere but in the simulation.
+        #
+        # The comparison itself is the error, not its consequence, so
+        # it is dropped here rather than silenced at the print. What
+        # Dhan actually holds is still read and still shown -- that is
+        # the whole point of the PAPER broker view.
+        if stale and not self._is_live():
+            stale = []
         theirs = result["only_at_broker"]
 
         # THE FIRST LOOK DEFINES WHAT IS "OLD". Everything Dhan reports
