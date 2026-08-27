@@ -67,6 +67,8 @@ import argparse
 import os
 import sys
 import time
+
+from sqlalchemy import text
 from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -77,7 +79,7 @@ from core.daily_store import DailyStore  # noqa: E402
 from core.history_fetch import (  # noqa: E402
     HistoryFetcher, suspect_price_jumps,
 )
-from core.logger import decision, warn  # noqa: E402
+from core.logger import decision, diagnostic, warn  # noqa: E402
 from core.master_loader import MasterLoader  # noqa: E402
 
 HISTORY_DB = "sqlite:///data/history_candles.db"
@@ -156,7 +158,8 @@ def show_state(candles, daily):
 
 
 def run(days=62, symbols=None, daily_only=False, intraday_only=False,
-        post=None, candles=None, daily=None, loader=None, interval="1"):
+        post=None, candles=None, daily=None, loader=None, interval="1",
+        force=False):
     candles = candles if candles is not None else CandleStore(url=HISTORY_DB)
     daily = daily if daily is not None else DailyStore()
 
@@ -190,10 +193,56 @@ def run(days=62, symbols=None, daily_only=False, intraday_only=False,
     total_min, total_day, no_data = 0, 0, []
     all_daily_rows = []
 
+    # ---- DO NOT RE-DOWNLOAD A FINISHED SESSION. 27 August 2026 ----
+    #
+    #     "minutes collector is doing multiple times same collections"
+    #                                    -- operator, 27 August 2026
+    #
+    # He is right. This loop asked for the WHOLE window for EVERY
+    # symbol every time, and the window is five or six sessions. The
+    # store's UNIQUE (date, symbol, minute) meant no duplicate rows
+    # landed, so nothing looked wrong -- but the download happened
+    # anyway. On 26 August the identical range (19->26 Aug) and the
+    # identical 1,288 symbols were fetched TWICE, 23 minutes apart;
+    # on 20 August, three times.
+    #
+    # A session that has closed cannot gain another bar. If a symbol
+    # already holds a bar at or after LAST_MINUTE on the newest day
+    # being asked for, there is nothing left to fetch and the request
+    # is pure waste -- roughly 1,288 of them, sixteen minutes.
+    #
+    # Deliberately keyed on the NEWEST requested day only. Older days
+    # inside the window are already covered by that same test: if the
+    # newest is complete, the run is a repeat. And it never skips
+    # DURING a session -- at 11:00 no symbol has a 15:29 bar, so
+    # everything is fetched exactly as before.
+    LAST_MINUTE = "15:29"
+    already = set()
+    if not daily_only and not force:
+        try:
+            with candles.engine.connect() as conn:
+                for row in conn.execute(text(
+                        "select distinct symbol from candles "
+                        "where date = :d and substr(minute, 12, 5) >= :m"),
+                        {"d": str(to_date), "m": LAST_MINUTE}):
+                    already.add(str(row[0]).strip().upper())
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[HISTORY] Could not read what is already "
+                       f"stored ({exc}). Fetching everything.")
+            already = set()
+    if already:
+        decision(f"  already complete: {len(already)} symbol(s) hold a "
+                 f"{LAST_MINUTE} bar for {to_date} -- not re-fetched")
+
+    skipped = 0
     for i, symbol in enumerate(symbols, start=1):
         security_id = loader.security_id(symbol)
         if not security_id:
             no_data.append(symbol)
+            continue
+
+        if symbol.strip().upper() in already:
+            skipped += 1
             continue
 
         if not daily_only:
@@ -324,6 +373,9 @@ def main():
                    help="candle size in minutes (default 1)")
     p.add_argument("--check", action="store_true",
                    help="show what's already stored and exit")
+    p.add_argument("--force", action="store_true",
+                   help="re-fetch sessions already complete on disk "
+                        "(default: skip them -- see the note in run())")
     args = p.parse_args()
 
     if args.check:
@@ -335,7 +387,8 @@ def main():
              "py tools/dhan_account_check.py")
         return 1
 
-    return run(days=args.days,
+    return run(force=args.force,
+               days=args.days,
                symbols=[s.upper() for s in args.symbols]
                if args.symbols else None,
                daily_only=args.daily_only,

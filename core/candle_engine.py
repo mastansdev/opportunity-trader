@@ -129,6 +129,56 @@ class CandleEngine:
             return None
         return candles[-1]
 
+    def vwap(self, symbol):
+        """Volume-weighted average price for this session, or None.
+
+        ---- IT WAS READ AND NEVER WRITTEN. 27 August 2026 ----
+
+        core/ranker.py's liveness() has asked for row["vwap"] since it
+        was written -- "below VWAP on a long means the average buyer
+        today is under water, that is not a stock to be joining" --
+        and NOTHING anywhere set that key. It appears zero times in
+        the live snapshot. The guard reads `if vwap and ltp:` so it
+        degraded quietly rather than raising, and one of the three
+        signals deciding alive-vs-fading has never fired.
+
+        Same class as position.get("stop") printing None for three
+        protected positions: a field read from a shape that does not
+        carry it.
+
+            VWAP = sum(typical price x volume) / sum(volume)
+            typical price = (high + low + close) / 3
+
+        Computed over THIS SESSION'S closed candles, which is the
+        definition -- VWAP resets each day. Candle volume is already
+        the per-minute delta (see update()), not a cumulative figure,
+        so these sum correctly.
+
+        None when nothing has volume yet: a session with no volume has
+        no volume-weighted price, and returning the plain average
+        would be inventing one.
+        """
+        candles = self._closed_candles.get(symbol)
+        if not candles:
+            return None
+        weighted = 0.0
+        total = 0.0
+        for candle in candles:
+            volume = candle.get("volume")
+            if not volume or volume <= 0:
+                continue
+            high = candle.get("high")
+            low = candle.get("low")
+            close = candle.get("close")
+            if high is None or low is None or close is None:
+                continue
+            typical = (float(high) + float(low) + float(close)) / 3.0
+            weighted += typical * float(volume)
+            total += float(volume)
+        if total <= 0:
+            return None
+        return weighted / total
+
     def last_n_closed(self, symbol, n):
         """
         Up to the last `n` closed candles for symbol, OLDEST FIRST

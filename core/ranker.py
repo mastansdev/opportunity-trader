@@ -216,7 +216,36 @@ AT_CIRCUIT_PCT = 0.5
 # Above this the denominator is broken, not the market. See
 # volume_ratio(): the field is SORTED ON, so corrupt values are picked
 # preferentially rather than diluted.
-MAX_SANE_VOLUME_RATIO = 50.0
+# ---- 50x MEANT A BROKEN DENOMINATOR. IT NO LONGER DOES. ----
+#      27 August 2026.
+#
+# This was set on 23 August when 276 of 16,581 recorded multiples were
+# over 50x and every one of them was a DENOMINATOR fault -- VINATIORGA
+# reading 7,799x on a real 7.4x day. The denominator has since been
+# fixed (core/liquidity.py: median of 20 sessions, excluding today,
+# where it had been the MEAN of five INCLUDING today), and with a
+# correct divisor only two or three stocks a DAY now exceed 50x -- and
+# they are the biggest genuine movers in the market:
+#
+#     24 Aug  TVSSCS 106x   QUADFUTURE 104x   LTFOODS 97x
+#     25 Aug  FACT   617x   BOROLTD    297x
+#
+# Checked one by one, not averaged. TVSSCS traded Rs 546cr against a
+# Rs 5.1cr normal, and earningspulse.ai independently showed Rs 537cr
+# that day. FACT went Rs 4.4cr -> Rs 3,054cr overnight. These are real
+# event days on small caps, and 50 would refuse every one of them --
+# the cap had turned from catching corruption into rejecting the best
+# signal on the board.
+#
+# The tiny-denominator case it guarded is already covered, and covered
+# better, by ABSOLUTE floors that do not depend on a ratio:
+# MIN_LIQUIDITY_CR (Rs 2cr), MIN_UNIVERSE_TURNOVER_RS (Rs 5cr) and
+# config.MIN_TURNOVER_RS (Rs 2cr traded so far today). A stock cannot
+# reach the ranker on a near-zero denominator at all.
+#
+# 1000 keeps a backstop against arithmetic that has gone truly wrong
+# without refusing anything the market actually does.
+MAX_SANE_VOLUME_RATIO = 1000.0
 
 # ---- 09:30 IS PART OF TRADING, NOT PERMISSION TO TRADE. 23 Aug ----
 #

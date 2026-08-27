@@ -39,6 +39,7 @@ Author : H&M Opportunity Trader
 
 import json
 import os
+import statistics
 import sqlite3
 import threading
 import time
@@ -51,7 +52,25 @@ STORE_PATH = os.path.join("data", "liquidity.json")
 # Five sessions. Enough that one frantic day in a small name does not
 # promote it above a genuine large cap, short enough to notice a stock
 # that has actually started trading.
-SESSIONS = 5
+# ---- FIVE SESSIONS IS NOT ENOUGH FOR A MEDIAN. 27 Aug 2026 ----
+#
+# A median only finds "normal" if normal is the majority of the
+# window. QUADFUTURE ran for THREE days -- 21 Aug Rs 289cr, 24 Aug
+# Rs 1,058cr, 25 Aug Rs 211cr -- against a real normal near Rs 10cr.
+# Over five sessions the median of that is Rs 211cr: three-fifths of
+# the window is the spike itself.
+#
+#     stock          5d      10d      20d      30d
+#     QUADFUTURE  211.2     10.3     10.2     10.0
+#     RATNAMANI    45.4      9.5      9.5      7.4
+#     BALUFORGE   166.5    191.9     50.0     36.8
+#     TVSSCS       24.4      6.6      5.9      4.7
+#
+# At 20 a run would need ELEVEN elevated days to move the median, and
+# eleven days is not a spike -- it is a re-rating, which SHOULD move
+# the number. The daily store holds 2,480 sessions, so depth costs
+# nothing.
+SESSIONS = 20
 
 # How often the file is checked for changes. It is written once a
 # night; adv() is called thousands of times inside a single sort.
@@ -104,11 +123,11 @@ def refresh(db_path=None, store_path=STORE_PATH, sessions=SESSIONS):
             return 0
 
         bars = store.bars
-        totals, seen = {}, {}
+        per_day = {}
         with store.engine.connect() as conn:
             for row in conn.execute(
-                    select(bars.c.symbol, bars.c.turnover, bars.c.close,
-                           bars.c.volume)
+                    select(bars.c.symbol, bars.c.date, bars.c.turnover,
+                           bars.c.close, bars.c.volume)
                     .where(bars.c.date.in_(days))):
                 symbol = (row.symbol or "").strip().upper()
                 if not symbol:
@@ -118,12 +137,60 @@ def refresh(db_path=None, store_path=STORE_PATH, sessions=SESSIONS):
                     value = float(row.close) * float(row.volume)
                 if not value:
                     continue
-                totals[symbol] = totals.get(symbol, 0.0) + float(value)
-                seen[symbol] = seen.get(symbol, 0) + 1
+                per_day.setdefault(symbol, []).append(
+                    (str(row.date), float(value)))
 
-        # Divide by the sessions THIS stock actually traded, not by the
-        # window. A name listed three days ago is not a low-volume name.
-        rows = [(s, totals[s] / seen[s] / 1e7) for s in totals if seen[s]]
+        # ---- TODAY WAS INSIDE ITS OWN DENOMINATOR. 25 Aug 2026 ----
+        #
+        #     "whats this denominator error ?"      -- operator
+        #
+        # This was the MEAN of the last five sessions INCLUDING the one
+        # being measured, so a stock that exploded today had its own
+        # explosion averaged into what counts as normal:
+        #
+        #     LTFOODS   18-21 Aug  Rs 21cr a day
+        #               24 Aug     Rs 1,968cr        <- in its own mean
+        #               "normal"   Rs 410cr
+        #               reads      4.8x     truth: 116x
+        #
+        # Every big mover on 24 August compressed to roughly the same
+        # number -- LTFOODS 4.8x, QUADFUTURE 3.8x, TVSSCS 4.9x,
+        # RATNAMANI 4.4x, VMM 4.0x -- because the spike dominates the
+        # five-day mean it is then divided by. Which is why comparing
+        # winners against losers found NO separation in volume_x
+        # (2.83 vs 2.78): the instrument could not tell them apart.
+        #
+        # And it persisted. With 24 August in the window, LTFOODS reads
+        # Rs 410cr as "normal" for five more sessions, so it cannot
+        # look busy again all week however hard it trades.
+        #
+        # TWO CHANGES:
+        #   MEDIAN, not mean -- one session cannot dominate.
+        #   EXCLUDE THE LATEST DAY -- a stock is measured against the
+        #   days BEFORE it, never against itself.
+        #
+        # Still divided by the sessions THIS stock actually traded, not
+        # by the window: a name listed three days ago is not a
+        # low-volume name.
+        # Exclude the latest session ONLY when it is TODAY. The point
+        # is that a stock must not be measured against its own spike
+        # while that spike is happening. If the daily store is a day
+        # or two behind -- on 27 August its newest was the 25th -- then
+        # the 25th is ordinary history and dropping it would throw away
+        # a real session for no reason.
+        today = time.strftime("%Y-%m-%d")
+        latest = max(days)
+        drop = latest if latest == today else None
+        rows = []
+        for symbol, entries in per_day.items():
+            values = [v for day, v in entries if day != drop]
+            if not values:
+                # Only today on file -- a new listing. Use what there
+                # is rather than dropping it; UNMEASURED would hide it.
+                values = [v for _, v in entries]
+            if not values:
+                continue
+            rows.append((symbol, statistics.median(values) / 1e7))
     except Exception as exc:                                # noqa: BLE001
         warn(f"[LIQUIDITY] Could not measure ({exc}). The fan-out will "
              f"fall back to alphabetical order.")

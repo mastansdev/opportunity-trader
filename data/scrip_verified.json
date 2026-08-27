@@ -1,6 +1,6 @@
 {
- "verified_at": "2026-08-24 22:56:22",
- "checked": 1919,
+ "verified_at": "2026-08-25 15:52:06",
+ "checked": 1923,
  "source": "https://images.dhan.co/api-data/api-scrip-master.csv",
  "mismatches": [
   "VIVIDEL: master 761771, Dhan 761768",
@@ -12,7 +12,9 @@
   "UCAL: master 3570, Dhan 7739",
   "DHABRIYA: master 764658, Dhan 764661",
   "AMBALALSA: master 762543, Dhan 762546",
-  "AUTOIND: master 14110, Dhan 14106"
+  "KAYA: master 10276, Dhan 10282",
+  "AUTOIND: master 14110, Dhan 14106",
+  "MYSORPETRO: master 4377, Dhan 8220"
  ],
  "not_found": [
   "KEL"

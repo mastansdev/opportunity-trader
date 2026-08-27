@@ -2952,6 +2952,13 @@ class DashboardState:
                 # both answer "what has this stock been doing", which
                 # neither the price nor the volume column can say.
                 row["trend"] = self._trend_for(row.get("symbol"))
+                # ---- VWAP, WHICH NOTHING EVER SET. 27 Aug 2026 ----
+                # core/ranker.py's liveness() has read row["vwap"]
+                # since it was written and no code anywhere wrote it,
+                # so "is the average buyer under water" -- one of its
+                # three signals -- has never once fired. Computed from
+                # the same closed candles ATR already uses.
+                row["vwap"] = self._vwap_for(row.get("symbol"))
                 source = by_symbol.get(row.get("symbol")) or {}
                 mtf = self._mtf_for(row.get("symbol"), source) or {}
                 row["plan"] = position_plan(
@@ -3236,6 +3243,19 @@ class DashboardState:
             return {"available": False, "note": str(exc)}
 
         return {"available": True, "rows": rows}
+
+    def _vwap_for(self, symbol):
+        """This session's VWAP for one symbol, or None. Never raises."""
+        if not symbol:
+            return None
+        try:
+            engine = getattr(self, "engine", None)
+            candles = getattr(engine, "candle_engine", None) if engine else None
+            if candles is None:
+                return None
+            return candles.vwap(symbol)
+        except Exception:                                  # noqa: BLE001
+            return None     # a panel must not take the snapshot down
 
     def _trend_for(self, symbol):
         """This stock's 7-day structure, or None.
