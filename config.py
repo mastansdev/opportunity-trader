@@ -2322,6 +2322,32 @@ ANNOUNCEMENT_POLL_SECONDS = 60
 ANNOUNCEMENT_LOOKBACK_HOURS = 8
 ANNOUNCEMENT_PANEL_COUNT = 25
 
+# ---- WHO WAS IN A HURRY. 29 August 2026. ----
+#
+#     "by volume , order flow which carries the buyer & seller will
+#      give us info"                            -- operator
+#
+# volume_ratio() measures how MUCH traded. It cannot say whether a
+# stock on 5x volume is being accumulated or distributed -- turnover
+# reads identically either way. His claim is that the buyer/seller
+# split turns before the price does, and the bot cannot answer it
+# because total_buy_quantity, total_sell_quantity and LTQ arrive on
+# every tick and are discarded.
+#
+# core/order_flow.py records them per symbol per minute. It feeds NO
+# decision and is not wired to one: the cheap version of his idea
+# (surge SIZE, not composition) measured -Rs 30,664 over 1,049
+# stock-days this morning, so composition gets measured before it
+# gets believed. A few weeks of this store is what makes the question
+# askable at all.
+#
+# All ~1,300 subscribed stocks, not the shortlist -- the whole point
+# is catching the turn BEFORE a stock qualifies. PRECWIRE at 11:00 on
+# 28 August was not a candidate; by the time it was, it was +8%.
+# Roughly 490k rows a session, the same order as the candle store.
+ENABLE_ORDER_FLOW_RECORDER = True
+ORDER_FLOW_FLUSH_SECONDS = 30
+
 # Read the PDF attached to a results filing (core/results_ingest.py).
 # THE ONLY SOURCE WITH THE FIGURES, measured 2026-07-27:
 #   - the announcement text has none. Seven real filings that evening

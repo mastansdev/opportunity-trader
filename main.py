@@ -64,6 +64,8 @@ from config import (
     ANNOUNCEMENT_LOOKBACK_HOURS, ENABLE_FILING_PDF_READING,
     ENABLE_NEWS_WATCHER, NEWS_POLL_SECONDS,
 )
+from config import ENABLE_ORDER_FLOW_RECORDER, ORDER_FLOW_FLUSH_SECONDS
+from core import order_flow
 from core.announcement_watcher import AnnouncementWatcher
 from core.results_ingest import ResultsIngestor, requests_downloader
 from core.news_watcher import NewsWatcher
@@ -1424,6 +1426,22 @@ def main():
             # until the drift is a number rather than my opinion.
             tick_ohlc.remember(symbol, message)
 
+            # ---- AND WHO WAS IN A HURRY. 29 August 2026. ----
+            #
+            #     "by volume , order flow which carries the buyer &
+            #      seller will give us info"          -- operator
+            #
+            # Same packet, same reason as the line above: the buy/sell
+            # split arrives free and was being dropped. O(1) arithmetic
+            # into a per-minute bucket, no I/O -- the write happens on
+            # core/order_flow.py's own timer thread, because a SQLite
+            # write here is how a feed falls behind.
+            #
+            # Records only. Nothing reads this store yet, and nothing
+            # should until it has been measured.
+            if ENABLE_ORDER_FLOW_RECORDER:
+                order_flow.observe(symbol, message)
+
             ltt_raw = message.get("LTT")
             tick_time = parse_ltt_to_ist(ltt_raw) or datetime.now()
 
@@ -1608,6 +1626,19 @@ def main():
         f"[CIRCUIT_MONITOR] Started -- polling {len(security_id_to_symbol)} "
         f"symbols for circuit-limit proximity."
     )
+
+    # The buy/sell split, per symbol per minute. Owns only a flush
+    # timer -- the reading itself happens on the tick path in O(1).
+    # See core/order_flow.py; it feeds nothing and is measured before
+    # it is trusted.
+    flow_recorder = None
+    if ENABLE_ORDER_FLOW_RECORDER:
+        flow_recorder = order_flow.Recorder(ORDER_FLOW_FLUSH_SECONDS).start()
+        decision(
+            f"[FLOW] Recording order flow for {len(security_id_to_symbol)} "
+            f"symbols -- buyer/seller split, written every "
+            f"{ORDER_FLOW_FLUSH_SECONDS}s. Reads into no decision."
+        )
 
     # ==========================================================
     # THE SCREEN COMES UP FIRST.  12 August 2026.
@@ -2128,6 +2159,11 @@ def main():
         # explicitly means no further doomed REST calls fire during
         # shutdown.
         circuit_monitor.stop()
+        # Closes every open minute and writes what is still buffered.
+        # Without this the last 30 seconds of the session are lost --
+        # which on a day like PRECWIRE's is the part worth having.
+        if flow_recorder is not None:
+            flow_recorder.stop()
         state_store.save(
             engine.orb_engine.export_state(),
             engine.export_positions(),

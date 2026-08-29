@@ -1,0 +1,351 @@
+"""
+==========================================================
+Order Flow -- who was in a hurry, minute by minute
+==========================================================
+
+    "my point is not make universal timing . i'm saying you that by
+     volume , order flow which carries the buyer & seller will give
+     us info"                            -- operator, 29 August 2026
+
+He is asking a question the bot cannot answer, and the reason it
+cannot is that the answer arrives on every tick and is thrown away.
+
+WHAT THE BOT ALREADY KNOWS, AND WHAT IT DOES NOT
+------------------------------------------------
+core/ranker.volume_ratio() measures HOW MUCH traded against this
+stock's own normal for the time of day. That is a real reading and it
+is already a hard gate.
+
+It says nothing about WHO. A stock trading 5x its normal volume is
+either being accumulated or distributed, and turnover reads the same
+either way. His claim is that the buyer/seller split turns BEFORE the
+price does -- and on 28 August PRECWIRE is exactly the shape of it:
+
+    09:15 - 11:30    +1.5% to +2.4%     1.1x - 1.4x volume
+    11:45            +3.0%              1.4x
+    12:00            +5.6%              2.3x     <- it starts
+    12:15            +8.2%              4.6x
+    12:29           +16.4%             19.0x
+    13:55            locked at the high
+    close           +20.0%             upper circuit
+
+The only stored reason arrived at 12:24 -- a Telegram card recycling
+a preferential-issue filing published the previous evening, by which
+time the stock was already +8%. Whatever was happening at 11:50 was
+happening in the book, and nobody kept it.
+
+WHY THIS IS A RECORDER AND NOT A SIGNAL
+---------------------------------------
+Because I measured his idea the cheap way first and it did not hold:
+across 1,049 stock-days that crossed +3% on volume with no reason the
+bot knew of, the result was -Rs 30,664, and splitting by the SIZE of
+the surge showed no pattern (10-20x best, 20x+ negative -- noise).
+
+But that measured turnover, not composition. It does not touch what
+he actually said. His question is untested, and it is untestable
+against anything stored today, which is the whole reason this file
+exists. Nothing here reaches a decision. It writes.
+
+The rule this bot keeps learning the hard way -- most recently this
+morning, when a fade exit built on ranker.liveness() sounded right
+and measured -Rs 24,000 against simply holding -- is that an idea
+gets wired in AFTER it is measured, not before.
+
+HOW THE SIDE IS DECIDED, AND HOW WRONG THAT CAN BE
+--------------------------------------------------
+Dhan's Quote packet carries LTQ (last traded quantity) but not an
+aggressor flag: it does not say whether that trade lifted the offer
+or hit the bid. So the side is inferred by the TICK RULE -- price up
+from the previous print is a buy, down is a sell, unchanged inherits
+the last direction. That is the Lee-Ready fallback every retail
+platform uses, and it is right roughly 75-80% of the time. It
+degrades in fast markets, which is precisely where this bot trades.
+
+So the honest reading is recorded beside it rather than hidden:
+
+    ltq_sum    the quantity this file actually saw and classified
+    vol_delta  what the exchange's cumulative volume moved by
+
+If ltq_sum is far below vol_delta the feed coalesced prints and the
+delta is a SAMPLE, not the flow. Any measurement done on this data
+later has to check that ratio first, or it will be measuring the
+feed's throttling and calling it order flow.
+
+True classification needs the best bid/ask beside each print, which
+means Dhan's Full packet (5-level depth) instead of Quote. That is a
+bigger change and it waits on whether this cheap version shows
+anything at all.
+
+RESTING BOOK IS NOT TRADED FLOW
+-------------------------------
+book_buy / book_sell are total_buy_quantity / total_sell_quantity --
+the aggregate size RESTING on each side. Resting orders can be
+pulled and often are. Kept because they are free and because the
+comparison between what was resting and what actually traded is
+itself a reading. They are a different thing from delta and must
+never be added to it.
+"""
+
+from datetime import datetime
+import os
+import sqlite3
+import threading
+
+from core.logger import diagnostic, warn
+
+DB_PATH = os.path.join("data", "order_flow.db")
+
+# One row per symbol per minute. UNIQUE keeps a restart mid-session
+# from doubling a minute it already wrote.
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS flow_minutes (
+    id         INTEGER PRIMARY KEY,
+    date       TEXT NOT NULL,
+    minute     TEXT NOT NULL,
+    symbol     TEXT NOT NULL,
+    ticks      INTEGER NOT NULL,
+    up_qty     REAL,
+    down_qty   REAL,
+    flat_qty   REAL,
+    delta      REAL,
+    ltq_sum    REAL,
+    vol_delta  REAL,
+    book_buy   REAL,
+    book_sell  REAL,
+    skew_pct   REAL,
+    ltp        REAL,
+    atp        REAL,
+    UNIQUE(date, minute, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_flow_day_symbol
+    ON flow_minutes(date, symbol);
+"""
+
+_lock = threading.Lock()
+_open = {}        # symbol -> the minute being filled
+_done = []        # completed minutes waiting to be written
+_last_px = {}     # symbol -> last LTP seen, for the tick rule
+_last_dir = {}    # symbol -> last non-flat direction, for unchanged prints
+_stats = {"observed": 0, "written": 0, "dropped": 0}
+
+# A minute that never closes is a minute that never gets written. If
+# a stock stops ticking at 11:04 its 11:04 bucket sits open until the
+# session ends, so flush() closes anything older than this.
+STALE_MINUTES = 2
+
+
+def _num(value):
+    try:
+        got = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if got != got else got
+
+
+def _blank(symbol, date, minute):
+    return {"date": date, "minute": minute, "symbol": symbol, "ticks": 0,
+            "up_qty": 0.0, "down_qty": 0.0, "flat_qty": 0.0, "ltq_sum": 0.0,
+            "vol_first": None, "vol_last": None, "book_buy": None,
+            "book_sell": None, "ltp": None, "atp": None}
+
+
+def observe(symbol, message, now=None):
+    """Fold one Quote packet into this symbol's current minute.
+
+    O(1), no I/O, never raises. This runs on the websocket thread for
+    every tick of every subscribed stock -- roughly 1,300 of them --
+    so anything slow here is felt by the whole feed.
+
+    Returns the bucket it closed, if this tick rolled the minute over.
+    """
+    if not symbol:
+        return None
+    try:
+        symbol = str(symbol).upper()
+        now = now or datetime.now()
+        date = now.strftime("%Y-%m-%d")
+        minute = now.strftime("%H:%M")
+
+        ltp = _num(message.get("LTP"))
+        ltq = _num(message.get("LTQ"))
+        volume = _num(message.get("volume"))
+        buy = _num(message.get("total_buy_quantity"))
+        sell = _num(message.get("total_sell_quantity"))
+        atp = _num(message.get("avg_price"))
+
+        if ltp is None or ltp <= 0:
+            return None                       # pre-open, nothing traded
+
+        closed = None
+        with _lock:
+            held = _open.get(symbol)
+            if held is not None and (held["minute"] != minute
+                                     or held["date"] != date):
+                _done.append(held)
+                closed = held
+                held = None
+            if held is None:
+                held = _blank(symbol, date, minute)
+                _open[symbol] = held
+
+            # ---- THE TICK RULE ----
+            # Up from the last print is a buy, down is a sell. A print
+            # at the SAME price inherits the last direction rather than
+            # being discarded -- an unchanged print at the offer is
+            # still a buy, and dropping them would bias the delta
+            # towards whichever side happened to move the price.
+            previous = _last_px.get(symbol)
+            size = ltq if (ltq is not None and ltq > 0) else 0.0
+            if previous is None or ltp == previous:
+                direction = _last_dir.get(symbol, 0)
+                bucket = ("up_qty" if direction > 0
+                          else "down_qty" if direction < 0 else "flat_qty")
+            elif ltp > previous:
+                _last_dir[symbol] = 1
+                bucket = "up_qty"
+            else:
+                _last_dir[symbol] = -1
+                bucket = "down_qty"
+            held[bucket] += size
+            held["ltq_sum"] += size
+            _last_px[symbol] = ltp
+
+            held["ticks"] += 1
+            held["ltp"] = ltp
+            if atp is not None:
+                held["atp"] = atp
+            if buy is not None:
+                held["book_buy"] = buy
+            if sell is not None:
+                held["book_sell"] = sell
+            if volume is not None:
+                if held["vol_first"] is None:
+                    held["vol_first"] = volume
+                held["vol_last"] = volume
+            _stats["observed"] += 1
+        return closed
+    except Exception as exc:                              # noqa: BLE001
+        # A recorder must never be able to break the feed it rides on.
+        _stats["dropped"] += 1
+        return None
+
+
+def _row(held):
+    up, down = held["up_qty"], held["down_qty"]
+    book_buy, book_sell = held["book_buy"], held["book_sell"]
+    skew = None
+    if book_buy is not None and book_sell is not None \
+            and (book_buy + book_sell) > 0:
+        skew = round((book_buy - book_sell)
+                     / (book_buy + book_sell) * 100.0, 2)
+    vol_delta = None
+    if held["vol_first"] is not None and held["vol_last"] is not None:
+        vol_delta = held["vol_last"] - held["vol_first"]
+    return (held["date"], held["minute"], held["symbol"], held["ticks"],
+            up, down, held["flat_qty"], up - down, held["ltq_sum"],
+            vol_delta, book_buy, book_sell, skew, held["ltp"], held["atp"])
+
+
+def flush(now=None, force=False):
+    """Write completed minutes. Returns how many rows landed.
+
+    Called off the tick path -- a SQLite write on the websocket thread
+    is how a feed falls behind. `force` also closes every open bucket,
+    which is what shutdown wants.
+    """
+    now = now or datetime.now()
+    try:
+        with _lock:
+            if force:
+                _done.extend(_open.values())
+                _open.clear()
+            else:
+                # Close buckets nothing has ticked into for a while.
+                cutoff = now.strftime("%H:%M")
+                for symbol, held in list(_open.items()):
+                    if held["minute"] == cutoff:
+                        continue
+                    gap = _minutes_between(held["minute"], cutoff)
+                    if gap is None or gap >= STALE_MINUTES:
+                        _done.append(held)
+                        del _open[symbol]
+            pending, _done[:] = list(_done), []
+        if not pending:
+            return 0
+        rows = [_row(h) for h in pending]
+        with sqlite3.connect(DB_PATH, timeout=30) as db:
+            db.executescript(_SCHEMA)
+            db.executemany(
+                "INSERT OR IGNORE INTO flow_minutes "
+                "(date, minute, symbol, ticks, up_qty, down_qty, flat_qty, "
+                " delta, ltq_sum, vol_delta, book_buy, book_sell, skew_pct, "
+                " ltp, atp) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        _stats["written"] += len(rows)
+        return len(rows)
+    except Exception as exc:                              # noqa: BLE001
+        warn(f"[FLOW] Could not write order flow ({exc}). Nothing else "
+             f"is affected -- this store feeds no decision.")
+        return 0
+
+
+def _minutes_between(older, newer):
+    try:
+        a = int(older[:2]) * 60 + int(older[3:5])
+        b = int(newer[:2]) * 60 + int(newer[3:5])
+        return b - a
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def stats():
+    """{"observed", "written", "dropped", "open", "pending"}."""
+    with _lock:
+        return dict(_stats, open=len(_open), pending=len(_done))
+
+
+def reset():
+    """Tests only."""
+    with _lock:
+        _open.clear()
+        _done[:] = []
+        _last_px.clear()
+        _last_dir.clear()
+        for key in _stats:
+            _stats[key] = 0
+
+
+class Recorder:
+    """Owns the flush timer. Started from main.py, stopped at the bell."""
+
+    def __init__(self, seconds=30):
+        self.seconds = int(seconds)
+        self._stop = threading.Event()
+        self._thread = None
+
+    def start(self):
+        if self._thread is not None:
+            return self
+        self._thread = threading.Thread(target=self._loop, daemon=True,
+                                        name="order-flow")
+        self._thread.start()
+        diagnostic(f"[FLOW] Order flow recorder started "
+                   f"(flush every {self.seconds}s -> {DB_PATH}).")
+        return self
+
+    def _loop(self):
+        while not self._stop.is_set():
+            self._stop.wait(self.seconds)
+            if self._stop.is_set():
+                break
+            flush()
+
+    def stop(self, timeout=5):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=timeout)
+            self._thread = None
+        wrote = flush(force=True)
+        got = stats()
+        diagnostic(f"[FLOW] Recorder stopped. {got['written']} minutes "
+                   f"written ({wrote} on the way out), "
+                   f"{got['observed']} ticks seen, {got['dropped']} dropped.")
