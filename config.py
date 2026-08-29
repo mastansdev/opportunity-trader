@@ -2348,6 +2348,36 @@ ANNOUNCEMENT_PANEL_COUNT = 25
 ENABLE_ORDER_FLOW_RECORDER = True
 ORDER_FLOW_FLUSH_SECONDS = 30
 
+# ---- THE CYCLE COULD NOT FINISH IN A SECOND. 29 August 2026. ----
+#
+# Measured on the real stores: dashboard_state.refresh() is asked to
+# run every DASHBOARD_REFRESH_INTERVAL_SECONDS (1), and the reason
+# lookup alone took 1,590 ms of it -- why() at a median 15.1 ms x 105
+# symbols carrying news. So the loop was running at roughly 1.7-2s a
+# cycle: about 13,000 cycles between 09:15 and 15:30 instead of
+# 22,500. It missed no event -- the reason set is rebuilt every cycle
+# either way -- but every entry landed a second or two late.
+#
+# Two one-off costs sat on top: 2,071 ms for the first call of the
+# session, and one call in 105 taking 8,432 ms when the cache inside
+# core/opportunity.evaluate() rebuilds (it walks ~14,000 events and
+# fires 227,577 regex searches, roughly twice an hour).
+#
+# why() was re-deriving the same answer every second for a stock
+# whose news had not changed since 09:41. Caching it per symbol takes
+# the reason path from 1,590 ms to about 50 ms.
+#
+# THIRTY SECONDS, NOT LONGER, because of his rule:
+#
+#     "if 100 stocks were there at morning & by 11 5 stocks got news
+#      . then bot must include those stocks too"
+#
+# A stock that gets news at 11:00:05 is a candidate by 11:00:35. The
+# membership question is answered by this lookup, so this TTL IS the
+# bot's reaction time to fresh news. Raising it trades entry speed
+# for cycle time; 0 disables the cache entirely.
+REASON_CACHE_SECONDS = 30
+
 # Read the PDF attached to a results filing (core/results_ingest.py).
 # THE ONLY SOURCE WITH THE FIGURES, measured 2026-07-27:
 #   - the announcement text has none. Seven real filings that evening

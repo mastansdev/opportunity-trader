@@ -107,10 +107,12 @@ Author : H&M Opportunity Trader
 
 import re
 import threading
+import zlib
 import time
 from datetime import datetime
 
 from config import (
+    REASON_CACHE_SECONDS,
     GAINERS_LOSERS_REFRESH_SECONDS, GAINERS_LOSERS_COUNT,
     SECTOR_GAINERS_LOSERS_MIN_SYMBOLS, SECTOR_GAINERS_LOSERS_REFRESH_SECONDS,
     SECTOR_HEATMAP_TOP_N, DAILY_PROFIT_TARGET_RS, DAILY_MAX_LOSS_RS,
@@ -3562,6 +3564,32 @@ class DashboardState:
         """
         from core.why_moving import why
 
+        # ---- IT RE-DERIVED THE SAME ANSWER EVERY SECOND. 29 Aug ----
+        #
+        # 15.1 ms a symbol, 105 symbols carrying news, once per cycle,
+        # for a reason that has not changed since the news landed at
+        # 09:41. That was 1,590 ms of a 1-second loop -- see
+        # config.REASON_CACHE_SECONDS for the full measurement.
+        #
+        # Keyed by symbol AND day: a process that runs past midnight
+        # must not serve yesterday's reason, and the entry gate reads
+        # this to decide membership.
+        #
+        # This TTL is the bot's reaction time to fresh news, which is
+        # the whole reason it is 30 seconds and not 5 minutes.
+        name = str(symbol or "").upper()
+        if not name:
+            return None
+        today = datetime.now().strftime("%Y-%m-%d")
+        cache = getattr(self, "_reason_cache", None)
+        if cache is None or getattr(self, "_reason_cache_day", None) != today:
+            cache = self._reason_cache = {}
+            self._reason_cache_day = today
+        if REASON_CACHE_SECONDS:
+            held = cache.get(name)
+            if held is not None and time.monotonic() < held[0]:
+                return held[1]
+
         events = []
         if self.stock_events is not None:
             try:
@@ -3602,9 +3630,36 @@ class DashboardState:
                 filing = watcher.for_symbol(symbol)
             except Exception:                              # noqa: BLE001
                 filing = None
-        return why(events=events, news_hits=hits, symbol=symbol,
-                   filing=filing,
-                   on_date=datetime.now().strftime("%Y-%m-%d"))
+        got = why(events=events, news_hits=hits, symbol=symbol,
+                  filing=filing, on_date=today)
+        # None is cached too. "This stock has no reason" is an answer
+        # that costs the same 15 ms to reach as any other, and it is
+        # the answer for most of the list.
+        #
+        # ---- SPREAD THE EXPIRIES. ----
+        # A flat TTL fills the whole cache on one cycle, so the whole
+        # cache falls due on one cycle too: measured, that turned a
+        # steady 1,590 ms into 0.3 ms for 29 cycles and 5,372 ms for
+        # the thirtieth. The stall is worse than the average it fixes.
+        #
+        # So each symbol keeps its own lifetime between half the TTL
+        # and all of it, fixed by its NAME rather than by chance --
+        # the same stock gets the same offset on every restart, and
+        # the re-derivations land a few per cycle instead of all at
+        # once. Maximum staleness is still REASON_CACHE_SECONDS, which
+        # is the number his 11:00-news rule cares about.
+        # crc32, not sum-of-bytes and not hash(). Summing bytes puts
+        # SYM0..SYM299 within 1.7 seconds of each other -- similar
+        # names get similar sums, which is the stampede again wearing
+        # a disguise. hash() is salted per process, so the same stock
+        # would take a different slot on every restart and a timing
+        # fault would only show up some mornings.
+        lifetime = REASON_CACHE_SECONDS
+        if lifetime:
+            share = (zlib.crc32(name.encode("utf-8")) % 1000) / 1000.0
+            lifetime = REASON_CACHE_SECONDS * (0.5 + share * 0.5)
+        cache[name] = (time.monotonic() + lifetime, got)
+        return got
 
     def _safe_opportunity_memory(self):
         """What each opportunity family has been WORTH, measured.

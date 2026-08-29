@@ -262,11 +262,44 @@ def test_the_freshness_gate_still_exists_and_is_deliberate():
     assert "not why a stock is moving today" in src
 
 
-def test_the_live_path_actually_passes_todays_date():
+def test_the_live_path_actually_passes_todays_date(monkeypatch):
     """The gate only bites because dashboard/state.py passes on_date.
-    Without it the newest reason would win whenever it happened."""
-    src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
-    assert 'on_date=datetime.now().strftime("%Y-%m-%d")' in src
+    Without it the newest reason would win whenever it happened.
+
+    ---- ASKED OF THE FUNCTION, NOT OF THE SOURCE. 29 Aug 2026 ----
+    This used to grep state.py for the literal
+    'on_date=datetime.now().strftime("%Y-%m-%d")'. On 29 August that
+    expression moved into a `today` variable, because the reason cache
+    added beside it needs the same date to key on -- identical
+    behaviour, and the test failed anyway.
+
+    Grepping source for a spelling is the fourth time this suite has
+    broken on a refactor that changed nothing. So it now CALLS the
+    live method and reads the date why() was handed.
+    """
+    from datetime import datetime
+
+    from dashboard.state import DashboardState
+
+    seen = {}
+
+    def _spy(events=None, news_hits=None, symbol=None, filing=None,
+             on_date=None):
+        seen["on_date"] = on_date
+        return None
+
+    monkeypatch.setattr("core.why_moving.why", _spy)
+
+    class _Stub(DashboardState):
+        def __init__(self):
+            self.stock_events = None
+            self.news_impact = None
+            self.announcement_watcher = None
+
+    _Stub()._mechanism_for("TESTCO")
+    assert seen["on_date"] == datetime.now().strftime("%Y-%m-%d"), (
+        "the live reason lookup did not pass today's date, so a stale "
+        "event would be accepted as the reason for today's move")
 
 # ---------------------------------------------------------------
 # WHICH SIDE OF THE COMMODITY IS THIS COMPANY ON?
