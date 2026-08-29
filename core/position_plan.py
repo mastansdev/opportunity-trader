@@ -75,7 +75,7 @@ from core.rules import (
 # he changes, not a rule the book is built on. core/engine.py reads
 # the same name for the position it manages -- if these two disagree,
 # the alert and the trade disagree.
-from config import FIXED_STOP_PCT
+from config import FIXED_STOP_PCT, TARGET_REWARD_BY_REGIME
 
 
 def _num(value):
@@ -215,26 +215,71 @@ def plan(entry, side, day_low=None, day_high=None, atr=None,
     if stop_pct > MAX_STOP_DISTANCE_PCT:
         return {"ok": False, "why": "stop too far -- the loss would not be small"}
 
-    # THE SIZING. Always rounds DOWN, so the risk can never exceed the
-    # budget -- 4.7 shares is 4, never 5.
-    qty = int(risk_rs // distance)
-    if qty < 1:
-        return {"ok": False, "why": "one share risks more than the budget"}
-
-    # MTF cap. Risk-based sizing does not know what the account can
-    # carry; the smaller number always wins.
+    # ---- THE CARD SAID 21 AND THE BOT BOUGHT 40. 29 Aug 2026. ----
+    #
+    #     "even it disagree (that also made by us right). we need to
+    #      make bot understand & book profits not wait until close
+    #      every day & loose the money"          -- operator
+    #
+    # Two sizing rules were live at once. This one took
+    # min(risk / stop distance, what the margin affords). core/engine.py
+    # _risk_sized_qty() takes the margin figure ALONE -- it dropped the
+    # risk formula on 28 July, on his own instruction ("Buy no of shares
+    # worth equal to 1 Lakh = mtf power"). Nobody reconciled the two.
+    #
+    # Measured on TCS at Rs 3,000: this card said 21 shares, the engine
+    # bought 40. The stop and target printed on his phone were computed
+    # for a position half the size of the one that actually opened.
+    #
+    # And the risk formula is what made an expensive stock untradeable.
+    # A Rs 3,000 stock with a 4.68% stop got 10 shares, so it had to
+    # move +9.4% to reach its target -- which does not happen in a day,
+    # so the trade drifted to the close every time.
+    #
+    # The margin figure now decides the size, alone, exactly as the
+    # engine does it. The stop then keeps the RUPEE loss fixed at
+    # risk_rs by adjusting its distance, instead of the size adjusting
+    # to a fixed distance. Same money at risk, a reachable target.
     if margin_pct:
         per_share = entry * float(margin_pct)
-        affordable = int(budget_rs // per_share) if per_share > 0 else 0
-        if affordable < 1:
+        qty = int(budget_rs // per_share) if per_share > 0 else 0
+        if qty < 1:
             return {"ok": False, "why": "one share costs more than the budget"}
-        qty = min(qty, affordable)
+        # The stop is whatever puts risk_rs at stake over this many
+        # shares. Recomputed here, then re-checked against the bounds
+        # below -- a width this produces is not exempt from them.
+        distance = risk_rs / qty
+        stop_pct = distance / entry * 100.0
+        stop = round(entry - distance if side == "BUY"
+                     else entry + distance, 2)
+        if stop_pct < MIN_STOP_DISTANCE_PCT:
+            return {"ok": False,
+                    "why": "this size would put the stop inside the noise"}
+        if stop_pct > MAX_STOP_DISTANCE_PCT:
+            return {"ok": False,
+                    "why": "stop too far -- the loss would not be small"}
+    else:
+        # No margin figure -- paper, backtests, the preview. Falls back
+        # to the risk formula rather than guessing at a size.
+        qty = int(risk_rs // distance)
+        if qty < 1:
+            return {"ok": False, "why": "one share risks more than the budget"}
 
     # The target is where the reward is worth the risk. Deliberately
     # not a price prediction -- it is the level below which this trade
     # is not worth taking, which is a different and answerable question.
-    reach = distance * MIN_REWARD_MULTIPLE
-    target = round(entry + reach if side == "BUY" else entry - reach, 2)
+    # ---- ONE DIAL, SO THE CARD CANNOT LIE. 29 August 2026. ----
+    # config.TARGET_REWARD_BY_REGIME is what core/engine.py books at.
+    # Empty means the exit is the trail, and then this must print no
+    # target either -- a card promising a level the trade will not
+    # take is the same fault as the card promising 21 shares while
+    # the engine bought 40.
+    multiple = MIN_REWARD_MULTIPLE if TARGET_REWARD_BY_REGIME else None
+    if multiple:
+        reach = distance * multiple
+        target = round(entry + reach if side == "BUY" else entry - reach, 2)
+    else:
+        target = None
 
     return {
         "ok": True,
@@ -245,6 +290,6 @@ def plan(entry, side, day_low=None, day_high=None, atr=None,
         # the budget once the MTF cap has bitten.
         "risk_rs": round(qty * distance, 2),
         "target": target,
-        "reward_multiple": MIN_REWARD_MULTIPLE,
+        "reward_multiple": multiple,
         "value_rs": round(qty * entry, 2),
     }

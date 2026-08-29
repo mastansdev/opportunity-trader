@@ -57,10 +57,32 @@ def test_trailing_is_on_for_his_buys():
     assert config.MANUAL_BUY_TRAILS is True
 
 
-def test_the_bot_own_trailing_is_still_off():
-    """The split he chose. Turning this on would change every bot
-    entry, and every measured target width was worse than holding."""
-    assert config.ENABLE_BOT_TRAILING_STOP is False
+def test_the_bot_now_gets_the_same_rules_his_manual_buys_do():
+    """The split closed, 29 August 2026.
+
+    His buys got a target and a trail on 23 August; the bot's own
+    entries got neither, because seven target widths measured on
+    22-23 August underperformed holding.
+
+    Both are on for the bot now, for a reason that is his and not a
+    backtest:
+
+        "incase if bot carry towards close some stocks may lock at
+         upper circuits ... some may fade out & become no profit /
+         loss . to fix this i need one simple solution"
+
+    A stop that only moves up handles both: the circuit-locker keeps
+    making highs so it never fires, the fader gives back and is
+    booked. TRADING_MODE is PAPER, so this is measured forward.
+    """
+    assert config.ENABLE_BOT_TRAILING_STOP is True
+    assert config.MANUAL_BUY_TRAILS is True, (
+        "his own buys must not have lost theirs")
+    # The bot's exit IS the trail. A hard target came on and off the
+    # same day: at Rs 2,500 it capped a Rs 10,800 runner, and below it
+    # the trail was booking anyway. TARGET_REWARD_BY_REGIME is the one
+    # dial, read by the engine AND the alert card.
+    assert config.TARGET_REWARD_BY_REGIME == {}
 
 
 # ---------------------------------------------------------------

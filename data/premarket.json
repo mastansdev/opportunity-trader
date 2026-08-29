@@ -21,7 +21,7 @@
    "symbol": "^IXIC"
   },
   "dow": {
-   "last": 53560.0,
+   "last": 53559.99,
    "currency": "USD",
    "market_state": null,
    "change_pct": 0.18,
@@ -211,7 +211,7 @@
    "symbol": "JPY=X"
   }
  },
- "fetched_at": "2026-08-29 17:10:08",
- "last_success_at": "2026-08-29 17:10:08",
+ "fetched_at": "2026-08-29 18:54:44",
+ "last_success_at": "2026-08-29 18:54:44",
  "failed": []
 }

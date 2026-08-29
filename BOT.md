@@ -1,4 +1,4 @@
-<!-- generated: 2026-08-29 11:07 by tools/bot_doc.py -- do not edit by hand -->
+<!-- generated: 2026-08-29 18:44 by tools/bot_doc.py -- do not edit by hand -->
 # Opportunity Trader — what the bot is, and what it does
 
 **This file is generated.** Every number below is read out of `config.py` and `core/rules.py` when it is written, so it cannot drift away from the running bot. To change a rule, change the code and run `py tools/bot_doc.py --write`.
@@ -28,7 +28,7 @@ An evidence panel with a BUY button. It reads Telegram pro channels, NSE/BSE fil
 | Your own margin per position | ₹30,000 | `config.MTF_MARGIN_PER_POSITION_RS` |
 | MTF leverage | 4× | `config.MTF_LEVERAGE` |
 | Stock value per position | ≈₹120,000 | derived |
-| Risk budget per trade | ₹1,500 | **`core/rules.py`** — the only owner |
+| Risk budget per trade | ₹2,500 | **`core/rules.py`** — the only owner |
 | Hard stop from entry | 2.50% | `config.HARD_STOP_FROM_ENTRY_PCT` |
 | A stop-out therefore costs | ≈₹3,000 | derived |
 | Stop for the day after losing | ₹12,000 (≈4 stop-outs) | `config.DAILY_MAX_LOSS_RS` |
@@ -76,7 +76,7 @@ Since 12 August **both require a reason** — `core/rules.py`'s `is_a_reason()`,
 | 9 | Still near its high | ≥0.5 of day range | `core/rules.py` |
 | 10 | Stop is not too tight | ≥0.75% | `core/rules.py` |
 | 11 | Stop is not too wide | ≤6% | `core/rules.py` |
-| 12 | Reward is worth the risk | ≥2× the stop | `core/rules.py` |
+| 12 | Reward is worth the risk | ≥1× the stop | `core/rules.py` |
 | 13 | No corporate action distorting the price | — | `core/stock_memory.py` |
 | 14 | Book is not full | <3 open | `core/rules.py` |
 | 15 | Day's loss is under the cap | ₹12,000 | `config.py` |
@@ -121,10 +121,7 @@ Row counts and freshness are deliberately **not** printed here — they change h
 
 ## 7 · Exits
 
-- Bot trailing stop: **OFF** (`ENABLE_BOT_TRAILING_STOP`)
-- With the trail off, the stop is a **fixed 2.50% from entry** and does not move (`core/engine.py`, `_atr_entry_sizing`).
-
-> Exits tagged `TRAILING_STOP` since 29 July are therefore **hard stop-outs, not trail exits.** `BOT_SPEC.md` reads all 64 as trail exits and concludes the trail is too wide; split at 29 July they are two different regimes — trail on, n=29, −₹643 average; trail off, n=35, −₹2,627 average. There has been no trail to widen since.
+- Bot trailing stop: **ON** (`ENABLE_BOT_TRAILING_STOP`)
 - Force square-off: **OFF** at 15:15
 
 ## 8 · What the bot must never do

@@ -97,9 +97,20 @@ def test_no_core_module_redeclares_a_rule(path):
 
 def test_the_numbers_he_approved_are_the_numbers_in_the_file():
     """He approved these on 11 August. Pinned so a later edit has to
-    be deliberate rather than accidental."""
+    be deliberate rather than accidental.
+
+    ---- RAISED TO Rs 2,500 ON 29 August 2026. ----
+    core/position_plan.py now sizes from the MTF margin alone, the way
+    core/engine.py always did, so this number sets the STOP WIDTH and
+    no longer the share count: distance = risk / qty. At Rs 1,500 over
+    a Rs 1.2 lakh position that width was 1.25%, inside the daily range
+    of every stock the bot trades. His own number:
+
+        "allot the capital sufficient to 50 qty in mtf order & book
+         the profits above 2500 rs"
+    """
     from core import rules
-    assert rules.RISK_PER_TRADE_RS == 1500.0
+    assert rules.RISK_PER_TRADE_RS == 2500.0
     # RAISED 1.5 -> 2.5 on 20 August 2026, on measurement rather than
     # taste: 13,272 scored signals put "under 2x normal volume" at
     # 44.3% up at close and "over 10x" at 60.0%. 1.5 sat in the worst
@@ -229,4 +240,7 @@ def test_both_entry_lanes_risk_the_same_money():
         "the two entry lanes are sizing to different risk budgets: "
         + ", ".join(f"{k} = Rs {v:,.0f}" for k, v in budgets.items())
     )
-    assert rules.RISK_PER_TRADE_RS == 1500.0
+    # Same number as the pin above -- one owner, checked twice on
+    # purpose, because these two lanes disagreeing is what this file
+    # exists to catch.
+    assert rules.RISK_PER_TRADE_RS == 2500.0

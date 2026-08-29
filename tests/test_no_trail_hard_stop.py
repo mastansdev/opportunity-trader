@@ -35,19 +35,65 @@ from core.engine import Engine, LONG
 
 # ---- THIS FILE TESTS THE FLAT 2.5%. 29 August 2026. ----
 #
-# config.FIXED_STOP_PCT = 2.0 returns before _hard_stop_pct() reads
-# anything, so the entry stop is 2.0% on the live path now. He chose
-# that after 2.0 x daily ATR was measured flat against its own 6%
-# ceiling for 81 of 101 event trades.
+# config.FIXED_STOP_PCT was set to 2.0 on 29 August and REVERTED the
+# same day: it had been chosen and measured on the same eight
+# sessions, and on eleven it had never seen it was worse than the ATR
+# rule it replaced. The dial is None again and VOLATILITY_SCALED_STOP
+# is live.
 #
-# The rule below is not deleted and the dial is one line to reverse,
-# so it is pinned off here and keeps being proved. The SAFETY half of
-# this file -- that a near-zero ATR can never produce a hair-thin
-# stop -- is asserted under the LIVE dial too, in
+# It is still pinned off here, because the flat rule below is one
+# line from being reachable again and must keep being proved. The
+# mechanism -- that a fixed width, if ever set, reaches BOTH the
+# alert and the position -- lives in
 # tests/test_one_width_and_he_picked_it.py.
 @pytest.fixture(autouse=True)
 def _flat_stop(monkeypatch):
     monkeypatch.setattr(engine_module, "FIXED_STOP_PCT", None)
+    # ---- AND THE TRAIL WENT BACK ON. 29 August 2026. ----
+    # ENABLE_BOT_TRAILING_STOP is True again, to be measured forward
+    # in paper against his fading-into-the-close problem. This file
+    # documents the no-trail design and the July table behind it, so
+    # it keeps testing that -- one flag away, exactly as before.
+    monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", False)
+    # This file pins exact stop LEVELS from the flat-2.5% rule.
+    # config.STOP_FROM_RISK_AND_SIZE moves the width to fit the share
+    # count instead; pinned off so the rule below keeps being proved.
+    monkeypatch.setattr(engine_module, "STOP_FROM_RISK_AND_SIZE", False)
+
+
+def test_the_entry_width_does_not_change_when_the_trail_is_switched_on():
+    """Two questions, one flag, until 29 August 2026.
+
+    _atr_entry_sizing() used to branch on ENABLE_BOT_TRAILING_STOP for
+    the WIDTH as well as the ratchet, and that branch sized from a
+    ONE-MINUTE ATR against a 1% floor. Turning the trail on therefore
+    collapsed the entry stop to 1.00% for every stock at every ATR --
+    on names whose DAILY range is around 3.9% -- and tripled every
+    position, because qty is risk divided by that distance.
+
+    VOLATILITY_SCALED_STOP now decides the width on its own terms.
+    This asserts the two are independent, which is the only thing
+    stopping that from happening again.
+    """
+    import config
+
+    widths = {}
+    for trail in (False, True):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", trail)
+            mp.setattr(engine_module, "compute_atr",
+                       lambda candles, period: 0.5)
+            engine = Engine()
+            engine.candle_engine.last_n_closed = lambda symbol, n: [
+                {"high": 661.0, "low": 659.0, "close": 660.0}] * n
+            mp.setattr(Engine, "_risk_sized_qty", lambda self, *a, **k: 75)
+            stop, _target, _qty = engine._atr_entry_sizing(
+                "RELIANCE", LONG, 660.0)
+            widths[trail] = round(660.0 - stop, 4)
+    assert widths[True] == widths[False], (
+        f"the trail flag moved the entry width: {widths}")
+    assert config.VOLATILITY_SCALED_STOP, (
+        "this test assumes the volatility-scaled width is the live one")
 
 
 def _t(hour, minute, second=0):
@@ -130,7 +176,16 @@ def test_the_entry_stop_sits_2_and_a_half_percent_below_entry(monkeypatch):
     stop, target, qty = engine._atr_entry_sizing("TESTCO", LONG, 1000.0)
 
     assert stop == pytest.approx(975.0)
-    assert target is None
+    # The target was None on this path until 29 August 2026. The
+    # alert card had always printed one and the trade ignored it;
+    # see config.TARGET_REWARD_BY_REGIME. The STOP is what this
+    # test is about and it is unchanged.
+    import config
+    if config.TARGET_REWARD_BY_REGIME:
+        from core.rules import MIN_REWARD_MULTIPLE
+        assert target == pytest.approx(1000.0 + MIN_REWARD_MULTIPLE * 25.0)
+    else:
+        assert target is None, "the exit is the trail, not a target"
 
 
 def test_a_tiny_atr_can_no_longer_produce_a_hair_thin_stop(monkeypatch):

@@ -78,16 +78,15 @@ def _clean():
     atr.reset_daily_cache()
 
 
-# ---- THE SCALING IS OFF THE LIVE PATH NOW. 29 August 2026. ----
+# ---- FIXED_STOP_PCT IS OFF AGAIN. 29 August 2026. ----
 #
-# config.FIXED_STOP_PCT = 2.0 returns before _hard_stop_pct() ever
-# reaches the ATR store: on this bot's event setups 2.0 x daily ATR
-# cleared the 6% ceiling for 81 of 101 trades, so the width he was
-# promised was not varying anyway and he chose one number.
+# It was set to 2.0 that morning and reverted the same day: chosen and
+# measured on one eight-session window, and worse than this rule on
+# eleven sessions it had never seen. VOLATILITY_SCALED_STOP is live
+# and this file is what proves it.
 #
-# VOLATILITY_SCALED_STOP is unchanged and still correct -- this file
-# is what proves it, and it must keep proving it, because the dial
-# above is one line to reverse. Pinned off here for that reason.
+# Pinned to None here anyway, because the dial is one line from being
+# set again and these tests must keep proving the rule underneath it.
 @pytest.fixture(autouse=True)
 def _scaled_stop(monkeypatch):
     from core import engine as engine_module
@@ -219,20 +218,53 @@ def test_a_replay_cannot_read_tomorrows_volatility():
 # THE STOP IS STILL HARD. ONLY ITS WIDTH MOVED.
 # ---------------------------------------------------------------
 
-def test_this_did_not_switch_the_trailing_stop_back_on():
-    """THE LINE THAT MUST NOT MOVE. The trail was disabled on 29 July
-    because it sold winners -- KAYNES ran to 3,685 after it fired.
+def test_the_two_questions_stay_separate():
+    """THE LINE THAT MUST NOT MOVE, restated 29 August 2026.
+
     Whether the stop TRAILS and how WIDE it starts are two questions,
-    and one flag was answering both."""
+    and one flag was answering both. That was the whole point of this
+    test -- and asserting ENABLE_BOT_TRAILING_STOP is False was the
+    wrong way to protect it, because it made the two INSEPARABLE in
+    the opposite direction: the trail could never be reconsidered
+    without this failing.
+
+    On 29 August the trail went back on, to be measured forward in
+    paper against stocks fading into the close. The coupling then
+    showed itself immediately: turning it on took the entry width
+    onto a one-minute ATR under a 1% floor, collapsing every stop to
+    1.00% on names whose daily range is near 3.9%, and tripling every
+    position. _atr_entry_sizing now decides the width FIRST.
+
+    So this asserts the independence rather than either value. Flip
+    the trail and the width must not move.
+    """
     import config
-    assert config.ENABLE_BOT_TRAILING_STOP is False
+    import core.engine as engine_module
+    from core.engine import Engine, LONG
+
     assert config.VOLATILITY_SCALED_STOP is True
 
+    widths = {}
+    for trail in (False, True):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", trail)
+            mp.setattr(engine_module, "compute_atr",
+                       lambda candles, period: 0.5)
+            mp.setattr(engine_module, "daily_atr_pct", lambda s, **kw: 3.9)
+            mp.setattr(Engine, "_risk_sized_qty", lambda self, *a, **k: 75)
+            engine = Engine()
+            engine.candle_engine.last_n_closed = lambda symbol, n: [
+                {"high": 661.0, "low": 659.0, "close": 660.0}] * n
+            stop, _t, _q = engine._atr_entry_sizing("X", LONG, 660.0)
+            widths[trail] = round(660.0 - stop, 6)
+    assert widths[True] == widths[False], (
+        f"the trail flag moved the entry width again: {widths}")
+
     src = (ROOT / "core" / "engine.py").read_text(encoding="utf-8")
-    branch = src[src.find("if ENABLE_BOT_TRAILING_STOP:"):]
-    branch = branch[:branch.find("return stop_price")]
-    assert "elif VOLATILITY_SCALED_STOP:" in branch, (
-        "the volatility width is not on its own branch")
+    body = src[src.find("def _atr_entry_sizing"):]
+    body = body[:body.find("return stop_price")]
+    assert body.find("if VOLATILITY_SCALED_STOP:") <         body.find("elif ENABLE_BOT_TRAILING_STOP:"), (
+        "the width must be decided before the trail flag is consulted")
 
 
 def test_turning_the_switch_off_restores_the_flat_number(monkeypatch):

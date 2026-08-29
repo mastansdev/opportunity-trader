@@ -36,16 +36,12 @@ from core.position_plan import (MAX_STOP_DISTANCE_PCT, MIN_STOP_DISTANCE_PCT,
 
 # ---- THIS FILE TESTS THE STRUCTURAL STOP. 29 August 2026. ----
 #
-# config.FIXED_STOP_PCT = 2.0 now overrides it on the live path: he
-# chose one width for every stock after the ATR scaling was measured
-# flat (81 of 101 event trades pinned to the 6% ceiling). See
-# tests/test_one_width_and_he_picked_it.py for the live behaviour.
+# config.FIXED_STOP_PCT was set to 2.0 that morning and reverted the
+# same day -- chosen and measured on one window, worse than the rule
+# it replaced on eleven sessions it had never seen. It is None again.
 #
-# The structural rule is NOT deleted -- FIXED_STOP_PCT = None brings
-# it straight back, and every guarantee below is what it must still
-# give when it does. So the dial is pinned off here rather than
-# these tests being rewritten to the new number, which would have
-# thrown away the guarantees instead of keeping them.
+# Pinned off here anyway: the dial is one line from being set, and
+# these guarantees are what the structural rule must still give.
 @pytest.fixture(autouse=True)
 def _structural_stop(monkeypatch):
     monkeypatch.setattr(position_plan, "FIXED_STOP_PCT", None)
@@ -145,27 +141,72 @@ def test_a_share_costing_more_than_the_whole_budget_is_refused():
 
 
 def test_the_reported_risk_is_what_it_actually_costs():
-    """Once the MTF cap bites, the real risk is below the budget. The
-    row must show what it costs, not what was asked for."""
+    """The row must show what it costs, not what was asked for.
+
+    ---- WHICH SIDE ADJUSTS, CHANGED 29 August 2026. ----
+    This used to assert the risk came out BELOW the budget once the
+    MTF cap bit: the stop distance was fixed by the day's low and the
+    share count was cut to fit, so a capped position risked less.
+
+    The margin figure now decides the size alone -- the same rule
+    core/engine.py always used, which this file's rule disagreed with
+    (TCS: card 21 shares, engine 40). The stop distance is what
+    adjusts now, so the rupees at stake are exactly the budget by
+    construction.
+
+    The guarantee is unchanged in substance and stronger in form: the
+    number on the card is the number the trade actually risks.
+    """
     got = plan(432.0, "BUY", day_low=427.0, margin_pct=0.25,
                budget_rs=20000.0)
     assert got["ok"]
-    assert got["risk_rs"] == round(got["qty"] * 5.0, 2)
-    assert got["risk_rs"] < RISK_PER_TRADE_RS
+    distance = 432.0 - got["stop"]
+    assert got["risk_rs"] == pytest.approx(got["qty"] * distance, abs=1.0)
+    assert got["risk_rs"] == pytest.approx(RISK_PER_TRADE_RS, abs=1.0)
 
 
 # ---------------------------------------------------------------
 # 5. WIN BIG -- THE OTHER HALF OF THE RULE
 # ---------------------------------------------------------------
-def test_the_target_is_worth_at_least_twice_the_risk():
+def test_the_target_is_a_move_the_stock_actually_makes():
+    """Was "worth at least twice the risk" until 29 August 2026.
+
+    Twice the risk put the target 4.17% above entry on a Rs 1.2 lakh
+    position, against a 2.34% daily range on TCS. A target beyond the
+    day's range never fires, which is the hold-to-the-close behaviour
+    it was meant to replace.
+
+    The upside is not capped by this: ENABLE_BOT_TRAILING_STOP arms
+    around +1% and follows every higher high, so a stock that keeps
+    running is booked by the trail, not here.
+    """
+    import config
+
     got = plan(100.0, "BUY", day_low=95.0)
-    assert got["target"] == 110.0
-    assert got["reward_multiple"] >= 2.0
+    if config.TARGET_REWARD_BY_REGIME:
+        from core.rules import MIN_REWARD_MULTIPLE
+        distance = 100.0 - got["stop"]
+        assert got["target"] == pytest.approx(
+            100.0 + distance * MIN_REWARD_MULTIPLE)
+    else:
+        # The exit is the trail. A card printing a target the trade
+        # will not take is the fault this whole day removed.
+        assert got["target"] is None
+        assert got["reward_multiple"] is None
 
 
 def test_a_short_targets_downwards():
+    import config
+
     got = plan(100.0, "SELL", day_high=105.0)
-    assert got["target"] == 90.0
+    if not config.TARGET_REWARD_BY_REGIME:
+        assert got["target"] is None
+        return
+    from core.rules import MIN_REWARD_MULTIPLE
+    distance = got["stop"] - 100.0
+    assert got["target"] == pytest.approx(
+        100.0 - distance * MIN_REWARD_MULTIPLE)
+    assert got["target"] < 100.0
 
 
 # ---------------------------------------------------------------

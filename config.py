@@ -1360,6 +1360,152 @@ MAX_NOTIONAL_PER_TRADE_RS = 200_000.0
 MANUAL_BUY_TARGET_RS = 2000.0     # book it when the position shows this
 MANUAL_BUY_TRAILS = True          # and ratchet the stop until it does
 
+
+# ==========================================================
+# THE BOT'S OWN TARGET, SET BY THE DAY
+# ==========================================================
+#
+#     "if i ask u to set target to bot on day basis based on market
+#      environment & by focusing only on gaining stocks . do not
+#      create any mess & keep all trades simple by keeping the
+#      capital allocation, entry, exit on targets, stop losses."
+#                                     -- operator, 29 August 2026
+#
+# core/position_plan.py has ALWAYS computed a target -- stop distance
+# x MIN_REWARD_MULTIPLE -- and it is printed on the alert that reaches
+# his phone. On a Rs 660 entry it reads "stop 640, target 700". The
+# bot's own entries then passed target=None to _enter() and held to
+# the close, so the card promised a target the trade never took.
+#
+# This makes the bot do what its own alert says.
+#
+# The multiple is keyed to the day's BREADTH, which the engine already
+# computes from advancing vs declining and caches
+# (_market_regime()). No new machinery, no new poll:
+#
+#     LONG_ONLY    the broad market is rising -- let it run further
+#     BOTH         mixed -- the standing 2.0, same as the alert card
+#     SHORT_ONLY   the broad market is falling -- take it sooner
+#
+# The stop is already scaled to each stock's own daily range, so a
+# multiple of the stop is automatically a target that fits the stock.
+# One dial for the day, one rule per trade. That is the whole design.
+#
+# HONEST ABOUT THESE THREE NUMBERS: 2.5 / 2.0 / 1.5 is judgement, not
+# measurement. 2.0 is the one already on the alert card; the other two
+# lean it with the market. Every attempt I made on 29 August to FIT a
+# target width collapsed out of sample, so this is deliberately a
+# simple ladder rather than a tuned constant -- and it is one dict to
+# edit when live trading says otherwise.
+#
+# Set to None or {} to restore hold-to-the-close.
+# ---- AND THE LADDER CAME STRAIGHT BACK OFF. 29 August 2026. ----
+#
+#     "even on broad market falling strong event stocks will make
+#      higher highs and we are capturing those stocks"
+#                                                 -- operator
+#
+# He is right and it inverts the idea above. This bot only reaches a
+# stock that has an event, is up 3%+, is on 2.5x its own volume AND
+# IS ALREADY BEATING ITS SECTOR. On a falling market the names that
+# clear those gates are showing MORE relative strength, not less --
+# they are going up while everything else goes down.
+#
+# Scaling their target down by the index would penalise exactly the
+# setup that is strongest, and it double-counts: relative strength is
+# already a gate, so measuring it again from the broad market adds
+# nothing and points the wrong way.
+#
+# So all three are 2.0 -- the number already on the alert card. The
+# dict stays because a day-based target is a real idea and this is
+# where it would live; it is simply not claiming anything today.
+# ---- AND 2.0 WAS NOT A DAY'S MOVE EITHER. 29 August 2026. ----
+#
+#     "how can any stock move that wide in any given day until its
+#      best or worst day to the stock which will occur very rarely in
+#      a year. bot will trade daily right. so be realistic & trade =
+#      book profits . look for the next opportunity"    -- operator
+#
+# At 2.0 the target sat 4.17% above entry. TCS's whole daily range is
+# 2.34%. A target beyond the day's range is not a target, it is the
+# hold-to-the-close behaviour this was meant to replace, wearing a
+# price label.
+#
+# 1.0 books at the same rupees the stop risks: Rs 2,500 either way,
+# which on the Rs 1.2 lakh position is a 2.08% move. That is a move
+# these stocks make -- they only reach the bot by being up 3%+ on
+# volume with an event behind them.
+#
+# The runners are not capped by this. ENABLE_BOT_TRAILING_STOP arms
+# once the trade is up ~1% and follows every higher high, so a stock
+# that keeps going is booked by the trail when it fades, not here.
+# This number is the floor under a normal day, not a ceiling on a
+# good one.
+# ---- AND THE HARD TARGET CAME OFF ENTIRELY. 29 August 2026. ----
+#
+#     "if entry at 3000 & target is missed by 1 or 2 rs & what is
+#      stock made higher highs after entry"          -- operator
+#
+# His question, and the arithmetic answers it. TCS at Rs 3,000, 40
+# shares, Rs 2,500 at risk -- so the target sits at Rs 3,062.50:
+#
+#     runs to 3,061 and turns   trail books  +Rs  1,240
+#     runs to 3,100             TARGET FIRES +Rs  2,500
+#     runs to 3,150             TARGET FIRES +Rs  2,500
+#     runs to 3,300             TARGET FIRES +Rs  2,500
+#
+# Without it, the same four:  +1,240 / +2,800 / +4,800 / +10,800.
+#
+# Below the target the trail was doing the booking anyway. Above it,
+# the target cut the exact trade he wanted to keep -- the one making
+# higher highs. It only ever cost money.
+#
+# So the exit is the trail, which is what he asked for twice:
+# "book the profits above 2500 rs" and "trail until one fades". The
+# fixed stop still caps the loss at Rs 2,500 before the trail arms.
+#
+# EMPTY MEANS NO HARD TARGET, and core/position_plan.py reads THIS
+# SAME DICT, so the card cannot print a target the trade will not
+# take. That disagreement -- card 21 shares, engine 40 -- is the
+# fault this whole day's work exists to remove.
+TARGET_REWARD_BY_REGIME = {}
+
+
+# ==========================================================
+# THE STOP FOLLOWS THE SIZE, NOT THE OTHER WAY ROUND
+# ==========================================================
+#
+#     "so tcs needs to move 3000 rs to 3281 rs or 2859 rs to exit
+#      which will never happen on day basis. thats a flaw with qty"
+#     "allot the capital sufficient to 50 qty in mtf order & book the
+#      profits above 2500 rs"                       -- operator
+#
+# There are only two ways to hold the rupee loss fixed:
+#
+#   SHRINK THE SIZE to fit the stop  -- _cap_by_risk(), the rule since
+#     7 August. Keeps the stock's own stop width. On TCS at Rs 3,000
+#     with a 4.68% stop that is 10 shares, so the trade needs a +9.4%
+#     day to reach a 2R target. It never comes, and the position
+#     drifts to the close every time. That is the flaw he found.
+#
+#   MOVE THE STOP to fit the size -- this. The share count comes from
+#     the MTF margin, and the stop sits wherever puts RISK_PER_TRADE_RS
+#     at stake over that many shares. TCS: 40 shares, stop 2.08%,
+#     Rs 2,500 at risk, and a move it actually makes in a day.
+#
+# THE COST, SAID PLAINLY: the width is then the same percentage on
+# every stock -- about 2.08% -- which is the thing he objected to on
+# 18 August. It is arithmetic, not a choice: fixed rupees of risk over
+# a fixed rupee position can only produce one percentage. A stop near
+# the daily range will be hit more often than one at twice it.
+#
+# He chose it knowing that, after seeing the 10-share alternative.
+#
+# OFF restores _cap_by_risk and the volatility-scaled width whole --
+# every measurement behind those is still in the code and still tested
+# (tests/test_the_stop_fits_the_stock.py, tests/test_engine.py).
+STOP_FROM_RISK_AND_SIZE = True
+
 # shows -- so the bot asks Dhan rather than guessing, and self-corrects
 # when Dhan changes a stock's rate or drops it from the MTF list.
 #
@@ -1405,7 +1551,40 @@ MANUAL_BUY_TRAILS = True          # and ratchet the stop until it does
 # With this False the stop is set once, HARD_STOP_FROM_ENTRY_PCT
 # below the entry, and never moves. It still closes a losing trade.
 # It just stops selling the winners.
-ENABLE_BOT_TRAILING_STOP = False
+# ---- BACK ON, 29 August 2026, AND HERE IS THE ARGUMENT ----
+#
+#     "incase if bot carry towards close some stocks may lock at
+#      upper circuits (excellent for us = profits) , some may fade
+#      out & become no profit / loss . to fix this i need one simple
+#      solution"                                    -- operator
+#
+# One rule covers both halves of that. A stock running into an upper
+# circuit keeps making new highs, so a stop that only moves UP never
+# catches it -- it rides to the target or the bell. A stock that
+# fades comes off its high by the trail distance and is closed with
+# its gain intact instead of giving the whole move back.
+#
+# The target added the same day does NOT solve the fading half: it
+# only fires if the stock reaches stop-distance x 2. A stock that
+# turns at +4% and closes at +0.5% never touches it.
+#
+# WHAT THE TABLE ABOVE SAYS, AND WHY IT IS NOT THE LAST WORD. It
+# stands: 80 real trades on 27-29 July, ratcheting turned +Rs 21,374
+# into -Rs 1,252. But that is three sessions in one market mood, and
+# it ran with MIN_STOP_DISTANCE_PCT at 0.004 -- the 0.4% floor that
+# let ordinary noise trigger the stop and churned CHENNPETRO nine
+# times. That floor is 0.01 now, and the activation guard (no ratchet
+# until the trade is up ATR_TRAIL_ACTIVATION_MULT ATRs in profit) is
+# in place.
+#
+# So this goes on to be MEASURED FORWARD, not because the July
+# reading was wrong. TRADING_MODE is PAPER and ALERT_ONLY_MODE is
+# True, so nothing is risked by finding out, and two weeks of his own
+# stocks will settle it in a way no backtest against this repo's 19
+# sessions of event history can.
+#
+# Set back to False if the paper record says the July table holds.
+ENABLE_BOT_TRAILING_STOP = True
 
 # The stop that remains. 2.5% from the entry price, fixed for the
 # life of the trade -- the operator's own number, and the one every

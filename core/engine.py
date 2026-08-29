@@ -73,6 +73,7 @@ from config import (
     MTF_MARGIN_PER_POSITION_RS,
     ATR_STOP_MULTIPLIER, ATR_TRAIL_MULTIPLIER, ATR_TRAIL_ACTIVATION_MULT,
     MIN_STOP_DISTANCE_PCT, MAX_NOTIONAL_PER_TRADE_RS, FIXED_STOP_PCT,
+    STOP_FROM_RISK_AND_SIZE,
     MIN_TRADABLE_PRICE_RS, EARNINGS_CALENDAR,
     ENABLE_PARTIAL_EXIT, PARTIAL_EXIT_ATR_MULTIPLE, PARTIAL_EXIT_FRACTION,
     PARTIAL_EXIT_MIN_PCT,
@@ -99,7 +100,7 @@ from config import (
     EARLY_ENTRY_MAX_POSITIONS,
     ENABLE_VOLUME_FILTER, VOLUME_SURGE_MULT, VOLUME_AVG_CANDLES,
     MIN_VOLUME_CANDLES,
-    MANUAL_BUY_TARGET_RS, MANUAL_BUY_TRAILS,
+    MANUAL_BUY_TARGET_RS, MANUAL_BUY_TRAILS, TARGET_REWARD_BY_REGIME,
 )
 from core.atr import compute_atr, daily_atr_pct
 # ---- ONE RISK BUDGET, NOT TWO. 12 August 2026. ----
@@ -3957,11 +3958,26 @@ class Engine:
         if atr is None or atr <= 0:
             return None, None, None
 
-        if ENABLE_BOT_TRAILING_STOP:
-            raw_stop_distance = ATR_STOP_MULTIPLIER * atr
-            min_stop_distance = MIN_STOP_DISTANCE_PCT * entry_price
-            stop_distance = max(raw_stop_distance, min_stop_distance)
-        elif VOLATILITY_SCALED_STOP:
+        # ---- TWO QUESTIONS, ONE FLAG. UNTANGLED 29 August 2026. ----
+        #
+        # HOW WIDE the entry stop is, and WHETHER it ratchets up, are
+        # separate questions. VOLATILITY_SCALED_STOP's own comment
+        # below says exactly that -- "ENABLE_BOT_TRAILING_STOP had
+        # been answering both since 29 July" -- and the ordering here
+        # was what made it true.
+        #
+        # Turning the trail on for his fading-into-the-close problem
+        # silently took this first branch instead, and 0.8 x a
+        # ONE-MINUTE ATR is always under the 1% floor. Measured: the
+        # entry stop became 1.00% for every stock at every ATR, on
+        # names whose DAILY range is around 3.9%. A stop inside the
+        # noise, and qty = risk / distance would have tripled every
+        # position at the same time.
+        #
+        # So the width is decided first and on its own terms. The
+        # trail flag now governs only the ratchet, which is what its
+        # name says and all it was ever meant to do.
+        if VOLATILITY_SCALED_STOP:
             # ---- ONE WIDTH FOR 1,312 STOCKS. 18 August 2026. ----
             #
             #     "do not fix the 2.5% for every stock"
@@ -3976,6 +3992,20 @@ class Engine:
             # Falls back to the flat number, not to a guess, whenever
             # the daily store cannot answer. See _hard_stop_pct().
             stop_distance = self._hard_stop_pct(symbol) * entry_price
+        elif ENABLE_BOT_TRAILING_STOP:
+            # The pre-18-August width: this stock's INTRADAY ATR, with
+            # a percentage floor under it. Demoted below the daily
+            # scaling rather than deleted -- it is still the right
+            # width if VOLATILITY_SCALED_STOP is ever turned off, and
+            # tests/test_engine.py pins that combination to prove it.
+            #
+            # It is no longer reachable by turning the trail on, which
+            # is the whole point: 0.8 x a one-minute ATR sits under the
+            # 1% floor on every stock, so this branch WAS the 1.00%
+            # stop that turning the trail on silently produced.
+            raw_stop_distance = ATR_STOP_MULTIPLIER * atr
+            min_stop_distance = MIN_STOP_DISTANCE_PCT * entry_price
+            stop_distance = max(raw_stop_distance, min_stop_distance)
         else:
             # 2026-07-29: with the trail gone this stop is the ONLY
             # thing protecting the trade, so it is the operator's own
@@ -4030,12 +4060,66 @@ class Engine:
         if qty < 1:
             return None, None, None
 
+        # ---- AND THE STOP HAD TO FOLLOW THE SIZE. 29 Aug 2026. ----
+        #
+        # The share count above comes from the MTF margin. The stop
+        # width came from the stock's daily range, and nothing
+        # reconciled the two -- so the rupees at stake were whatever
+        # the multiplication happened to give.
+        #
+        # Caught by walking a real trade through: TCS at Rs 3,000, the
+        # card said stop 2,937.50 risking Rs 2,500, and this method
+        # held 2,859.53 risking Rs 5,619. His phone would have shown
+        # less than half the loss the trade carried.
+        #
+        # core/position_plan.py was changed the same day to derive the
+        # distance from the rupee risk: distance = risk / qty. This is
+        # the other half of that. Same inputs, same arithmetic, same
+        # answer on both paths.
+        #
+        # Bounded at both ends like everything else -- a size that
+        # would put the stop inside the noise, or past the point where
+        # the loss stops being small, is refused rather than taken.
+        if STOP_FROM_RISK_AND_SIZE and qty > 0:
+            wanted = RISK_PER_TRADE_RS / qty
+            as_pct = wanted / entry_price * 100.0
+            if as_pct < STOP_FLOOR_PCT or as_pct > STOP_CEILING_PCT:
+                return None, None, None
+            stop_distance = wanted
+
         if direction == LONG:
             stop_price = entry_price - stop_distance
         else:
             stop_price = entry_price + stop_distance
 
-        return stop_price, None, qty
+        # ---- THE CARD PROMISED A TARGET AND THE TRADE IGNORED IT ----
+        #      29 August 2026.
+        #
+        # core/position_plan.py has always put "target 700" on the
+        # alert -- stop distance x MIN_REWARD_MULTIPLE. This method
+        # returned None here, so the bot held to the close and the
+        # card was describing a trade that was never taken.
+        #
+        # The multiple comes from the day's breadth, which is already
+        # computed and cached. See config.TARGET_REWARD_BY_REGIME.
+        # The stop is scaled to the stock, so a multiple of the stop
+        # is a target scaled to the stock.
+        #
+        # Never raises and never blocks an entry: if the regime cannot
+        # be read, the target is simply absent and the trade behaves
+        # exactly as it did before this existed.
+        target_price = None
+        if TARGET_REWARD_BY_REGIME:
+            try:
+                reward = TARGET_REWARD_BY_REGIME.get(self._market_regime())
+            except Exception:                              # noqa: BLE001
+                reward = None
+            if reward:
+                target_price = (entry_price + reward * stop_distance
+                                if direction == LONG
+                                else entry_price - reward * stop_distance)
+
+        return stop_price, target_price, qty
 
     # ==============================================================
     # YOUR TRADES ARE YOURS  (2026-07-29)

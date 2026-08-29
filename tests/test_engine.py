@@ -17,6 +17,34 @@ from trading.portfolio import Portfolio
 from config import MTF_MARGIN_PER_POSITION_RS
 
 
+# ---- AND THE TARGET, ADDED 29 August 2026. ----
+#
+# config.TARGET_REWARD_BY_REGIME gives the bot's own entries a target
+# for the first time -- stop distance x the day's multiple, the same
+# number position_plan has always printed on the alert card.
+#
+# Every test below is about ATR SIZING, TRAILING or the PARTIAL EXIT.
+# Six of them broke because a position they expected to ride was
+# closed at the new target instead: "rides uncapped" and "a huge
+# favourable move must still be open" are statements about the trail,
+# not about targets. Pinning the target off here keeps them testing
+# what they were written for.
+#
+# The target's own behaviour is covered in
+# tests/test_the_bot_takes_the_target_it_promised.py.
+@pytest.fixture(autouse=True)
+def _no_target(monkeypatch):
+    import core.engine as _engine_module
+    monkeypatch.setattr(_engine_module, "TARGET_REWARD_BY_REGIME", {})
+    # config.STOP_FROM_RISK_AND_SIZE derives the stop from
+    # RISK_PER_TRADE_RS / qty, so the rupee loss is fixed and the
+    # width follows. Every test below pins an exact stop LEVEL from
+    # the ATR/volatility widths, which is a different question and
+    # still the live one whenever that dial is off. Pinned off here
+    # so those measurements keep being proved.
+    monkeypatch.setattr(_engine_module, "STOP_FROM_RISK_AND_SIZE", False)
+
+
 @pytest.fixture(autouse=True)
 def _pin_sizing_constants(monkeypatch):
     """
@@ -1718,6 +1746,12 @@ def test_momentum_mode_allows_a_structural_long_inside_the_locked_universe(monke
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
@@ -1748,6 +1782,12 @@ def test_momentum_mode_short_side_mirrors_long_gating_and_atr_sizing(monkeypatch
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
     universe = _FakeMomentumUniverse(short_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
@@ -1817,6 +1857,12 @@ def test_atr_trailing_stop_hit_closes_the_position_at_the_current_atr_stop(monke
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
     _feed_orb_range(engine, high=110.0)
@@ -1859,6 +1905,12 @@ def test_atr_trailing_ratchets_up_on_a_favourable_candle_close_and_never_loosens
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
     engine = _engine(momentum_universe=universe)
     _feed_orb_range(engine, high=110.0)
@@ -1935,6 +1987,12 @@ def test_partial_exit_trims_qty_at_the_configured_atr_multiple(monkeypatch):
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     monkeypatch.setattr(engine_module, "ENABLE_PARTIAL_EXIT", True)
     monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
 
@@ -1969,6 +2027,12 @@ def test_partial_exit_only_fires_once_even_across_many_more_candles(monkeypatch)
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     monkeypatch.setattr(engine_module, "ENABLE_PARTIAL_EXIT", True)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
@@ -2004,6 +2068,12 @@ def test_partial_exit_leaves_the_atr_trail_completely_unaffected(monkeypatch):
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     monkeypatch.setattr(engine_module, "ENABLE_PARTIAL_EXIT", True)
     monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
 
@@ -2037,6 +2107,12 @@ def test_partial_exit_skipped_when_trim_would_round_to_zero(monkeypatch):
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     monkeypatch.setattr(engine_module, "ENABLE_PARTIAL_EXIT", True)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})
@@ -2063,6 +2139,12 @@ def test_partial_exit_credits_portfolio_and_frees_margin(monkeypatch):
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     monkeypatch.setattr(engine_module, "ENABLE_PARTIAL_EXIT", True)
     monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
 
@@ -2450,6 +2532,12 @@ def test_atr_entry_sizing_floors_stop_distance_and_caps_qty_when_atr_is_tiny(mon
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     monkeypatch.setattr(engine_module, "compute_atr", lambda candles, period: 0.1)
     monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
 
@@ -2494,6 +2582,12 @@ def test_atr_entry_sizing_notional_cap_binds_independently_of_the_stop_floor(mon
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     monkeypatch.setattr(engine_module, "compute_atr", lambda candles, period: 2.0)
     monkeypatch.setattr(engine_module, "MTF_MARGIN_PER_POSITION_RS", 100000.0)
     monkeypatch.setattr(engine_module, "RISK_PER_TRADE_RS", 1.0)
@@ -2525,6 +2619,12 @@ def test_atr_trailing_ratchet_also_respects_the_min_stop_distance_floor(monkeypa
     # Enabled explicitly here so the old path stays covered rather
     # than silently untested -- see config ENABLE_BOT_TRAILING_STOP.
     monkeypatch.setattr(engine_module, "ENABLE_BOT_TRAILING_STOP", True)
+    # 29 August 2026: the trail flag no longer selects the entry WIDTH
+    # -- VOLATILITY_SCALED_STOP decides that on its own terms now, so
+    # turning the trail on cannot silently collapse the stop to the 1%
+    # floor. These tests are about the ATR-multiplier sizing, so they
+    # ask for that branch directly instead of reaching it sideways.
+    monkeypatch.setattr(engine_module, "VOLATILITY_SCALED_STOP", False)
     monkeypatch.setattr(engine_module, "compute_atr", lambda candles, period: 0.1)
 
     universe = _FakeMomentumUniverse(long_symbols={"TCS"})

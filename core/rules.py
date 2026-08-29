@@ -102,7 +102,28 @@ Author : H&M Opportunity Trader
 # twelve replayed days were measured at 1,500 and the selector has no
 # proven edge yet -- raising size before there is an edge only loses
 # money faster. Raise it after, not before. His call, 11 August.
-RISK_PER_TRADE_RS = 1500.0
+# ---- RAISED WITH THE SIZING. 29 August 2026. ----
+#
+#     "allot the capital sufficient to 50 qty in mtf order & book the
+#      profits above 2500 rs"                      -- operator
+#
+# core/position_plan.py now sizes from the MTF margin alone, the way
+# core/engine.py always did. The size is therefore fixed by capital,
+# and this number sets the STOP WIDTH rather than the share count:
+# distance = risk / qty.
+#
+# At Rs 1,500 over a Rs 1.2 lakh position that width was 1.25%, on
+# stocks whose daily range is 2-4%. A stop inside the noise is a
+# guaranteed exit -- the same fault the 24 July note describes, from
+# the other direction.
+#
+#     Rs 1,500 -> 1.25% stop, Rs 3,000 target
+#     Rs 2,500 -> 2.08% stop, Rs 5,000 target
+#
+# 2.08% sits just under TCS's own 2.34% daily range instead of well
+# inside it. DAILY_MAX_LOSS_RS (Rs 12,000) still halts the day, so
+# five stop-outs closes the book whatever this says.
+RISK_PER_TRADE_RS = 2500.0
 
 # Margin Dhan blocks for one MTF position. Caps qty independently of
 # the risk budget: a share can be affordable by risk and unaffordable
@@ -149,7 +170,26 @@ MAX_STOP_DISTANCE_PCT = 6.0
 
 # Target = entry + this x (entry - stop). Not a price prediction -- the
 # level below which the trade is not worth taking.
-MIN_REWARD_MULTIPLE = 2.0
+# ---- THE CARD AND THE TRADE MUST AGREE. 29 August 2026. ----
+#
+# This sets the target core/position_plan.py prints on his phone.
+# config.TARGET_REWARD_BY_REGIME sets the one core/engine.py actually
+# books at. They were 2.0 and 1.0 for about ten minutes, which is the
+# same fault as the quantity disagreement fixed the same day: the
+# card promising Rs 5,000 while the trade took Rs 2,500.
+#
+# 1.0 because 2.0 was not a day's move:
+#
+#     "how can any stock move that wide in any given day ... bot will
+#      trade daily right. so be realistic & trade = book profits"
+#
+# At 2.0 the target sat 4.17% above entry on a Rs 1.2 lakh position.
+# TCS's whole daily range is 2.34%. The runners are not capped by it
+# -- the trail arms around +1% and rides every higher high.
+#
+# tests/test_the_bot_takes_the_target_it_promised.py fails if this
+# and TARGET_REWARD_BY_REGIME ever drift apart again.
+MIN_REWARD_MULTIPLE = 1.0
 
 
 # ==========================================================

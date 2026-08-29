@@ -122,11 +122,19 @@ def test_one_percent_is_still_the_trail_floor_and_only_that():
     assert config.MIN_STOP_DISTANCE_PCT == 0.01
 
 
-def test_the_trail_that_the_floor_belongs_to_is_off():
-    """The floor's whole purpose was to keep the trail from getting
-    razor-thin. With the trail off, a 1% entry seed was a leftover of
-    a mechanism that is not running."""
-    assert config.ENABLE_BOT_TRAILING_STOP is False
+def test_the_floor_still_belongs_to_a_trail_that_is_running():
+    """The floor keeps the trail from getting razor-thin.
+
+    While the trail was off (29 July - 29 August 2026) this asserted
+    the flag was False, because a 1% entry seed was a leftover of a
+    mechanism that was not running. The trail is back on, to be
+    measured forward in paper against stocks fading into the close --
+    so the floor has a job again, and what matters is that it exists,
+    not which way the flag points.
+    """
+    assert config.ENABLE_BOT_TRAILING_STOP is True
+    assert config.MIN_STOP_DISTANCE_PCT > 0, (
+        "the trail is running with no floor under it")
 
 
 # ---------------------------------------------------------------
