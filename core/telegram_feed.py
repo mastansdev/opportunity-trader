@@ -63,6 +63,28 @@ POLL_SECONDS = 90
 # happens, just not in front of the channels that carry order wins.
 SLOW_POLL_SECONDS = 300
 
+
+# A ticker straight after a number and a slash is a unit of measure --
+# "$84.94/BBL", "Rs 2,053/kg", "5,773.63/Sh". See symbols_in().
+_UNIT_AFTER_NUMBER = re.compile(r"(?<=[0-9])\s*/\s*(#?[A-Za-z]{2,})")
+
+# OIL after a commodity word, DOLLAR after a currency one. Both are
+# real NSE tickers and ordinary English in the same breath.
+_COMMODITY_OR_CURRENCY = re.compile(
+    r"\b(?:CRUDE|BRENT|PALM|WTI|COOKING|EDIBLE|HEATING|FUEL|SOY)\s+(OIL)\b"
+    r"|\b(?:US|U\.S\.|THE|PER|BILLION|MILLION|TRILLION)\s+(DOLLAR)S?\b",
+    re.I)
+
+
+def _blank_the_word(match):
+    """Blank only the ticker-shaped word, leaving the rest in place.
+
+    The surrounding words still have to be readable -- another rule,
+    or a human, may be looking at the same line.
+    """
+    word = match.group(1) or match.group(2)
+    return match.group(0)[:-len(word)] + "x" * len(word)
+
 # ---------------------------------------------------------------
 # HOW LONG THE RAW MESSAGES ARE KEPT
 # ---------------------------------------------------------------
@@ -987,6 +1009,48 @@ class TelegramFeed:
         # "2026" out of every date on every card become candidate
         # tickers. Three symbols is the entire population this opens,
         # and every one of them is checked against `known` below.
+        # ---- A UNIT IS NOT A TICKER. 29 August 2026. ----
+        #
+        #     "day trader telugu posts data images after 08 am daily
+        #      bulk images"                          -- operator
+        #
+        # Those bulk images carry macro and commodity lines, and three
+        # NSE tickers are ordinary words inside them:
+        #
+        #     "CRUDE OIL FUTURES SETTLE AT $84.94/BBL"
+        #        -> OIL     Oil India
+        #        -> BBL     Bharat Bijlee, from the BARREL
+        #     "NET PURCHASE OF US DOLLARS"
+        #        -> DOLLAR  Dollar Industries
+        #
+        # The capitals guard below cannot see these -- the whole line
+        # is shouted, so they read exactly like a real ticker mention.
+        # And they are not harmless: since REQUIRE_A_REASON_ALWAYS, an
+        # event is what makes a stock tradeable at all, so a crude
+        # price quoted per barrel was giving Bharat Bijlee a reason.
+        #
+        # TWO NARROW RULES, both measured on the 1,525 stored messages
+        # before shipping:
+        #
+        #     a token straight after a number and a slash is a UNIT
+        #       -- /kg /Sh /BBL /share /kWh /MT /oz /ton /Litre. Only
+        #          BBL is also a ticker; the rest match nothing.
+        #     OIL after CRUDE, BRENT, PALM ... is a commodity, and
+        #     DOLLAR after US, THE, PER ... is a currency.
+        #
+        # Result: 20 links removed across 16 messages -- OIL x10,
+        # BBL x9, DOLLAR x1 -- and every one of them false.
+        #
+        # WHY IT IS THIS NARROW. The blunt version of this was tried on
+        # 1 August (see the all-caps note above) and reverted: it took
+        # out 83 links and most were TRUE. Masking the OCCURRENCE and
+        # not the symbol keeps that from happening again -- a message
+        # that says "#OIL" or "OIL INDIA: Q1 PROFIT" still links,
+        # because only the unit and phrase positions are blanked.
+        text = _UNIT_AFTER_NUMBER.sub(
+            lambda m: " " + "x" * len(m.group(1)), str(text))
+        text = _COMMODITY_OR_CURRENCY.sub(_blank_the_word, text)
+
         found = []
         for token in re.findall(r"#?[A-Za-z0-9][A-Za-z0-9&_\-]{2,}", str(text)):
             tagged = token.startswith("#")
