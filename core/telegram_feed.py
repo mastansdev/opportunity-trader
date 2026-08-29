@@ -56,6 +56,13 @@ from core.stock_events import events_from_message
 # HTML view and hammering it would be rude and would get us blocked.
 POLL_SECONDS = 90
 
+# How often the FULL pass runs -- every channel, including the ones he
+# has told me are episodic or results-season only. The daily three run
+# on POLL_SECONDS above; see start() for the measurement that split
+# them. Nothing is read less often than it was: a full pass still
+# happens, just not in front of the channels that carry order wins.
+SLOW_POLL_SECONDS = 300
+
 # ---------------------------------------------------------------
 # HOW LONG THE RAW MESSAGES ARE KEPT
 # ---------------------------------------------------------------
@@ -513,6 +520,7 @@ class TelegramFeed:
         self._store_failures = 0
         # Background poller -- see start(). None until started.
         self._thread = None
+        self._slow_thread = None
         self._stop = threading.Event()
         self._ensure_db()
 
@@ -1097,7 +1105,7 @@ class TelegramFeed:
 
     # ------------------------------------------------------------
 
-    def poll(self, limit=30, stop_check=None):
+    def poll(self, limit=30, stop_check=None, fast=None):
         """Fetch recent messages from every channel.
 
         One channel failing costs that channel only. Never raises --
@@ -1116,6 +1124,10 @@ class TelegramFeed:
         `stop_check` is asked before each channel. A pass abandoned
         halfway costs nothing -- every message is committed as it is
         stored, and the next run picks up from the last id.
+
+        `fast` limits the pass to the channels that post through
+        the session -- everything except SLOW_KINDS. None reads all of
+        them. See start() for why that exists.
         """
         if self.client is None:
             self._last_error = ("no Telegram client -- run "
@@ -1123,7 +1135,7 @@ class TelegramFeed:
             return 0
 
         stored = 0
-        for channel in self.channels:
+        for channel in self._channels_for(fast):
             if stop_check is not None and stop_check():
                 decision(f"[TELEGRAM] Stopping mid-pass. {stored} message(s) "
                          f"already saved.")
@@ -1143,6 +1155,51 @@ class TelegramFeed:
                      f"{len(self.channels)} channels.")
         self._prune()
         return stored
+
+    # Only these are held back to the slow pass. Everything else --
+    # including a channel nobody has classified yet -- is read on the
+    # fast one.
+    #
+    # ---- THE DEFAULT WAS THE WRONG WAY ROUND. 29 August 2026. ----
+    # This first selected FOR "daily", which is OrderBook Pulse, Day
+    # Trader Telugu and RedboxGlobal India. News Pulse is none of those
+    # -- channel_kind() calls it "other" -- so it landed on the five
+    # minute loop while posting news all day, 109 messages in the
+    # 18-29 August sample. He spotted it immediately: "telegram
+    # channels are still getting news, orderbook, business updates."
+    #
+    # An unclassified channel is one nobody has looked at, not one
+    # known to be quiet. Reading it too often costs a few seconds;
+    # reading it too rarely costs a trade. So the slow list is the
+    # SHORT, EXPLICIT one, and the fast loop takes everything else.
+    SLOW_KINDS = ("results", "episodic")
+
+    def _channels_for(self, fast=None):
+        """Channels in poll order. All of them unless `fast` is True.
+
+        fast=True  everything except SLOW_KINDS -- the channels that
+                   post through the session, plus anything unclassified
+        fast=None  every channel
+
+        Falls back to every channel whenever the kind cannot be
+        resolved. A pass that reads too much is a slow pass; a pass
+        that reads nothing is a blind one.
+        """
+        if not fast:
+            return list(self.channels)
+        try:
+            from core.feed_clock import channel_kind
+
+            picked = []
+            for entry in self.channels:
+                kinds = {channel_kind(entry.get(key))
+                         for key in ("handle", "name")}
+                if kinds & set(self.SLOW_KINDS):
+                    continue
+                picked.append(entry)
+            return picked or list(self.channels)
+        except Exception:                                  # noqa: BLE001
+            return list(self.channels)
 
     # ------------------------------------------------------------
     # keeping it CURRENT
@@ -1176,30 +1233,68 @@ class TelegramFeed:
             return
         self._stop.clear()
 
-        def _loop():
+        # ---- THE DAILY THREE WERE WAITING FOR THE OTHER SEVEN ----
+        #      29 August 2026.
+        #
+        #     "fix the telegram collector delay"      -- operator
+        #
+        # This loop was `wait(90s) -> poll() -> wait(90s)`, and poll()
+        # walked EVERY channel with OCR on every image. So the cycle was
+        # never 90 seconds -- it was 90 plus the length of a full pass.
+        #
+        # Ordering the daily three first (24 August) did not fix it, and
+        # the measurement says so: over 18-29 August their median lag
+        # from posted to stored was still 5.5 minutes, p90 24.9. Being
+        # read first in a pass does not help when you still wait for the
+        # PREVIOUS pass to finish walking seven channels you do not need.
+        #
+        #     Day Trader Telugu   958 messages   median 5.5m   p90 24.9m
+        #     Breakouts           240            median 5.5m   p90  9.4m
+        #     RedboxGlobal        171            median 5.6m   p90 12.9m
+        #
+        # His rule for those three, from 24 August: "delay in getting
+        # their data into bot will cost us money."
+        #
+        # So they get their own loop at `every_seconds`, and the rest --
+        # episodic and results-season channels he has told me are not
+        # owed a post on a schedule -- get a slower one. The daily cycle
+        # is now 90s plus THREE channels instead of 90s plus ten.
+        #
+        # Two threads, both daemon, both fail-quiet. A failed pass on
+        # either costs one cycle; neither can block the other, because
+        # sqlite3 serialises the writes and every message is committed
+        # as it is stored.
+        def _loop(fast, seconds, label):
             # First poll already happened in main.py's setup, so wait
             # before the second one rather than doubling up at startup.
-            while not self._stop.wait(every_seconds):
+            while not self._stop.wait(seconds):
                 try:
-                    self.poll()
+                    self.poll(fast=fast)
                 except Exception as exc:                   # noqa: BLE001
-                    warn(f"[TELEGRAM] Poll cycle failed ({exc}) -- keeping "
-                         f"what is already held, retrying in "
-                         f"{every_seconds}s.")
+                    warn(f"[TELEGRAM] {label} poll cycle failed ({exc}) -- "
+                         f"keeping what is already held, retrying in "
+                         f"{seconds}s.")
 
-        self._thread = threading.Thread(target=_loop, name="telegram-feed",
-                                        daemon=True)
+        slow = max(int(every_seconds), int(SLOW_POLL_SECONDS))
+        self._thread = threading.Thread(
+            target=_loop, args=(True, every_seconds, "fast"),
+            name="telegram-feed", daemon=True)
         self._thread.start()
-        decision(f"[TELEGRAM] Watching for new messages every "
-                 f"{every_seconds}s on a background thread.")
+        self._slow_thread = threading.Thread(
+            target=_loop, args=(None, slow, "full"),
+            name="telegram-feed-slow", daemon=True)
+        self._slow_thread.start()
+        decision(f"[TELEGRAM] Watching the daily channels every "
+                 f"{every_seconds}s, all channels every {slow}s.")
 
     def stop(self):
-        """Stop the poller. Safe to call when it was never started."""
+        """Stop both pollers. Safe to call when they were never started."""
         self._stop.set()
-        thread = self._thread
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=3)
-        self._thread = None
+        for attr in ("_thread", "_slow_thread"):
+            thread = getattr(self, attr, None)
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=3)
+            setattr(self, attr, None)
 
     def poller_alive(self):
         """True if the background poll loop is running -- so the
