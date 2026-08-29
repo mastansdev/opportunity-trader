@@ -2632,9 +2632,32 @@ class DashboardState:
         except Exception as exc:                           # noqa: BLE001
             return {"available": False, "note": str(exc)}
 
+        # ---- THE LEADERBOARD IS NOT THE UNIVERSE. 29 Aug 2026 ----
+        #
+        #     "i do not want those top 50 gainers & losers which no one
+        #      gonna use & burden the bot system"
+        #                                    -- operator, 29 Aug 2026
+        #
+        # This seeded the candidate pool with 50 gainers AND 50 LOSERS.
+        # config.ENABLE_SHORT_TRADES is False and always has been, so
+        # every loser was walked through the gates only to be refused
+        # for being a loser -- 2,045 SELL picks are on record that
+        # could never have been taken.
+        #
+        # The gainers half is a leaderboard of moves ALREADY MADE, which
+        # is why _widen_by_reason() below had to exist at all: to ADD
+        # BACK the stock that filed results at 09:41 and sat 180th.
+        # Seeding from the leaderboard and then repairing it is the
+        # wrong way round, so the widener IS the seed now.
+        #
+        # _compute_gl_rows() already builds a row for every symbol --
+        # the leaderboard was only ever a slice of it -- so this costs
+        # nothing new and drops the half that cannot trade.
+        #
+        # gainers_losers still reaches rank() untouched: sector strength
+        # and market breadth need every stock, candidate or not.
+        # Narrowing what is TRADED must not narrow what is SEEN.
         movers = []
-        for side in ("gainers", "losers"):
-            movers.extend((gainers_losers or {}).get(side) or [])
 
         # ---- THE RANKER COULD NOT SEE THE STOCK EARLY. ----
         #      4 August 2026.
@@ -2663,7 +2686,19 @@ class DashboardState:
         try:
             movers = self._widen_by_reason(movers)
         except Exception as exc:                           # noqa: BLE001
-            diagnostic(f"[RANK] Could not widen the pool: {exc}")
+            diagnostic(f"[RANK] Could not build the pool: {exc}")
+        # This is now the SEED, not a widening, so an empty result is
+        # a different statement than it used to be: it means nothing
+        # has a reason today, which is a legitimate and common answer
+        # -- and it means NO TRADES. Said out loud once per session
+        # rather than silently returning an empty board, because
+        # "no news" and "the news lookup broke" look identical from
+        # here and only one of them is fine.
+        if not movers and not getattr(self, "_said_no_reasons", False):
+            self._said_no_reasons = True
+            diagnostic("[RANK] No stock has a published reason yet -- "
+                       "nothing is a candidate. This is the rule, not "
+                       "a fault: no event, no evaluation.")
 
         if not movers:
             return {"available": True, "rows": [], "note": "no prices yet"}

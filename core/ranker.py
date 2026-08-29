@@ -636,6 +636,66 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
         if name:
             refused_by_symbol[name] = why
 
+    # ---- NO EVENT, NO EVALUATION. 29 August 2026. ----
+    #
+    #     "the problem is for non events / no volume stocks are being
+    #      processed continously ?"
+    #     "if 100 stocks were there at morning & by 11 5 stocks got
+    #      news . then bot must include those stocks too"
+    #                                    -- operator, 29 August 2026
+    #
+    # On 24 August the bot recorded 355,089 refusals to reach three
+    # decisions. The largest single reason, 164,988 of them, was "no
+    # event behind it" -- the same reasonless stocks re-refused on
+    # every one of ~1,400 cycles. 31,924 more were "under the Rs 50
+    # floor", which is a permanent property of a stock being
+    # rediscovered twenty-five times a day.
+    #
+    # REQUIRE_A_REASON_ALWAYS means a stock without a published reason
+    # can never be taken. Walking it through nine gates to arrive
+    # there is work whose answer is known before it starts.
+    #
+    # The market context above is computed from the FULL mover list
+    # and is untouched -- sector strength and market breadth need
+    # every stock, including the ones that are not candidates.
+    #
+    # A stock is NOT dropped for the day: mechanism_of() is asked
+    # fresh each cycle, so news arriving at 11:00 puts a stock into
+    # the evaluated set from 11:00 onward. That is his 100-at-the-open
+    # plus 5-at-eleven, and it costs nothing to support because the
+    # reason lookup is what decides membership.
+    reason_cache = {}
+
+    def _reason_for(symbol):
+        if symbol not in reason_cache:
+            try:
+                reason_cache[symbol] = mechanism_of(symbol)
+            except Exception:                              # noqa: BLE001
+                reason_cache[symbol] = None
+        return reason_cache[symbol]
+
+    if REQUIRE_A_REASON_ALWAYS:
+        candidates_before = rows
+        before = len(rows)
+        rows = [r for r in rows
+                if _reason_for(str(r.get("symbol") or "").upper())]
+        skipped = before - len(rows)
+        if skipped:
+            # ONE aggregate line, not one refusal per gate per cycle.
+            rejected["no event -- not evaluated"] = skipped
+            # But the SYMBOL is still remembered, so "why was X not
+            # named?" keeps an answer. tests/test_live_tab_is_not_blank
+            # exists for that question -- the ranker used to count
+            # reasons and forget the stock. Writing a dict entry is
+            # not the cost being avoided here; walking nine gates,
+            # computing a volume ratio and sizing a plan is.
+            named = {str(r.get("symbol") or "").upper() for r in rows}
+            for row in candidates_before:
+                name = str(row.get("symbol") or "").upper()
+                if name and name not in named:
+                    refused_by_symbol[name] = ("no event behind it -- "
+                                               "the tape is not a reason")
+
     for row in rows:
         symbol = str(row.get("symbol") or "").upper()
         if not symbol:
@@ -738,7 +798,7 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
         # the number has to exist before the question is asked.
         vratio = volume_ratio(row, adv, symbol=symbol, now=now)
 
-        mech = mechanism_of(symbol)
+        mech = _reason_for(symbol)
         text = str((mech or {}).get("text") or "").strip()
         if not mech or not text:
             # ---- FOLLOW THE MONEY. THE REASON BACKS IT. ----
