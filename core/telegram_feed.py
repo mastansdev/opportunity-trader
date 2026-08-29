@@ -63,6 +63,41 @@ POLL_SECONDS = 90
 # happens, just not in front of the channels that carry order wins.
 SLOW_POLL_SECONDS = 300
 
+# A message later than this has probably already cost the move it was
+# about. Measured over 18-29 August the median was 5.7 minutes and the
+# p90 was 21.5 -- and 30 of 459 in-hours events had already run 1% or
+# more before the bot saw them. See TelegramFeed._report_lag().
+SLOW_FEED_WARN_MINUTES = 10.0
+
+# Past this, it is the bot catching up after being off, not the feed
+# running late. See _report_lag() -- the 28 August restart stored 227
+# messages from the previous day, which reads as a 1,440-minute lag.
+CATCH_UP_MINUTES = 120.0
+
+# What each pass asks a channel for. The FIRST pass of a process asks
+# for more, because nothing was collecting while the bot was down --
+# see TelegramFeed._next_limit().
+DEFAULT_LIMIT = 30
+FIRST_PASS_LIMIT = 120
+
+
+def _as_ist(stamp):
+    """A stored stamp as naive IST, or None.
+
+    One clock for the whole repo -- core/feed_clock.to_ist() is what
+    every other reader of these two columns uses. `at` carries a UTC
+    offset and `seen_at` does not, so comparing them raw is how a
+    five-and-a-half hour "lag" gets reported.
+    """
+    try:
+        from core.feed_clock import to_ist
+        got = to_ist(stamp)
+    except Exception:                                      # noqa: BLE001
+        return None
+    if got is None:
+        return None
+    return got.replace(tzinfo=None) if got.tzinfo else got
+
 
 # A ticker straight after a number and a slash is a unit of measure --
 # "$84.94/BBL", "Rs 2,053/kg", "5,773.63/Sh". See symbols_in().
@@ -543,6 +578,10 @@ class TelegramFeed:
         # Background poller -- see start(). None until started.
         self._thread = None
         self._slow_thread = None
+        # Posted-to-stored lag, this session. See _report_lag().
+        self._lags = []
+        # The first pass reaches further back. See _next_limit().
+        self._first_pass_done = False
         self._stop = threading.Event()
         self._ensure_db()
 
@@ -1169,7 +1208,7 @@ class TelegramFeed:
 
     # ------------------------------------------------------------
 
-    def poll(self, limit=30, stop_check=None, fast=None):
+    def poll(self, limit=DEFAULT_LIMIT, stop_check=None, fast=None):
         """Fetch recent messages from every channel.
 
         One channel failing costs that channel only. Never raises --
@@ -1198,6 +1237,7 @@ class TelegramFeed:
                                 "py tools/telegram_setup.py")
             return 0
 
+        started = datetime.now()
         stored = 0
         for channel in self._channels_for(fast):
             if stop_check is not None and stop_check():
@@ -1217,8 +1257,90 @@ class TelegramFeed:
         if stored:
             decision(f"[TELEGRAM] {stored} new message(s) across "
                      f"{len(self.channels)} channels.")
+            self._report_lag(started)
         self._prune()
         return stored
+
+    def _report_lag(self, since):
+        """Say how late this pass's messages were. Never raises.
+
+        ---- IT KNEW AND NEVER SAID. 29 August 2026. ----
+        Every row carries `at` (posted on the channel) and `seen_at`
+        (stored by us), and core/feed_clock.py's own note says the
+        difference is pure collection lag. Nothing ever read it. The
+        5.7-minute median and the 21.5-minute p90 that split the
+        poller into two loops were measured by hand, off the store,
+        weeks after the fact.
+
+        A number nobody looks at is a number nobody acts on. So the
+        bot now says it after every pass that stored something, and
+        says it LOUDLY when a message was late enough to have cost a
+        move -- SLOW_FEED_WARN_MINUTES.
+
+        This is also the only way to know whether the two-loop split
+        worked. It could not be measured offline; the client only
+        exists in a live session.
+        """
+        try:
+            with self._lock:
+                conn = sqlite3.connect(self.db_path)
+                rows = conn.execute(
+                    "SELECT channel, at, seen_at FROM messages "
+                    "WHERE seen_at >= ?",
+                    (since.isoformat(timespec="seconds"),)).fetchall()
+                conn.close()
+            lags = []
+            worst = None
+            for channel, at, seen_at in rows:
+                posted = _as_ist(at)
+                seen = _as_ist(seen_at)
+                if not posted or not seen:
+                    continue
+                minutes = (seen - posted).total_seconds() / 60.0
+                # ---- A BACKFILL IS NOT A LAG. ----
+                # The bot was off on 28 August; when it came back it
+                # stored 227 messages posted the day before. Measured
+                # naively that reads as a 1,440-minute delay and fires
+                # a warning about a feed that is working perfectly.
+                #
+                # A poll delay cannot cross a date and cannot outlast
+                # a couple of hours -- the loop runs every 90 seconds.
+                # Anything else is catching up, and counting it would
+                # make the median meaningless on exactly the mornings
+                # it matters.
+                if minutes < 0 or minutes > CATCH_UP_MINUTES:
+                    continue
+                if posted.date() != seen.date():
+                    continue
+                lags.append(minutes)
+                if worst is None or minutes > worst[0]:
+                    worst = (minutes, channel)
+            if not lags:
+                return
+            lags.sort()
+            middle = lags[len(lags) // 2]
+            self._lags.extend(lags)
+            if worst and worst[0] >= SLOW_FEED_WARN_MINUTES:
+                warn(f"[TELEGRAM] {worst[1]} was {worst[0]:.0f} minutes "
+                     f"behind -- posted before the bot could see it. "
+                     f"This pass: {middle:.1f} min median over "
+                     f"{len(lags)} message(s).")
+            else:
+                diagnostic(f"[TELEGRAM] lag {middle:.1f} min median over "
+                           f"{len(lags)} new message(s).")
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[TELEGRAM] could not measure lag ({exc}).")
+
+    def lag_summary(self):
+        """Posted-to-stored lag for the session. {} until something
+        has arrived. Read by the close-of-session score."""
+        got = sorted(self._lags)
+        if not got:
+            return {}
+        return {"messages": len(got),
+                "median_min": round(got[len(got) // 2], 1),
+                "p90_min": round(got[int(len(got) * 0.9)], 1),
+                "worst_min": round(got[-1], 1)}
 
     # Only these are held back to the slow pass. Everything else --
     # including a channel nobody has classified yet -- is read on the
@@ -1237,6 +1359,46 @@ class TelegramFeed:
     # reading it too rarely costs a trade. So the slow list is the
     # SHORT, EXPLICIT one, and the fast loop takes everything else.
     SLOW_KINDS = ("results", "episodic")
+
+    def _next_limit(self):
+        """How many messages to ask each channel for on this pass.
+
+        ---- NOTHING COLLECTS WHILE THE MARKET IS SHUT. 29 Aug 2026 ----
+
+            "in telegram last i saw one info at 21:29"    -- operator
+
+        The store's last row that evening was 18:09. main.py exits on a
+        non-trading day -- "Nothing to do -- exiting" -- and the
+        collector goes with it, so everything posted between Friday
+        evening and Monday morning arrives only when the next session
+        starts and the first pass reaches back for it.
+
+        Thirty was not far enough to reach. Counted on the store,
+        between a Friday 18:00 and the Monday 09:15 after it:
+
+            14-17 August   Earnings Pulse   42 messages
+            21-24 August   Earnings Pulse    1
+
+        Forty-two against a limit of thirty means the twelve OLDEST --
+        Friday evening's, the ones that decide Monday's gaps -- were
+        the ones dropped.
+
+        So the first pass of a process asks for FIRST_PASS_LIMIT and
+        every pass after it goes back to the ordinary number, because
+        nothing posted since the last pass can be more than ninety
+        seconds old. Same shape as the announcement watcher's deep
+        first pass, and for the same reason.
+
+        t.me/s/ decides how much it will actually return; asking for
+        more is not a promise of getting it.
+        """
+        if self._first_pass_done:
+            return DEFAULT_LIMIT
+        self._first_pass_done = True
+        decision(f"[TELEGRAM] First pass of this run -- asking each channel "
+                 f"for {FIRST_PASS_LIMIT} messages to cover the time the "
+                 f"collector was not running.")
+        return FIRST_PASS_LIMIT
 
     def _channels_for(self, fast=None):
         """Channels in poll order. All of them unless `fast` is True.
@@ -1333,7 +1495,7 @@ class TelegramFeed:
             # before the second one rather than doubling up at startup.
             while not self._stop.wait(seconds):
                 try:
-                    self.poll(fast=fast)
+                    self.poll(fast=fast, limit=self._next_limit())
                 except Exception as exc:                   # noqa: BLE001
                     warn(f"[TELEGRAM] {label} poll cycle failed ({exc}) -- "
                          f"keeping what is already held, retrying in "

@@ -165,3 +165,129 @@ def test_the_full_pass_is_never_faster_than_the_daily_one(feed, monkeypatch):
     feed.start(every_seconds=POLL_SECONDS)
     feed.stop()
     assert seconds == [POLL_SECONDS, SLOW_POLL_SECONDS]
+
+
+# ------------------------------------------------- and it says how late
+
+def _store_message(feed, channel, posted, seen):
+    """One row, straight in -- the shapes the store actually holds."""
+    import sqlite3
+    conn = sqlite3.connect(feed.db_path)
+    conn.execute(
+        "INSERT OR IGNORE INTO messages (channel, message_id, at, text,"
+        " symbols, seen_at) VALUES (?,?,?,?,?,?)",
+        (channel, f"{channel}-{posted}", posted, "x", "", seen))
+    conn.commit()
+    conn.close()
+
+
+def test_it_reports_how_late_the_messages_were(feed):
+    """It knew and never said.
+
+    Every row carries `at` and `seen_at`, and core/feed_clock.py's own
+    note calls the difference pure collection lag. Nothing read it --
+    the 5.7-minute median that split this poller in two was measured
+    by hand, off the store, weeks after the fact.
+    """
+    from datetime import datetime
+
+    _store_message(feed, "OrderBook Pulse",
+                   "2026-08-31T04:00:00+00:00", "2026-08-31T09:33:00")
+    _store_message(feed, "News Pulse",
+                   "2026-08-31T04:10:00+00:00", "2026-08-31T09:45:00")
+    feed._lags = []
+    feed._report_lag(datetime(2026, 8, 31, 9, 0))
+    got = feed.lag_summary()
+    assert got["messages"] == 2
+    assert 3.0 <= got["median_min"] <= 6.0, got
+
+
+def test_a_backfill_is_not_reported_as_a_lag(feed):
+    """The bot was off on 28 August and stored 227 messages from the
+    day before when it came back. Measured naively that is a
+    1,440-minute delay and a warning about a feed that is fine."""
+    from datetime import datetime
+
+    _store_message(feed, "Day Trader Telugu",
+                   "2026-08-30T04:00:00+00:00", "2026-08-31T09:33:00")
+    feed._lags = []
+    feed._report_lag(datetime(2026, 8, 31, 9, 0))
+    assert feed.lag_summary() == {}, "a catch-up was counted as lateness"
+
+
+def test_a_clock_that_runs_backwards_is_ignored(feed):
+    from datetime import datetime
+
+    _store_message(feed, "News Pulse",
+                   "2026-08-31T10:00:00+00:00", "2026-08-31T09:33:00")
+    feed._lags = []
+    feed._report_lag(datetime(2026, 8, 31, 9, 0))
+    assert feed.lag_summary() == {}
+
+
+def test_the_two_stamps_are_read_on_the_same_clock(feed):
+    """`at` carries a UTC offset and `seen_at` does not. Comparing them
+    raw reports every message as five and a half hours late."""
+    from datetime import datetime
+
+    _store_message(feed, "OrderBook Pulse",
+                   "2026-08-31T04:00:00+00:00", "2026-08-31T09:32:00")
+    feed._lags = []
+    feed._report_lag(datetime(2026, 8, 31, 9, 0))
+    got = feed.lag_summary()
+    assert got["median_min"] < 60, (
+        f"the offset was not applied: {got}")
+
+
+def test_no_summary_before_anything_arrives(feed):
+    feed._lags = []
+    assert feed.lag_summary() == {}
+
+
+# ------------------------------- reaching back over the shut market
+
+def test_the_first_pass_asks_for_more_than_the_rest(feed):
+    """Nothing collects while the market is shut.
+
+    main.py exits on a non-trading day -- "Nothing to do -- exiting" --
+    and the collector goes with it. He noticed: the store's last row
+    one Saturday evening was 18:09 and he had seen a message at 21:29.
+
+    Everything posted between then and Monday's open arrives only when
+    the next session starts and the first pass reaches back for it.
+    Thirty was not far enough: over 14-17 August, Earnings Pulse posted
+    42 messages in that window, so the twelve OLDEST -- Friday
+    evening's, the ones that decide Monday's gaps -- were dropped.
+    """
+    from core.telegram_feed import DEFAULT_LIMIT, FIRST_PASS_LIMIT
+
+    assert FIRST_PASS_LIMIT > DEFAULT_LIMIT
+    assert feed._next_limit() == FIRST_PASS_LIMIT
+    assert feed._next_limit() == DEFAULT_LIMIT
+    assert feed._next_limit() == DEFAULT_LIMIT
+
+
+def test_the_deep_ask_covers_a_weekend_of_the_busiest_channel(feed):
+    """42 was the most any channel posted over a Friday-to-Monday gap
+    in the store. The first ask has to clear that with room."""
+    from core.telegram_feed import FIRST_PASS_LIMIT
+
+    assert FIRST_PASS_LIMIT >= 60, (
+        "a first pass that cannot cover a weekend loses Friday evening")
+
+
+def test_the_poller_uses_the_deep_ask_on_its_first_cycle(feed, monkeypatch):
+    """The limit has to reach poll(), not just exist."""
+    asked = []
+    monkeypatch.setattr(feed, "poll",
+                        lambda **kw: asked.append(kw.get("limit")) or 0)
+    feed.start(every_seconds=0.05)
+    import time
+    time.sleep(0.35)
+    feed.stop()
+    assert asked, "the poller never ran"
+    from core.telegram_feed import DEFAULT_LIMIT, FIRST_PASS_LIMIT
+    assert FIRST_PASS_LIMIT in asked, asked
+    assert asked.count(FIRST_PASS_LIMIT) == 1, (
+        f"the deep ask repeated: {asked}")
+    assert DEFAULT_LIMIT in asked, asked
