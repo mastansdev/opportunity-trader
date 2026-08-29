@@ -33,6 +33,23 @@ import core.engine as engine_module
 from core.engine import Engine, LONG
 
 
+# ---- THIS FILE TESTS THE FLAT 2.5%. 29 August 2026. ----
+#
+# config.FIXED_STOP_PCT = 2.0 returns before _hard_stop_pct() reads
+# anything, so the entry stop is 2.0% on the live path now. He chose
+# that after 2.0 x daily ATR was measured flat against its own 6%
+# ceiling for 81 of 101 event trades.
+#
+# The rule below is not deleted and the dial is one line to reverse,
+# so it is pinned off here and keeps being proved. The SAFETY half of
+# this file -- that a near-zero ATR can never produce a hair-thin
+# stop -- is asserted under the LIVE dial too, in
+# tests/test_one_width_and_he_picked_it.py.
+@pytest.fixture(autouse=True)
+def _flat_stop(monkeypatch):
+    monkeypatch.setattr(engine_module, "FIXED_STOP_PCT", None)
+
+
 def _t(hour, minute, second=0):
     return datetime(2026, 7, 29, hour, minute, second)
 

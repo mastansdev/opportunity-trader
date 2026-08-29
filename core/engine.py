@@ -72,7 +72,7 @@ from config import (
     ENABLE_MARKET_REGIME_GATE,
     MTF_MARGIN_PER_POSITION_RS,
     ATR_STOP_MULTIPLIER, ATR_TRAIL_MULTIPLIER, ATR_TRAIL_ACTIVATION_MULT,
-    MIN_STOP_DISTANCE_PCT, MAX_NOTIONAL_PER_TRADE_RS,
+    MIN_STOP_DISTANCE_PCT, MAX_NOTIONAL_PER_TRADE_RS, FIXED_STOP_PCT,
     MIN_TRADABLE_PRICE_RS, EARNINGS_CALENDAR,
     ENABLE_PARTIAL_EXIT, PARTIAL_EXIT_ATR_MULTIPLE, PARTIAL_EXIT_FRACTION,
     PARTIAL_EXIT_MIN_PCT,
@@ -2398,6 +2398,14 @@ class Engine:
         be measured. A stop derived from a volatility nobody measured
         is worse than an honestly flat one.
         """
+        # ---- ONE WIDTH, AND HE PICKED IT. 29 August 2026. ----
+        # Above the VOLATILITY_SCALED_STOP branch on purpose: on the
+        # event setups this bot now trades, 2.0 x daily ATR cleared
+        # the 6% ceiling for 81 of 101 names, so the scaling was
+        # already flat. See config.FIXED_STOP_PCT for the measurement.
+        # None there restores the ATR rule and this returns nothing.
+        if FIXED_STOP_PCT:
+            return float(FIXED_STOP_PCT) / 100.0
         if not VOLATILITY_SCALED_STOP:
             return HARD_STOP_FROM_ENTRY_PCT
         try:

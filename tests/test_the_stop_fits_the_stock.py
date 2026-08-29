@@ -78,6 +78,22 @@ def _clean():
     atr.reset_daily_cache()
 
 
+# ---- THE SCALING IS OFF THE LIVE PATH NOW. 29 August 2026. ----
+#
+# config.FIXED_STOP_PCT = 2.0 returns before _hard_stop_pct() ever
+# reaches the ATR store: on this bot's event setups 2.0 x daily ATR
+# cleared the 6% ceiling for 81 of 101 trades, so the width he was
+# promised was not varying anyway and he chose one number.
+#
+# VOLATILITY_SCALED_STOP is unchanged and still correct -- this file
+# is what proves it, and it must keep proving it, because the dial
+# above is one line to reverse. Pinned off here for that reason.
+@pytest.fixture(autouse=True)
+def _scaled_stop(monkeypatch):
+    from core import engine as engine_module
+    monkeypatch.setattr(engine_module, "FIXED_STOP_PCT", None)
+
+
 def _engine():
     """An Engine shell -- _hard_stop_pct touches no other state."""
     return Engine.__new__(Engine)

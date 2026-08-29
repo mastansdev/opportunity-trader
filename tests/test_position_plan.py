@@ -27,8 +27,28 @@ Author : H&M Opportunity Trader
 ==========================================================
 """
 
+import pytest
+
+from core import position_plan
 from core.position_plan import (MAX_STOP_DISTANCE_PCT, MIN_STOP_DISTANCE_PCT,
                                 RISK_PER_TRADE_RS, plan, stop_for)
+
+
+# ---- THIS FILE TESTS THE STRUCTURAL STOP. 29 August 2026. ----
+#
+# config.FIXED_STOP_PCT = 2.0 now overrides it on the live path: he
+# chose one width for every stock after the ATR scaling was measured
+# flat (81 of 101 event trades pinned to the 6% ceiling). See
+# tests/test_one_width_and_he_picked_it.py for the live behaviour.
+#
+# The structural rule is NOT deleted -- FIXED_STOP_PCT = None brings
+# it straight back, and every guarantee below is what it must still
+# give when it does. So the dial is pinned off here rather than
+# these tests being rewritten to the new number, which would have
+# thrown away the guarantees instead of keeping them.
+@pytest.fixture(autouse=True)
+def _structural_stop(monkeypatch):
+    monkeypatch.setattr(position_plan, "FIXED_STOP_PCT", None)
 
 
 # ---------------------------------------------------------------

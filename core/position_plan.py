@@ -71,6 +71,11 @@ from core.rules import (
     MAX_STOP_DISTANCE_PCT,      # further than this and the loss is not small
     MIN_REWARD_MULTIPLE,        # target must be worth twice the risk
 )
+# The one width, when he has set one. config, not rules: it is a dial
+# he changes, not a rule the book is built on. core/engine.py reads
+# the same name for the position it manages -- if these two disagree,
+# the alert and the trade disagree.
+from config import FIXED_STOP_PCT
 
 
 def _num(value):
@@ -134,14 +139,31 @@ def plan(entry, side, day_low=None, day_high=None, atr=None,
     budget_rs = (MTF_MARGIN_PER_POSITION_RS if budget_rs is None
                  else float(budget_rs))
 
-    stop = stop_for(entry, side, day_low, day_high, atr)
-    if stop is None:
-        # SAY SO. An invented stop is worse than none, because it will
-        # be believed and it will be wrong at the worst moment.
-        return {"ok": False, "why": "no level to stop behind yet"}
+    # ---- ONE WIDTH, AND HE PICKED IT. 29 August 2026. ----
+    #
+    # A fixed width has no level to sit too close to, so the
+    # structural stop, the widening below and the "no level to stop
+    # behind yet" refusal all belong to the ATR-scaled rule and are
+    # skipped whole. That refusal was the RAILTEL filter of 19
+    # August; a fixed width cannot reproduce it.
+    #
+    # The MIN/MAX bounds below still run and still apply -- 2.0%
+    # passes both -- so a badly chosen FIXED_STOP_PCT is caught by
+    # the same guards as everything else. See config.FIXED_STOP_PCT.
+    if FIXED_STOP_PCT:
+        stop_pct = float(FIXED_STOP_PCT)
+        distance = entry * stop_pct / 100.0
+        stop = round(entry - distance if side == "BUY"
+                     else entry + distance, 2)
+    else:
+        stop = stop_for(entry, side, day_low, day_high, atr)
+        if stop is None:
+            # SAY SO. An invented stop is worse than none, because it
+            # will be believed and it will be wrong at the worst moment.
+            return {"ok": False, "why": "no level to stop behind yet"}
 
-    distance = abs(entry - stop)
-    stop_pct = distance / entry * 100.0
+        distance = abs(entry - stop)
+        stop_pct = distance / entry * 100.0
 
     # ---- A BAD STOP LEVEL IS NOT A BAD TRADE. 19 August 2026. ----
     #

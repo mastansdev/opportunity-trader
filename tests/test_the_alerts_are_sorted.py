@@ -53,8 +53,22 @@ import pathlib
 
 import pytest
 
+from core import position_plan
 from core.position_plan import plan
 from core.rules import MAX_STOP_DISTANCE_PCT, MIN_STOP_DISTANCE_PCT
+
+
+# ---- THE WIDENING BELONGS TO THE STRUCTURAL STOP. 29 Aug 2026. ----
+#
+# The RAILTEL case here is about a day-low stop sitting 0.10% below
+# entry and being widened rather than refused. config.FIXED_STOP_PCT
+# = 2.0 removes the whole question on the live path -- a fixed width
+# has no level to sit too close to -- so the dial is pinned off to
+# keep testing the rule this file was written for. The live
+# behaviour is covered by tests/test_one_width_and_he_picked_it.py.
+@pytest.fixture(autouse=True)
+def _structural_stop(monkeypatch):
+    monkeypatch.setattr(position_plan, "FIXED_STOP_PCT", None)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 

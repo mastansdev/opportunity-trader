@@ -1244,6 +1244,46 @@ ATR_TRAIL_ACTIVATION_MULT = 1.0
 # the stop and left 8 trades out of 1,957 still open at the bell.
 MIN_STOP_DISTANCE_PCT = 0.01
 
+# ---- THE SCALING STOPPED SCALING. 29 August 2026. ----
+#
+#     "do not fix the 2.5% for every stock"
+#                                 -- operator, 18 August 2026
+#
+# VOLATILITY_SCALED_STOP was built to answer exactly that, and on
+# the stocks this bot now trades it does not scale. Measured over
+# the 101 qualified event trades of 18-29 August:
+#
+#     2.0 x daily ATR, bounded [0.75%, 6.0%]
+#     -> median 6.0%, and 81 of 101 sit ON the ceiling
+#
+# These are 3.9%-ATR names by the nature of the setup -- a stock is
+# only here because it moved 3%+ on volume with an event behind it
+# -- so twice the daily range clears 6% almost every time and the
+# cap flattens it. His instruction was already not being honoured;
+# the live choice was never scaled-vs-fixed, it was WHICH fixed
+# number, and 6% was chosen by a ceiling rather than by measurement.
+#
+# Same 101 trades, qty = RISK_PER_TRADE_RS / stop distance, held to
+# the close, slippage charged on entry AND on the stop fill:
+#
+#                    no slip     0.2%      0.3%      0.5%   stopped
+#     6% (live)     +15,955   +10,655    +8,004    +2,704     2/101
+#     3.0% fixed    +32,685   +21,323   +15,642    +4,281    14/101
+#     2.5% fixed    +38,559   +24,078   +16,838    +2,357    21/101
+#     2.0% fixed    +53,994   +34,986   +25,482    +6,474    27/101
+#
+# 2.0% wins at every slippage level, and the tighter stop is what
+# buys the size: Rs 24,930 a position becomes Rs 74,812, so five
+# seats go from Rs 1.25 lakh to Rs 3.74 lakh of Rs 4.31 lakh.
+#
+# HE CHOSE THIS KNOWING THE COST. 27 stops instead of 2, and the
+# bot no longer adapts the width to the stock. Set to None to fall
+# straight back to the ATR-scaled rule -- nothing else changes.
+#
+# Read by core/engine.py _hard_stop_pct() and core/position_plan.py
+# plan(). Both, or the alert and the position disagree.
+FIXED_STOP_PCT = 2.0
+
 # Hard ceiling on notional exposure (qty * entry_price) for any ONE
 # trade, regardless of what the risk/ATR formula computes. Backstop
 # for the SAME failure mode from the other side -- even with the
