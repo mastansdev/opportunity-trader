@@ -1745,7 +1745,9 @@ class TelegramFeed:
                              f"old -- stopping, nothing older is kept")
                     break
 
-                added = self._store(channel, messages)
+                # skip_known=False: this walk exists to fill holes,
+                # and a hole sits BELOW the newest id we hold.
+                added = self._store(channel, messages, skip_known=False)
                 recovered += added
                 # SAY SOMETHING WHILE IT WORKS, 1 August 2026.
                 #
@@ -1884,11 +1886,63 @@ class TelegramFeed:
                  f"were graded. Run  py tools/ai_check.py  to see why.")
         return result.get("graded", 0)
 
-    def _store(self, channel, messages):
+    def _store(self, channel, messages, skip_known=True):
         name = channel.get("name") or channel["handle"]
+
+        # ---- RE-READING WHAT WE ALREADY HAVE. 29 August 2026. ----
+        #
+        #     "the bot is doing over than asked to do in this telegram
+        #      data getting by re running multiple same info"
+        #                                       -- operator
+        #
+        # He is right. Every 90 seconds each channel is asked for its
+        # last DEFAULT_LIMIT messages, and typically none to two of
+        # them are new. The rows were never duplicated -- the insert is
+        # OR IGNORE and the primary key is (channel, message_id) -- but
+        # everything BEFORE the insert ran on all thirty, every pass:
+        # hashtag matching, symbols_in() over the text, and the event
+        # extraction underneath it.
+        #
+        # The watermark already holds what is needed to stop that. A
+        # post id at or below the newest one on file is a post we have
+        # read, so it is skipped before any of that work happens.
+        #
+        # NOT FOR catch_up(), and the reason is a hole in the middle.
+        # I first reasoned that a gap is always NEWER than what we
+        # hold, so the floor was safe everywhere. It is not.
+        # tests/test_telegram_catchup.py caught it in one run:
+        #
+        #     "49 posts inside the range were never recovered --
+        #      a stop-on-first-overlap rule cannot fill a hole"
+        #     "630 posts from the weekend were lost"
+        #
+        # Hold 1000-1050 from before a stop and 1100-1150 from after
+        # the restart, and the newest id is 1150 -- so a floor of 1150
+        # skips the entire 1051-1099 hole, which is precisely what
+        # catch_up() exists to fill. skip_known=False there.
+        #
+        # The floor is taken once, at the top of this call, so a row
+        # stored earlier in a page cannot raise the bar on the rest of
+        # its own page. Non-numeric ids, or an empty store, mean no
+        # floor and the old behaviour: skipping is an optimisation,
+        # never a requirement.
+        floor = self._newest_stored_id(name) if skip_known else None
+
         rows = []
         filed = []
+        fresh = []
+        skipped = 0
         for message in messages:
+            if floor is not None:
+                try:
+                    post_id = int(message.get("id")
+                                  or message.get("message_id"))
+                except (TypeError, ValueError):
+                    post_id = None
+                if post_id is not None and post_id <= floor:
+                    skipped += 1
+                    continue
+            fresh.append(message)
             text = (message.get("text") or "").strip()
             photos = message.get("photos") or []
             # A post with NO text but a photo is the entire content of
@@ -1961,8 +2015,16 @@ class TelegramFeed:
                           # to walk it in. None everywhere else.
                           "word_boxes": self._ocr_boxes.get(
                               message.get("url"))})
+        if skipped:
+            diagnostic(f"[TELEGRAM] {name}: {skipped} message(s) already on "
+                       f"file, skipped before parsing.")
+        # ---- ONLY THE NEW ONES. 29 August 2026. ----
+        # This took `messages`, so news_impact.record() ran for every
+        # post on the page every 90 seconds -- a database round trip
+        # each, for stories filed hours ago. The floor above already
+        # decided which are new; this is the same decision, honoured.
         if self.news_impact is not None:
-            self._remember_impact(name, messages)
+            self._remember_impact(name, fresh)
         self._file_events(filed)
         if not rows:
             return 0

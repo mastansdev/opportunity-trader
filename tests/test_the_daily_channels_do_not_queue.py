@@ -291,3 +291,110 @@ def test_the_poller_uses_the_deep_ask_on_its_first_cycle(feed, monkeypatch):
     assert asked.count(FIRST_PASS_LIMIT) == 1, (
         f"the deep ask repeated: {asked}")
     assert DEFAULT_LIMIT in asked, asked
+
+
+# ------------------------------- not re-reading what is already held
+
+class _Impact:
+    def __init__(self):
+        self.seen = []
+
+    def record(self, **kw):
+        self.seen.append(kw.get("headline"))
+
+
+def _msg(post_id, text, at="2026-08-31T04:00:00+00:00"):
+    return {"id": str(post_id), "text": text, "at": at}
+
+
+def test_a_post_already_on_file_is_skipped_before_any_parsing(feed):
+    """His words: "the bot is doing over than asked to do in this
+    telegram data getting by re running multiple same info".
+
+    Rows were never duplicated -- the insert is OR IGNORE on
+    (channel, message_id). But everything BEFORE the insert ran on all
+    thirty messages every ninety seconds: hashtag matching,
+    symbols_in() over the text, and a news_impact database round trip
+    for each.
+    """
+    channel = {"name": "OrderBook Pulse", "handle": "orders_pulse"}
+    impact = _Impact()
+    feed.news_impact = impact
+
+    first = [_msg(100, "GOLDIAM INTERNATIONAL: CO WINS EXPORT ORDER RS 50 CR")]
+    assert feed._store(channel, first) == 1
+    assert len(impact.seen) == 1
+
+    # the very next pass sees the same post again
+    impact.seen.clear()
+    assert feed._store(channel, first) == 0
+    assert impact.seen == [], "the story was filed a second time"
+
+
+def test_a_newer_post_is_still_stored(feed):
+    channel = {"name": "OrderBook Pulse", "handle": "orders_pulse"}
+    feed._store(channel, [_msg(100, "an older story, long enough to count")])
+    assert feed._store(
+        channel, [_msg(101, "HCC secures Rs 524 crore NHPC contract")]) == 1
+
+
+def test_the_floor_does_not_block_a_catch_up(feed):
+    """A gap NEWER than what we hold is stored either way."""
+    channel = {"name": "OrderBook Pulse", "handle": "orders_pulse"}
+    feed._store(channel, [_msg(100, "what we had when the bot stopped")])
+    gap = [_msg(103, "posted while the collector was down, three"),
+           _msg(102, "posted while the collector was down, two"),
+           _msg(101, "posted while the collector was down, one")]
+    assert feed._store(channel, gap) == 3
+
+
+def test_a_hole_in_the_middle_is_still_fillable(feed):
+    """The case I got WRONG, and the one that matters.
+
+    I reasoned that a gap is always newer than what we hold, so the id
+    floor was safe everywhere. It is not.
+    tests/test_telegram_catchup.py caught it in one run -- "49 posts
+    inside the range were never recovered", "630 posts from the
+    weekend were lost".
+
+    Hold 1000-1050 from before a stop and 1100-1150 from after the
+    restart: the newest id is 1150, so a floor of 1150 skips the whole
+    1051-1099 hole -- which is exactly what catch_up() exists to fill.
+
+    So catch_up passes skip_known=False, and the live poll keeps the
+    floor. This is the test my own first version did not have.
+    """
+    channel = {"name": "OrderBook Pulse", "handle": "orders_pulse"}
+    feed._store(channel, [_msg(100, "before the bot stopped, long enough")])
+    feed._store(channel, [_msg(150, "after the restart, also long enough")])
+
+    hole = [_msg(120, "inside the hole, posted while it was down")]
+    # the live poll skips it -- id is under the newest we hold
+    assert feed._store(channel, hole) == 0
+    # the catch-up walk must not
+    assert feed._store(channel, hole, skip_known=False) == 1
+
+
+def test_the_floor_is_taken_once_per_page(feed):
+    """A row stored earlier in a page must not raise the bar on the
+    rest of that same page."""
+    channel = {"name": "OrderBook Pulse", "handle": "orders_pulse"}
+    feed._store(channel, [_msg(100, "the newest thing already on file")])
+    page = [_msg(105, "newest of the batch, plenty of words here"),
+            _msg(104, "middle of the batch, plenty of words here"),
+            _msg(103, "oldest of the batch, plenty of words here")]
+    assert feed._store(channel, page) == 3
+
+
+def test_an_unreadable_post_id_is_not_skipped(feed):
+    """Skipping is an optimisation, never a requirement. A channel
+    whose ids are not numbers keeps the old behaviour."""
+    channel = {"name": "OrderBook Pulse", "handle": "orders_pulse"}
+    feed._store(channel, [_msg(100, "something already on file here")])
+    assert feed._store(
+        channel, [_msg("abc-xyz", "a post whose id is not a number")]) == 1
+
+
+def test_an_empty_store_has_no_floor(feed):
+    channel = {"name": "News Pulse", "handle": "news_pulse_ai"}
+    assert feed._store(channel, [_msg(7, "the first thing ever seen here")]) == 1
