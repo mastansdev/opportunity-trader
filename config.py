@@ -1282,7 +1282,24 @@ MIN_STOP_DISTANCE_PCT = 0.01
 #
 # Read by core/engine.py _hard_stop_pct() and core/position_plan.py
 # plan(). Both, or the alert and the position disagree.
-FIXED_STOP_PCT = 2.0
+# ---- REVERTED 29 August 2026, THE SAME DAY IT WENT IN. ----
+#
+# The 2.0% above was chosen on 18-27 August and measured on 18-27
+# August. Run against 3-17 August -- eleven sessions it had never
+# seen -- it is WORSE than the rule it replaced:
+#
+#                            18-27 Aug (fitted)   3-17 Aug (unseen)
+#     2.0% fixed                    +Rs 18,972         -Rs 48,722
+#     2.0 x daily ATR, cap 6%       +Rs  4,480         -Rs 28,623
+#
+# The whole advantage was fitted. Both rules lose out of sample,
+# which is its own finding and a larger one -- but a live dial must
+# not sit on the worse of the two on the strength of the window it
+# was tuned to.
+#
+# None restores VOLATILITY_SCALED_STOP untouched. Put a number here
+# only after it holds on sessions it was not chosen on.
+FIXED_STOP_PCT = None
 
 # Hard ceiling on notional exposure (qty * entry_price) for any ONE
 # trade, regardless of what the risk/ATR formula computes. Backstop
