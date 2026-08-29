@@ -62,6 +62,8 @@ Author : H&M Opportunity Trader
 import json
 import os
 import re
+
+from config import DEDUPE_EVENTS
 import sqlite3
 import threading
 from datetime import datetime, timedelta
@@ -2330,6 +2332,44 @@ class StockEvents:
         """
         if kind not in USEFUL_KINDS:
             return False
+
+        # ---- THE SAME EVENT ON TWO CHANNELS. 29 August 2026. ----
+        #
+        #     "Duplicates of data is not acceptable at all & if it
+        #      still do this is riducolus"          -- operator
+        #
+        # The unique index is (symbol, at, kind, headline), so the same
+        # story posted by two channels two minutes apart inserts twice
+        # -- different `at`, different wording, same event:
+        #
+        #     10:53 RedboxGlobal    ACUTAAS CHEMICALS: APPROVAL RECEIVED
+        #     10:55 Day Trader      ACUTAAS CHEMICALS: APPROVAL RECEIVED
+        #     14:46 Day Trader      #HCC bags $524 cr HNHPC contract
+        #     14:51 OrderBook       HCC secures Rs 524 crore NHPC contract
+        #
+        # TWO ATTEMPTS AT THIS WERE WRONG BEFORE (see below), and both
+        # failed the same way -- a key that did not identify one story.
+        # A bulk tool offered to delete "INDIA-EU FTA WILL BE A GAME
+        # CHANGER" as a duplicate of a solar story.
+        #
+        # So this matches on the story ITSELF, inside one symbol, one
+        # day and one kind:
+        #
+        #   the normalised headline is identical  -- 101 rows of 13,103
+        #   or the same rupee AMOUNT appears      -- 164 rows
+        #
+        # Measured on the whole store before shipping. Every group
+        # inspected was one event on two channels; the amount rule is
+        # what catches HCC and SAATVIKGL, where the wording differs but
+        # "524 cr" and "476 cr" do not.
+        #
+        # It cannot reach across symbols or days, which is exactly what
+        # the FTA/solar collapse did. DEDUPE_EVENTS = False disables it
+        # and restores insert-only.
+        if DEDUPE_EVENTS and symbol and self._already_have(symbol, at, kind,
+                                                           headline, value_cr):
+            return False
+
         try:
             with self._lock:
                 conn = sqlite3.connect(self.db_path)
@@ -2350,6 +2390,53 @@ class StockEvents:
             return bool(added)
         except sqlite3.Error as exc:
             diagnostic(f"[EVENTS] write failed: {exc}")
+            return False
+
+    @staticmethod
+    def _same_headline_key(headline):
+        """The headline stripped to the words that identify the story.
+
+        Leading #TICKER, case and punctuation all differ between
+        channels reposting the same line; none of them change what
+        happened.
+        """
+        text = re.sub(r"^#\S+\s*", "", str(headline or ""))
+        text = re.sub(r"[^a-z0-9]+", " ", text.lower())
+        return " ".join(text.split())
+
+    def _already_have(self, symbol, at, kind, headline, value_cr=None):
+        """Is this story already stored for this stock, today, as this
+        kind? See remember() for the measurement behind the two rules.
+
+        Fail-open: any error here means the event is stored. A missing
+        event costs a trade; a duplicate costs a row.
+        """
+        try:
+            day = str(at or "")[:10]
+            if not day:
+                return False
+            key = self._same_headline_key(headline)
+            amounts = set(self._amounts(headline))
+            if value_cr:
+                amounts.add(round(float(value_cr), 2))
+            if not key and not amounts:
+                return False
+            rows = self._query(
+                "SELECT headline, value_cr FROM events "
+                "WHERE symbol = ? AND kind = ? AND substr(at,1,10) = ?",
+                (str(symbol).upper(), kind, day))
+            for row in rows:
+                if key and self._same_headline_key(row.get("headline")) == key:
+                    return True
+                if amounts:
+                    theirs = set(self._amounts(row.get("headline")))
+                    if row.get("value_cr"):
+                        theirs.add(round(float(row["value_cr"]), 2))
+                    if amounts & theirs:
+                        return True
+            return False
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[EVENTS] duplicate check failed ({exc}); storing it.")
             return False
 
     def _query(self, sql, params=()):

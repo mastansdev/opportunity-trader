@@ -1506,6 +1506,24 @@ TARGET_REWARD_BY_REGIME = {}
 # (tests/test_the_stop_fits_the_stock.py, tests/test_engine.py).
 STOP_FROM_RISK_AND_SIZE = True
 
+
+# ---- ONE EVENT, ONE ROW. 29 August 2026. ----
+#
+#     "Duplicates of data is not acceptable at all & if it still do
+#      this is riducolus"                          -- operator
+#
+# core/stock_events.remember() refuses a story it already holds for
+# the same stock, the same day and the same kind -- matched either on
+# the normalised headline or on the rupee amount inside it. Measured
+# on the whole 13,103-row store first: 101 rows by headline, 164 by
+# amount, and every group inspected was one event posted by two
+# channels minutes apart.
+#
+# False restores insert-only, which is what it was from 1 August after
+# two earlier dedupe attempts were reverted for swallowing real
+# events. Read remember()'s note before changing this.
+DEDUPE_EVENTS = True
+
 # shows -- so the bot asks Dhan rather than guessing, and self-corrects
 # when Dhan changes a stock's rate or drops it from the MTF list.
 #
