@@ -105,7 +105,38 @@ ABSOLUTE_MAX_POSITIONS = 25
 # with cash, as he asked, and it cannot reach eleven while the selector
 # is unproven. Raise it as the hit rate earns it -- that is a decision
 # with evidence behind it, not a constant I picked.
-WORKING_MAX_POSITIONS = 5
+#
+# ---- RAISED TO EIGHT. 29 August 2026. ----
+#
+#     "i want bot to utilise the capital to max & book the profits"
+#                                              -- operator
+#
+# His real Dhan balance read Rs 246,592.89 at startup, so the cash
+# supports exactly eight positions at OWN_CASH_PER_POSITION_RS. At
+# five, Rs 96,593 sat idle every session -- the same "Rs 3.4 lakh sits
+# idle" complaint the note above was written for, one number down.
+#
+# WHAT THIS DOES NOT CHANGE IS THE DOWNSIDE, and that is why it is
+# safe to do while the selector is still unproven:
+#
+#     seats   own cash used   left free   worst-case day
+#         5         150,000      96,593         -12,000
+#         6         180,000      66,593         -12,000
+#         7         210,000      36,593         -12,000
+#         8         240,000       6,593         -12,000
+#
+# config.DAILY_MAX_LOSS_RS halts the session at Rs 12,000 whatever the
+# seat count, so eight seats cannot lose more in a day than five can.
+# It buys more OPPORTUNITIES at the same risk, which is exactly what
+# the 8 August measurement said NOT to do -- but that measurement
+# multiplied a losing edge with no daily halt in front of it, and the
+# halt is what makes this a different question.
+#
+# THE ONE COST, SAID PLAINLY: eight seats leave Rs 6,593 free. MTF
+# margin is re-quoted per stock and can move intraday, so a shortfall
+# has almost no buffer. Seven seats leave Rs 36,593 and still deploy
+# 85% of the account. He asked for max; seven is one edit away.
+WORKING_MAX_POSITIONS = 8
 
 
 def slots(capital_rs, held=0, floor_rs=None, per_position_rs=None):

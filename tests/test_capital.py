@@ -23,9 +23,15 @@ def test_cash_still_decides_below_the_working_ceiling():
     exists for. Only the reserve is gone.
     """
     from core import capital
-    assert capital.slots(200_000)["total"] == 5
-    assert capital.slots(150_000)["total"] == 5
-    assert capital.slots(120_000)["total"] == 4
+
+    per = capital.OWN_CASH_PER_POSITION_RS
+    cap = capital.WORKING_MAX_POSITIONS
+    # Below the ceiling the CASH decides, and it decides by division.
+    # Derived, not written out, so raising the ceiling (5 -> 8 on
+    # 29 August) does not require editing an arithmetic test.
+    for rupees in (120_000, 150_000, 200_000, 246_593):
+        assert capital.slots(rupees)["total"] == min(
+            int(rupees // per), cap), rupees
     assert capital.slots(20_000)["slots"] == 0, (
         "an account that cannot fund one position must still open none")
 
@@ -39,15 +45,48 @@ def test_the_floor_machinery_still_works_if_he_restores_it():
     assert capital.slots(120_000, floor_rs=100_000)["slots"] == 0
 
 
-def test_the_working_ceiling_holds_the_book_at_five():
-    """Cash says 11 at Rs 4.31 lakh. Measured 3-5 August, 11 seats made
-    33 trades at a 24% hit rate for -Rs 26,018, against 9 trades and
-    -Rs 10,715 at 3 seats. Five is the number that rises with cash --
-    which he asked for -- without multiplying an unproven edge."""
+def test_the_working_ceiling_still_caps_a_big_account():
+    """Cash says 11 at Rs 4.31 lakh; the ceiling holds it lower.
+
+    ---- RAISED FROM FIVE TO EIGHT. 29 August 2026. ----
+    "i want bot to utilise the capital to max & book the profits."
+    His real Dhan balance is Rs 246,592.89, which funds exactly eight
+    positions -- at five, Rs 96,593 sat idle every session.
+
+    The 3-5 August measurement behind the old number stands (11 seats:
+    33 trades, 24% hit rate, -Rs 26,018), but it ran with no daily
+    halt in front of it. config.DAILY_MAX_LOSS_RS stops the session at
+    Rs 12,000 whatever the seat count, so eight seats cannot lose more
+    in a day than five -- they take more opportunities at the same
+    bounded downside.
+
+    Asserted against the constant, not a literal, so the guarantee is
+    "the ceiling binds" rather than "the ceiling is five".
+    """
     from core import capital
     got = capital.slots(431_116)
-    assert got["total"] == capital.WORKING_MAX_POSITIONS == 5
+    assert got["total"] == capital.WORKING_MAX_POSITIONS
     assert got["capped_by_rule"] is True
+    assert capital.WORKING_MAX_POSITIONS < 11, (
+        "the ceiling no longer holds the book below what cash alone allows")
+
+
+def test_the_book_is_bounded_by_the_daily_halt_not_the_seat_count():
+    """Why raising the ceiling did not widen the risk.
+
+    Eight seats at RISK_PER_TRADE_RS is Rs 20,000 of theoretical loss,
+    but the session halts at DAILY_MAX_LOSS_RS long before that. If
+    that halt is ever removed, the seat count becomes the bound and
+    this decision has to be revisited.
+    """
+    import config
+    from core import capital
+    from core.rules import RISK_PER_TRADE_RS
+
+    worst = capital.WORKING_MAX_POSITIONS * RISK_PER_TRADE_RS
+    assert config.DAILY_MAX_LOSS_RS < worst, (
+        "the daily halt no longer binds before the seats do -- the "
+        "seat count is now the real risk limit")
 
 
 def test_a_below_floor_account_gets_no_slots_at_all():
