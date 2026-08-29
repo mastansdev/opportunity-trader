@@ -964,7 +964,7 @@ class DashboardState:
             "alerts": self.build_alerts(),
             "signal_counts": self.build_signal_counts(),
             "premarket": self.build_premarket(),
-            "preopen": self.build_preopen(),
+            "preopen": self._preopen_cached(),
             "calendar": self.build_calendar(),
             "results_today": self.build_results_today(),
             "watchlist": self._safe_watchlist(),
@@ -2959,6 +2959,13 @@ class DashboardState:
                 # three signals -- has never once fired. Computed from
                 # the same closed candles ATR already uses.
                 row["vwap"] = self._vwap_for(row.get("symbol"))
+                # ---- A RUN OF EVENTS, NOT JUST TODAY'S. 29 Aug ----
+                # ATHERENERG had four events across two sessions --
+                # Hero raising its stake twice -- and each was read
+                # alone on the day it arrived. The stock ran +8.9%
+                # from where the bot named it. The rows were all on
+                # file; nothing asked "has this happened before".
+                row["story"] = self._story_for(row.get("symbol"))
                 source = by_symbol.get(row.get("symbol")) or {}
                 mtf = self._mtf_for(row.get("symbol"), source) or {}
                 row["plan"] = position_plan(
@@ -3243,6 +3250,35 @@ class DashboardState:
             return {"available": False, "note": str(exc)}
 
         return {"available": True, "rows": rows}
+
+    def _story_for(self, symbol):
+        """A RUN of events on this stock, or None. Never raises.
+
+        One event is news. Several across days is a situation --
+        somebody buying a company in instalments, an order book
+        filling up -- and the tape has days to react, not minutes.
+        Cached per symbol for the session; the store only gains rows.
+        """
+        if not symbol:
+            return None
+        cache = getattr(self, "_story_cache", None)
+        if cache is None:
+            cache = self._story_cache = {}
+        if symbol in cache:
+            return cache[symbol]
+        got = None
+        try:
+            if getattr(self, "_events_store", None) is None:
+                from core.stock_events import StockEvents
+                self._events_store = StockEvents()
+            got = self._events_store.running_story(symbol, days=7)
+        except Exception:                                  # noqa: BLE001
+            got = None      # a panel must not take the snapshot down
+        # Bounded: a session touches ~1,300 symbols.
+        if len(cache) > 2000:
+            cache.clear()
+        cache[symbol] = got
+        return got
 
     def _vwap_for(self, symbol):
         """This session's VWAP for one symbol, or None. Never raises."""
@@ -4310,6 +4346,47 @@ class DashboardState:
         except Exception as exc:                           # noqa: BLE001
             warn(f"[CALENDAR] Panel build failed: {exc}")
             return None
+
+    def _preopen_cached(self):
+        """The pre-open book, built ONCE per session.
+
+        ---- 8.9 GB OF A FROZEN NUMBER. 29 August 2026 ----
+
+            "i need the bot to be precise & earn not to collection
+             agent"                        -- operator, 29 Aug 2026
+
+        NSE collects orders 09:00-09:08 and matches them 09:08-09:12
+        into one opening price per stock. After 09:12 the exchange
+        publishes NOTHING more: the book is finished.
+
+        build_preopen() was called on every snapshot cycle anyway.
+        Measured on 29 August:
+
+            snapshot payload   1,275,565 bytes
+            preopen            1,065,470 bytes = 84% of it
+            ~8,308 cycles a session -> 8.9 GB re-serialised
+
+        At 14:30 the bot was still rebuilding this morning's opening
+        auction, in full, every 2.6 seconds, for data that could not
+        have changed since 09:12. That is not collecting -- it is
+        re-packaging a finished thing, and it was 84% of every
+        dashboard refresh.
+
+        Rebuilt while the book is still forming (before 09:15), then
+        frozen for the day. Keyed on the DATE so tomorrow builds its
+        own, and a None result is never cached -- an empty answer at
+        09:02 must not become the answer at 11:00.
+        """
+        from datetime import date, datetime
+        today = date.today().isoformat()
+        cache = getattr(self, "_preopen_cache", None)
+        if cache and cache.get("day") == today and cache.get("book") is not None:
+            return cache["book"]
+        book = self.build_preopen()
+        # Only freeze it once the book is closed and real.
+        if book is not None and datetime.now().strftime("%H:%M") >= "09:15":
+            self._preopen_cache = {"day": today, "book": book}
+        return book
 
     def build_preopen(self):
         """NSE's 09:00-09:12 book -- where every stock opens, and the

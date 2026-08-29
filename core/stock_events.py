@@ -2374,6 +2374,290 @@ class StockEvents:
             "SELECT * FROM events WHERE symbol = ? "
             "ORDER BY at DESC, id DESC LIMIT ?", (str(symbol).upper(), limit))
 
+    @staticmethod
+    def _story_key(headline):
+        """The words that identify a story, for comparing two of them.
+
+        Lowercased, punctuation dropped, short words dropped. Numbers
+        are KEPT -- "1,758 cr" is what makes the 28 August Ather story
+        a different story from the "960 cr" one on the 26th, and
+        dropping figures would merge two real events into one.
+        """
+        import re
+        text = re.sub(r"[^a-z0-9 ]", " ", str(headline or "").lower())
+        return frozenset(w for w in text.split() if len(w) > 3)
+
+    @staticmethod
+    def _amounts(headline):
+        """The rupee figures a headline names, normalised.
+
+        ---- THE NUMBER IS THE STORY. 29 August 2026 ----
+
+        Word overlap is the wrong tool on this feed. The same Ather
+        announcement arrived as:
+
+            "To buy additional stake in Ather Energy for 1,758 cr
+             ... phe 4 y NOW IN|"            (OCR'd, noisy)
+            "HERO MOTOCORP: CO TO ACQUIRE ADDITIONAL STAKE ...
+             FOR UP TO 1,758 CRORE"
+
+        Different verbs, different length, OCR rubbish in one -- 4
+        shared words out of 8, which no sensible text threshold calls
+        the same. Yet a human reads them as one announcement instantly,
+        because of 1,758.
+
+        The figure is also what separates the two REAL events: Rs 960cr
+        on the 26th, Rs 1,758cr on the 28th. A text rule that merged
+        those would be worse than counting repeats.
+
+        Returns the set of numbers appearing near cr/crore/lakh, so a
+        percentage or a date does not become a story id.
+        """
+        import re
+        text = str(headline or "").lower().replace(",", "")
+        found = set()
+        for match in re.finditer(
+                r"(\d+(?:\.\d+)?)\s*(cr\b|crore|lakh)", text):
+            try:
+                found.add(round(float(match.group(1)), 1))
+            except ValueError:
+                continue
+        return found
+
+    @classmethod
+    def _same_story(cls, a, b, threshold=0.6, min_shared=4):
+        """Are these two headlines the same news told twice?
+
+        A shared rupee FIGURE settles it -- see _amounts(). Falling
+        back to word containment only when neither names an amount,
+        with min_shared so two short headlines cannot match on three
+        common words.
+        """
+        amounts_a, amounts_b = cls._amounts(a), cls._amounts(b)
+        if amounts_a and amounts_b:
+            # Both name money: same story only if they name the SAME
+            # money. This is what keeps Rs 960cr and Rs 1,758cr apart.
+            return bool(amounts_a & amounts_b)
+        ka, kb = cls._story_key(a), cls._story_key(b)
+        if not ka or not kb:
+            return False
+        shared = len(ka & kb)
+        if shared < min_shared:
+            return False
+        return shared / min(len(ka), len(kb)) > threshold
+
+    @classmethod
+    def distinct_stories(cls, rows, headline_of=None, at_of=None):
+        """Collapse a stock's events to the STORIES behind them.
+
+        ---- THE SAME NEWS, COUNTED TWICE. 29 August 2026 ----
+
+            "pls check incase of duplicate info being taken as multiple
+             times as different channels are being sourced"
+            "chip should show stories not repeats"
+                                    -- operator, 29 August 2026
+
+        ATHERENERG, 28 August:
+
+            08:15  "To buy additional stake in Ather Energy for 1,758 cr"
+            09:01  "HERO MOTOCORP: CO TO ACQUIRE ADDITIONAL STAKE ...
+                    FOR UP TO 1,758 CR"
+
+        One announcement, 46 minutes apart -- a channel reposting
+        another channel's card. Across the store since 22 August: 899
+        events, 171 stock-day groups with two or more, and 80 that are
+        the same story repeated.
+
+        That is ~9% of the feed, and it inflated the run chip: Ather
+        read "4 events / 2 days" when it is TWO stories -- Rs 960cr on
+        the 26th and Rs 1,758cr on the 28th -- told four times.
+
+        Keeps the EARLIEST of each group, which is also the fastest
+        source and therefore the one worth measuring lag against.
+        Returns the kept rows, oldest first.
+        """
+        headline_of = headline_of or (lambda r: r["headline"])
+        at_of = at_of or (lambda r: r["at"])
+        ordered = sorted(rows or [], key=lambda r: str(at_of(r) or ""))
+        kept = []
+        for row in ordered:
+            text = headline_of(row)
+            if any(cls._same_story(text, headline_of(k)) for k in kept):
+                continue
+            kept.append(row)
+        return kept
+
+    def _move_on(self, symbol, day):
+        """What the stock did on `day`, and since. Or None.
+
+        {"day_pct": that session open->close,
+         "since_pct": that session's open -> the latest close on file}
+
+        From core/daily_store.py -- the settled record. Never live
+        ticks: an outcome that moves while you read it is not an
+        outcome. None when the day is not on file, which is the honest
+        answer for today's own story before today has closed.
+        """
+        if not symbol or not day:
+            return None
+        try:
+            if getattr(self, "_daily", None) is None:
+                from core.daily_store import DailyStore
+                self._daily = DailyStore()
+            from sqlalchemy import select
+            bars = self._daily.bars
+            with self._daily.engine.connect() as conn:
+                row = conn.execute(
+                    select(bars.c.open, bars.c.close)
+                    .where(bars.c.symbol == str(symbol).upper())
+                    .where(bars.c.date == str(day))).first()
+                if not row or not row[0]:
+                    return None
+                opened, closed = float(row[0]), float(row[1])
+                latest = conn.execute(
+                    select(bars.c.close)
+                    .where(bars.c.symbol == str(symbol).upper())
+                    .where(bars.c.date >= str(day))
+                    .order_by(bars.c.date.desc())).first()
+            last = float(latest[0]) if latest and latest[0] else closed
+            return {
+                "day_pct": round((closed - opened) / opened * 100.0, 2),
+                "since_pct": round((last - opened) / opened * 100.0, 2),
+            }
+        except Exception:                                   # noqa: BLE001
+            return None
+
+    def running_story(self, symbol, days=7, now=None):
+        """Has this stock had a RUN of events, not just one? Or None.
+
+        ---- ONE STOCK, FOUR EVENTS, TWO DAYS. 29 August 2026 ----
+
+            "in this case ather energy got multiple events in multi
+             days & bot must relate & show the details highlighting
+             the info next to ather energy stock"
+                                    -- operator, 29 August 2026
+
+        ATHERENERG, 26-28 August:
+
+            26 Aug 08:56  Hero invests Rs 960cr via convertible warrants
+            28 Aug 08:15  To buy additional stake for Rs 1,758cr
+            28 Aug 09:01  Hero to acquire additional stake, Rs 1,758cr
+            28 Aug 11:07  Ather up 7%, F&O entrant, largest shareholder
+
+        One story told four times across two sessions, and the stock
+        ran +8.9% from where the bot named it on the 26th to Friday's
+        close. Every row was already on file. Nothing ever asked the
+        question "has this happened before, recently, to this stock" --
+        so each event was read alone, on the day it arrived, and the
+        run was invisible.
+
+        A single event is news. A RUN is a situation: somebody is
+        buying a company in public, in instalments, and the tape has
+        two or three days to react rather than twenty minutes.
+
+        Returns {"events", "days", "first_at", "last_at", "kinds",
+        "headlines"} or None when there is only one event -- one is
+        not a story and saying so would be inventing a pattern.
+
+        Reads what is already stored. No new collection, no AI.
+        """
+        if not symbol:
+            return None
+        try:
+            from datetime import datetime, timedelta
+            clock = now or datetime.now()
+            since = (clock - timedelta(days=int(days))).strftime("%Y-%m-%d")
+            rows = self._query(
+                "SELECT at, kind, headline, source FROM events "
+                "WHERE symbol = ? AND at >= ? AND kind IN "
+                "('NEWS','ORDER','RESULT','CONCALL','AI_VERDICT') "
+                # `id DESC`, not `at DESC` alone. When an event is
+                # CORRECTED the store keeps both rows with the same
+                # `at`, and without the tiebreak SQLite returns an
+                # arbitrary one -- in practice the oldest, so the
+                # panel would show the version that was corrected.
+                # tests/test_event_row_cap.py bans the bare form.
+                "ORDER BY at DESC, id DESC LIMIT 20",
+                (str(symbol).upper(), since))
+        except Exception:                                   # noqa: BLE001
+            return None
+        # STORIES, not repeats. ~9% of the feed is one channel
+        # reposting another, and counting those inflated Ather to
+        # "4 events / 2 days" when it is two announcements.
+        rows = self.distinct_stories(
+            rows,
+            headline_of=lambda r: r["headline"] if hasattr(r, "keys") else r[2],
+            at_of=lambda r: r["at"] if hasattr(r, "keys") else r[0])
+        if not rows or len(rows) < 2:
+            return None
+
+        def _get(row, key, index):
+            try:
+                return row[key]
+            except Exception:                               # noqa: BLE001
+                return row[index]
+
+        stamps = [str(_get(r, "at", 0) or "") for r in rows]
+        sessions = {stamp[:10] for stamp in stamps if stamp}
+        # ---- AND WHAT DID THE STOCK DO? 29 August 2026 ----
+        #
+        #     "i want to see the linkage (memory brain + map = links to
+        #      stocks + news/events + outcome if the stock movement
+        #      from that day)"           -- operator, 29 August 2026
+        #
+        # A story with no outcome is a headline. The point of keeping a
+        # run is to see whether the run WORKED: Hero raised its Ather
+        # stake on the 26th (+3.4% that session) and again on the 28th
+        # (+6.1%), and the stock closed +8.9% above where the bot named
+        # it. Without the move attached, the chip is trivia.
+        #
+        # Read from the daily store, which is the settled record --
+        # never from live ticks, which would make an outcome that
+        # changes while you look at it.
+        # ---- THREE, NEWEST FIRST. 29 August 2026 ----
+        #
+        #     "ather chip showed but the info looks ugly next to
+        #      welcorp. can u show them in neat & precise"
+        #                                    -- operator, 29 Aug 2026
+        #
+        # WELCORP carried nine, and reading them one by one showed
+        # what nine really means: three tellings of one 26 August
+        # block deal, a sector list that never mentions the company,
+        # and a Welspun LIVING headline filed against Welspun CORP.
+        # Four real stories at most.
+        #
+        # The count is left honest -- it still says nine, because that
+        # is what is on file and hiding it would be worse -- but the
+        # chip shows the three most recent and says how many remain.
+        # A tooltip nobody can read is not evidence.
+        # The most RECENT three, still in date order so "first event,
+        # second event" reads the way he asked for it. rows arrive
+        # oldest-first from distinct_stories(), so the tail is newest.
+        total = len(rows)
+        rows = rows[-3:]
+        told = []
+        for row in rows:
+            at = str(_get(row, "at", 0) or "")
+            told.append({
+                "at": at,
+                "headline": str(_get(row, "headline", 2) or "")[:110],
+                "kind": str(_get(row, "kind", 1) or ""),
+                "outcome": self._move_on(symbol, at[:10]),
+            })
+
+        return {
+            "stories": total,
+            "events": total,          # kept: existing readers
+            "told": told,
+            "more": max(0, total - len(told)),
+            "days": len(sessions),
+            "first_at": min(stamps) if stamps else None,
+            "last_at": max(stamps) if stamps else None,
+            "kinds": sorted({str(_get(r, "kind", 1) or "") for r in rows}),
+            "headlines": [str(_get(r, "headline", 2) or "")[:110]
+                          for r in rows[:4]],
+        }
+
     def needing_a_verdict(self, limit=500, hours=None):
         """Events with a kind but no direction -- what the model is for.
 

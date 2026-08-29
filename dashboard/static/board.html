@@ -820,6 +820,49 @@ function reasonChips(r){
         + (r.trend.broke ? " -- structure just BROKE" : ""));
   }
 
+  // ---- A RUN OF EVENTS, NOT JUST TODAY'S. 29 August 2026. ----
+  //
+  //     "in this case ather energy got multiple events in multi days
+  //      & bot must relate & show the details highlighting the info
+  //      next to ather energy stock"      -- operator, 29 Aug 2026
+  //
+  // ATHERENERG, 26-28 August: Hero MotoCorp invested Rs 960cr on the
+  // 26th, then bought an additional 2.9% for Rs 1,758cr on the 28th.
+  // Four events, two sessions, one story -- and the bot read each
+  // alone on the day it arrived. It named the stock at 11:34 on the
+  // 26th and the stock ran +8.9% from there to Friday's close.
+  //
+  // Every row was already in stock_events.db. Nothing asked "has this
+  // happened before, recently, to this stock". Now it does, and the
+  // chip carries the headlines so the run is readable without
+  // leaving the board.
+  //
+  // Only drawn for a RUN. One event is news, not a situation, and a
+  // chip on every stock would say nothing.
+  if (r.story && (r.story.stories || r.story.events) > 1) {
+    const st = r.story;
+    const n = st.stories || st.events;
+    // Each story with WHAT THE STOCK DID from that session: the
+    // day open->close, and where it stands since. A story with no
+    // outcome is trivia; the point of keeping a run is to see
+    // whether the run worked.
+    const lines = (st.told || []).map(function (t) {
+      const o = t.outcome || {};
+      const day = (o.day_pct === undefined || o.day_pct === null)
+        ? "" : "  " + (o.day_pct > 0 ? "+" : "") + o.day_pct + "% that day";
+      const since = (o.since_pct === undefined || o.since_pct === null)
+        ? "" : ", " + (o.since_pct > 0 ? "+" : "") + o.since_pct + "% since";
+      return (t.at || "").slice(0, 10) + day + since + "\n     " + t.headline;
+    });
+    // Green only if the runs actually paid. A run that went nowhere
+    // is still worth seeing, but it is not good news.
+    const paid = (st.told || []).some(function (t) {
+      return t.outcome && t.outcome.since_pct > 0; });
+    add(n + " stories\u00b7" + st.days + "d", paid ? "earn" : "flat",
+        n + " stories across " + st.days + " session(s)"
+        + (lines.length ? "\n" + lines.join("\n") : ""));
+  }
+
   // ---- HOW FAR IT HAD ALREADY RUN. 16 August 2026. ----
   //
   // Same fault as delivery above, found the same way: core/runup.py

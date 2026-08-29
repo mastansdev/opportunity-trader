@@ -395,7 +395,33 @@ DASHBOARD_AFTER_CLOSE_EXIT_AT = "09:00"
 # it directly. core/rules.py's LAST_NEW_ENTRY is derived from it, and
 # on 23 August I edited that one instead and reported the window as
 # widened when nothing had changed. Nothing reads rules' copy.
-LAST_ENTRY_TIME = "15:30"
+# ---- CAS. NSE CHANGED THE CLOSE ON 3 AUGUST 2026. ----
+#
+#     "once normal activity started at 09:15 till 15:15 is regular
+#      trading thats it . CAS after 15:16 leave that completely"
+#                                    -- operator, 29 August 2026
+#
+# He is right and my 24 August change was wrong. I moved this from
+# 15:15 to 15:30 reasoning that 15:15 was leftover MIS square-off
+# machinery. It was -- but 15:15 became correct again for a different
+# reason three weeks earlier, and I did not check:
+#
+#   NSE Closing Auction Session, live since 3 August 2026
+#     F&O stocks (Category I)  continuous trading ENDS 15:15,
+#                              auction runs 15:15-15:35
+#     other cash stocks        close 15:30
+#     equity derivatives       close 15:40
+#     post-close               15:50-16:00
+#
+# The bot trades MTF, and MTF-eligible names are largely F&O stocks.
+# An entry at 15:20 on one of those does not reach continuous trading
+# at all -- it lands in an auction, at a price set by a mechanism the
+# bot knows nothing about.
+#
+# 15:15 for now, deliberately conservative: it is right for Category I
+# and merely early for the rest. Revisit when CAS has settled and
+# there is a reason to want those fifteen minutes.
+LAST_ENTRY_TIME = "15:15"
 
 # Any tick timestamped before MARKET_OPEN must never be
 # treated as live data for ORB building or entries. This is
@@ -2154,7 +2180,9 @@ STAGED_POSITION_LIMITS = [
 # 23 August 2026: 15:30, in lockstep with LAST_ENTRY_TIME above. This
 # one is the harder gate of the two -- _position_ceiling() returns 0
 # past it, so the book is shut regardless of what auto_entry allows.
-STAGED_NO_ENTRY_AFTER = "15:30"
+# Back in lockstep with LAST_ENTRY_TIME above: CAS ends continuous
+# trading in F&O names at 15:15, so the book must shut with it.
+STAGED_NO_ENTRY_AFTER = "15:15"
 
 # --- One trade per stock per day --------------------------
 # A symbol gets ONE attempt per direction per day. Kills the

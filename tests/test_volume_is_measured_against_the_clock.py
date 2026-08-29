@@ -110,9 +110,9 @@ def test_a_new_entry_is_allowed_until_the_market_stops_trading():
     # widened while the gate that runs sat at 15:15.
     import config
     from core import auto_entry, rules
-    assert auto_entry.LAST_NEW_ENTRY.strftime("%H:%M") == "15:30"
-    assert config.LAST_ENTRY_TIME == "15:30"
-    assert rules.LAST_NEW_ENTRY == "15:30"
+    assert auto_entry.LAST_NEW_ENTRY.strftime("%H:%M") == "15:15"
+    assert config.LAST_ENTRY_TIME == "15:15"
+    assert rules.LAST_NEW_ENTRY == "15:15"
 
 
 def test_the_three_entry_clocks_can_never_disagree():
@@ -128,7 +128,7 @@ def test_the_book_is_not_shut_before_the_bell():
     # shuts the book regardless of what auto_entry allows. It sat at
     # 15:15 and would have silently defeated the change above.
     import config
-    assert config.STAGED_NO_ENTRY_AFTER == "15:30"
+    assert config.STAGED_NO_ENTRY_AFTER == "15:15"
     assert config.STAGED_NO_ENTRY_AFTER == config.LAST_ENTRY_TIME
 
 
@@ -139,7 +139,8 @@ def test_the_entry_window_is_not_the_square_off_clock():
     import config
     from core import rules
     assert config.FORCE_SQUARE_OFF_AT_CLOSE is False
-    assert rules.LAST_NEW_ENTRY != config.SQUARE_OFF_TIME
+    # CAS put it back ON the old square-off clock, for a new reason.
+    assert rules.LAST_NEW_ENTRY == "15:15"
 
 
 def test_the_orb_window_is_untouched():

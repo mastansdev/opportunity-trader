@@ -99,3 +99,8 @@ logs/*.log.[0-9]*
 # core/volume_pace.py falls back to the whole-day ratio when it is
 # missing, and nightly's health step reports a stale store.
 data/volume_profile.json
+
+# Database backups written by tools/dedupe_events.py before it removes
+# anything. 11 MB each and regenerated on demand -- kept on disk so a
+# removed row is always recoverable by id, never in git history.
+data/*.db.*.bak
