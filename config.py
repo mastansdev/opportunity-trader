@@ -2586,7 +2586,20 @@ ANNOUNCEMENT_PANEL_COUNT = 25
 #
 # The cost is bandwidth. A Full packet is 162 bytes against a Quote
 # packet's 50, across ~1,290 subscribed stocks.
-ENABLE_FULL_DEPTH_FEED = False
+# TURNED ON 29 August 2026 for Monday's session, at his instruction:
+# "make sure to on all before market opens on monday". The routing was
+# checked first -- main.py keys on exchange_segment, so a stock on
+# NSE_EQ cannot be mistaken for an IDX packet, and `depth` only ever
+# reaches the field-logging block, which is wrapped and read-only.
+#
+# What still cannot be known until a live session: whether Dhan
+# delivers Full for ~1,290 stocks without throttling. WATCH THE LOG --
+# "[FEED] Stocks subscribed in FULL (with market depth) mode" at
+# startup, then order_flow.pressure(symbol)["from_the_book"] going
+# True once trades are being classified against a real bid and ask.
+# Set back to False and restart if the feed misbehaves; everything
+# downstream reads LTP and volume, which a Full packet also carries.
+ENABLE_FULL_DEPTH_FEED = True
 
 ENABLE_ORDER_FLOW_RECORDER = True
 ORDER_FLOW_FLUSH_SECONDS = 30
