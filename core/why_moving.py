@@ -100,6 +100,68 @@ _LOOKUP = re.compile(r"^\s*matched on\s*:", re.I)
 MIN_REASON_CHARS = 15
 
 
+# ---- THE CARD SAYS HOW OLD ITS OWN NEWS IS. 29 August 2026. ----
+#
+#     "i want the bot to see the stocks only gaining + reason behind
+#      that"                                          -- operator
+#
+# The Breakouts and Earnings channels stamp a clock marker on every
+# card saying when the thing it describes actually happened:
+#
+#     "#LAURUSLABS  (clock) Recent activity - 29d ago"
+#     "#ESAFSFB     (clock) News published 10d ago"
+#     "#MARINE      (clock) Recent activity - 21d ago"
+#
+# The card is POSTED today, so `at` is today and the previous-close
+# window below lets it straight through. The news inside it is weeks
+# old. That is not why the stock is moving now.
+#
+# 61 such cards since 1 August; 14 were being accepted as today's
+# reason. Every one of those 14 carried a RESULT grade -- the "a
+# scanner is not a news source" guard further down only covers the
+# UNGRADED branch, so a graded recap bypassed it entirely. In the
+# 28 August reconstruction MARINE was the best trade of the day and
+# its stated reason was 21 days old.
+#
+# Anchored on the clock marker, NOT on loose "N<unit> ago" text.
+# "NSE - Live + 8m ago" is a quote widget saying eight MINUTES, and
+# reading a bare "m" as months made that card look eight months
+# stale. Inside the marker "m" is minutes, matching its own "h".
+_STAMPED_AGE = re.compile(
+    "\U0001f552" + r"[^|]{0,48}?(\d+)\s*(mo|[mhdw])\s*ago", re.I)
+_AGE_HOURS = {"m": 1.0 / 60.0, "h": 1.0, "d": 24.0, "w": 168.0, "mo": 720.0}
+
+# A day. Overnight news IS why a stock gaps -- "Order received 20h
+# ago" is a real reason this morning -- so hours stay. Days do not.
+STALE_REASON_HOURS = 24.0
+
+
+def stated_age_hours(headline):
+    """How old the card says its OWN news is, in hours, or None.
+
+    None means the card did not say. That is not the same as fresh:
+    it is left to the `at` window to judge, exactly as before.
+    """
+    found = _STAMPED_AGE.search(str(headline or ""))
+    if not found:
+        return None
+    try:
+        count = int(found.group(1))
+    except (TypeError, ValueError):
+        return None
+    return count * _AGE_HOURS.get(found.group(2).lower(), 0.0)
+
+
+def is_stale_reason(headline, limit_hours=None):
+    """True when the card itself says its news is a day or more old.
+
+    Never guesses. A card that states no age is not stale here.
+    """
+    age = stated_age_hours(headline)
+    limit = STALE_REASON_HOURS if limit_hours is None else limit_hours
+    return age is not None and age >= limit
+
+
 
 # ---- A FAILURE MUST LEAVE A MARK. 8 August 2026. ----
 #
@@ -332,6 +394,13 @@ def from_events(events, on_date=None):
         elif on_date and not at.startswith(str(on_date)):
             continue
         if str(event.get("kind") or "").upper() not in _STOCK_KINDS:
+            continue
+
+        # The card stamped its own age. Weeks-old news is not why the
+        # stock is moving now, whatever grade the card carries -- and
+        # this sits ABOVE all three return paths below on purpose, so
+        # a graded recap cannot slip past the way it did until today.
+        if is_stale_reason(event.get("headline")):
             continue
 
         # An explicit AI verdict outranks a grade: it was written about
