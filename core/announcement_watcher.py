@@ -194,6 +194,9 @@ class AnnouncementWatcher:
         self.known_symbols = {str(s).upper() for s in (known_symbols or ())}
         self.poll_seconds = poll_seconds
         self.lookback_hours = lookback_hours
+        # First pass reaches back to the previous
+        # session's close; see _from_date().
+        self._deep_pass_done = False
         # Injectable so tests never touch the network.
         self._fetcher = fetcher or self._fetch_nse
         # core/results_ingest.py. A RESULTS filing is handed over with
@@ -215,14 +218,63 @@ class AnnouncementWatcher:
 
     # ------------------------------------------------------------
 
+    def _from_date(self, now):
+        """How far back to ask NSE on this pass.
+
+        ---- THE EVENING FILINGS WERE NEVER FETCHED. 29 Aug 2026. ----
+
+            "fix the announcement lookback so evening filings are not
+             missed"                              -- operator
+
+        Every poll asked for the last ANNOUNCEMENT_LOOKBACK_HOURS (8).
+        At a 09:00 start that reaches 01:00 -- so everything filed the
+        previous evening was invisible, and board meetings finish
+        between 16:00 and 22:00. That is when preferential issues,
+        order wins and results are filed.
+
+        PRECWIRE is the case: a preferential issue published about
+        20:24 on 27 August. The bot's only copy of it arrived as a
+        Telegram card at 12:24 the NEXT day, by which time the stock
+        was +8% on its way to a 20% upper circuit. NSE had it sixteen
+        hours earlier and nobody asked.
+
+        A bigger constant does not fix it. Eight hours misses Tuesday
+        evening; eighteen would still miss FRIDAY evening on a Monday
+        morning. The boundary that is always right is the previous
+        SESSION's close -- the same one core/why_moving.py uses for
+        every other evidence source, holidays and weekends included.
+
+        ONLY ON THE FIRST PASS, though. That window is 65 hours on a
+        Monday, and asking NSE for it every 60 seconds would be rude
+        and would get us blocked. After the first pass the ordinary
+        lookback is far more than enough, because nothing published
+        since can be older than a minute.
+        """
+        ordinary = now - timedelta(hours=self.lookback_hours)
+        if self._deep_pass_done:
+            return ordinary
+        try:
+            from core.why_moving import previous_trading_close
+            deep = previous_trading_close(now)
+        except Exception:                                  # noqa: BLE001
+            return ordinary
+        return min(ordinary, deep) if deep else ordinary
+
     def _fetch_nse(self):
         from nse import NSE
         now = datetime.now()
+        since = self._from_date(now)
         with NSE(download_folder="data") as n:
-            return n.announcements(
-                index="equities",
-                from_date=now - timedelta(hours=self.lookback_hours),
-                to_date=now) or []
+            rows = n.announcements(
+                index="equities", from_date=since, to_date=now) or []
+        if not self._deep_pass_done:
+            self._deep_pass_done = True
+            hours = (now - since).total_seconds() / 3600.0
+            decision(f"[NEWS] First pass reached back {hours:.0f}h to "
+                     f"{since:%d %b %H:%M} -- the previous session's close. "
+                     f"{len(rows)} announcement(s). Later passes ask for "
+                     f"{self.lookback_hours}h.")
+        return rows
 
     def poll_once(self):
         """One pass. Returns the list of NEW records. Never raises."""

@@ -246,3 +246,101 @@ def test_it_never_reaches_a_decision():
         assert "order_flow" not in text, (
             f"{name} references order_flow. It records; it must not "
             f"decide until the question has been measured.")
+
+
+# ---------------------------------------------- the book, when it is there
+
+CLOCK = datetime(2026, 8, 31, 10, 5)
+NEXT_MIN = datetime(2026, 8, 31, 10, 6)
+
+
+def _full(px, qty, bid, ask):
+    """A FULL packet -- LTP and LTQ with the five-level book beside it."""
+    return {"LTP": px, "LTQ": qty, "volume": 1000,
+            "depth": [{"bid_price": "%.2f" % bid, "ask_price": "%.2f" % ask,
+                       "bid_quantity": 500, "ask_quantity": 400}]}
+
+
+def test_a_trade_at_the_ask_is_a_buy_whatever_the_tick_did():
+    """The correction, 29 August 2026: "no thats not the way order
+    flow is used".
+
+    Delta is not "did the price tick up". It is "did this trade lift
+    the offer or hit the bid". Here the price does not move at all --
+    three prints at the same 100.50 -- and every one of them lifted
+    the offer. The tick rule would call the last two flat.
+    """
+    for _ in range(3):
+        order_flow.observe("TESTCO", _full(100.5, 100, 100.0, 100.5),
+                           now=CLOCK)
+    closed = order_flow.observe("TESTCO", _full(100.5, 1, 100.0, 100.5),
+                                now=NEXT_MIN)
+    assert closed["up_qty"] == 300.0
+    assert closed["down_qty"] == 0.0
+
+
+def test_a_trade_at_the_bid_is_a_sell():
+    order_flow.observe("TESTCO", _full(100.0, 80, 100.0, 100.5), now=CLOCK)
+    closed = order_flow.observe("TESTCO", _full(100.0, 1, 100.0, 100.5),
+                                now=NEXT_MIN)
+    assert closed["down_qty"] == 80.0
+
+
+def test_a_trade_inside_the_spread_is_not_guessed_at():
+    """Neither side took it. Counting it as either would invent a
+    reading the book does not support."""
+    order_flow.observe("TESTCO", _full(100.2, 50, 100.0, 100.5), now=CLOCK)
+    closed = order_flow.observe("TESTCO", _full(100.2, 1, 100.0, 100.5),
+                                now=NEXT_MIN)
+    assert closed["flat_qty"] == 50.0
+    assert closed["up_qty"] == 0.0 and closed["down_qty"] == 0.0
+
+
+def test_it_says_whether_the_delta_came_from_the_book():
+    """The honesty column. A delta built from the book and one built
+    from the tick rule are not the same number."""
+    order_flow.observe("TESTCO", _full(100.5, 100, 100.0, 100.5), now=CLOCK)
+    order_flow.observe("TESTCO", _full(100.5, 1, 100.0, 100.5), now=NEXT_MIN)
+    assert order_flow.pressure("TESTCO")["from_the_book"] is True
+
+    order_flow.observe("QUOTECO", _tick(100.0, 50), now=CLOCK)
+    order_flow.observe("QUOTECO", _tick(100.5, 80), now=CLOCK)
+    order_flow.observe("QUOTECO", _tick(100.5, 1), now=NEXT_MIN)
+    quote = order_flow.pressure("QUOTECO")
+    assert quote["from_the_book"] is False
+    assert quote["book_ticks"] == 0
+
+
+def test_a_quote_packet_still_works_without_the_book():
+    """The feed is in Quote mode until a live session proves Full
+    arrives. The tick rule must keep answering until then."""
+    order_flow.observe("QUOTECO", _tick(100.0, 10), now=CLOCK)
+    order_flow.observe("QUOTECO", _tick(101.0, 90), now=CLOCK)
+    closed = order_flow.observe("QUOTECO", _tick(101.0, 1), now=NEXT_MIN)
+    assert closed["up_qty"] == 90.0
+
+
+# ------------------------------------------------- the LIVE reading
+
+def test_pressure_is_the_running_total_for_the_session():
+    """Same day, live -- his whole point. It must include the minute
+    still being filled, not only the ones already closed."""
+    order_flow.observe("TESTCO", _full(100.5, 100, 100.0, 100.5), now=CLOCK)
+    order_flow.observe("TESTCO", _full(100.0, 40, 100.0, 100.5), now=CLOCK)
+    order_flow.observe("TESTCO", _full(100.5, 60, 100.0, 100.5), now=NEXT_MIN)
+    got = order_flow.pressure("TESTCO")
+    assert got["buy"] == 160.0        # 100 closed + 60 still open
+    assert got["sell"] == 40.0
+    assert got["delta"] == 120.0
+
+
+def test_pressure_is_none_before_the_stock_has_traded():
+    assert order_flow.pressure("NEVERTRADED") is None
+    assert order_flow.pressure("") is None
+
+
+def test_a_new_day_does_not_inherit_yesterdays_pressure():
+    order_flow.observe("TESTCO", _full(100.5, 100, 100.0, 100.5), now=CLOCK)
+    order_flow.observe("TESTCO", _full(100.5, 10, 100.0, 100.5),
+                       now=datetime(2026, 9, 1, 10, 5))
+    assert order_flow.pressure("TESTCO")["buy"] == 10.0

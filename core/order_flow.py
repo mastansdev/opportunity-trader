@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS flow_minutes (
     minute     TEXT NOT NULL,
     symbol     TEXT NOT NULL,
     ticks      INTEGER NOT NULL,
+    book_ticks INTEGER,
     up_qty     REAL,
     down_qty   REAL,
     flat_qty   REAL,
@@ -142,8 +143,26 @@ def _num(value):
     return None if got != got else got
 
 
+_session = {}     # symbol -> the day's running totals, for pressure()
+
+
+def _roll_into_session(held):
+    """Fold a finished minute into the day's running total. Caller
+    holds the lock."""
+    day = _session.get(held["symbol"])
+    if day is None or day["date"] != held["date"]:
+        day = {"date": held["date"], "buy": 0.0, "sell": 0.0,
+               "ticks": 0, "book_ticks": 0}
+        _session[held["symbol"]] = day
+    day["buy"] += held["up_qty"]
+    day["sell"] += held["down_qty"]
+    day["ticks"] += held["ticks"]
+    day["book_ticks"] += held.get("book_ticks", 0)
+
+
 def _blank(symbol, date, minute):
     return {"date": date, "minute": minute, "symbol": symbol, "ticks": 0,
+            "book_ticks": 0,
             "up_qty": 0.0, "down_qty": 0.0, "flat_qty": 0.0, "ltq_sum": 0.0,
             "vol_first": None, "vol_last": None, "book_buy": None,
             "book_sell": None, "ltp": None, "atp": None}
@@ -182,11 +201,52 @@ def observe(symbol, message, now=None):
             if held is not None and (held["minute"] != minute
                                      or held["date"] != date):
                 _done.append(held)
+                _roll_into_session(held)
                 closed = held
                 held = None
             if held is None:
                 held = _blank(symbol, date, minute)
                 _open[symbol] = held
+
+            # ---- THE BOOK DECIDES, IF THE BOOK IS THERE ----
+            #      29 August 2026.
+            #
+            #     "no thats not the way order flow is used"
+            #     "it is used on same day"              -- operator
+            #
+            # He is right twice over. Delta is not "did the price tick
+            # up" -- it is "did this trade LIFT THE OFFER or HIT THE
+            # BID". That needs the best bid and ask beside the print,
+            # which a Quote packet does not carry and a FULL packet
+            # does: depth[0] is the top of book.
+            #
+            # Dhan's own order-flow terminal (DEXT T3) reads exactly
+            # this, live, inside each candle -- buy vs sell volume,
+            # delta, imbalance. Same day. Nothing about it is mined
+            # from history.
+            #
+            # So when depth arrives the side is KNOWN, and the tick
+            # rule below is only the fallback for a Quote packet. Which
+            # of the two answered is counted, because a delta built
+            # from inference and one built from the book are not the
+            # same number and a later reader must be able to tell.
+            side = None
+            book = message.get("depth")
+            if book:
+                try:
+                    top = book[0]
+                    bid = _num(top.get("bid_price"))
+                    ask = _num(top.get("ask_price"))
+                    if ask and ltp >= ask:
+                        side = 1          # lifted the offer
+                    elif bid and ltp <= bid:
+                        side = -1         # hit the bid
+                    elif bid and ask:
+                        side = 0          # inside the spread, unknowable
+                    if side is not None:
+                        held["book_ticks"] += 1
+                except Exception:                          # noqa: BLE001
+                    side = None
 
             # ---- THE TICK RULE ----
             # Up from the last print is a buy, down is a sell. A print
@@ -196,7 +256,13 @@ def observe(symbol, message, now=None):
             # towards whichever side happened to move the price.
             previous = _last_px.get(symbol)
             size = ltq if (ltq is not None and ltq > 0) else 0.0
-            if previous is None or ltp == previous:
+            if side is not None:
+                # The book answered. No inference needed.
+                bucket = ("up_qty" if side > 0
+                          else "down_qty" if side < 0 else "flat_qty")
+                if side:
+                    _last_dir[symbol] = side
+            elif previous is None or ltp == previous:
                 direction = _last_dir.get(symbol, 0)
                 bucket = ("up_qty" if direction > 0
                           else "down_qty" if direction < 0 else "flat_qty")
@@ -242,6 +308,7 @@ def _row(held):
     if held["vol_first"] is not None and held["vol_last"] is not None:
         vol_delta = held["vol_last"] - held["vol_first"]
     return (held["date"], held["minute"], held["symbol"], held["ticks"],
+            held.get("book_ticks", 0),
             up, down, held["flat_qty"], up - down, held["ltq_sum"],
             vol_delta, book_buy, book_sell, skew, held["ltp"], held["atp"])
 
@@ -277,9 +344,10 @@ def flush(now=None, force=False):
             db.executescript(_SCHEMA)
             db.executemany(
                 "INSERT OR IGNORE INTO flow_minutes "
-                "(date, minute, symbol, ticks, up_qty, down_qty, flat_qty, "
-                " delta, ltq_sum, vol_delta, book_buy, book_sell, skew_pct, "
-                " ltp, atp) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+                "(date, minute, symbol, ticks, book_ticks, up_qty, down_qty, "
+                " flat_qty, delta, ltq_sum, vol_delta, book_buy, book_sell, "
+                " skew_pct, ltp, atp) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
         _stats["written"] += len(rows)
         return len(rows)
     except Exception as exc:                              # noqa: BLE001
@@ -297,6 +365,62 @@ def _minutes_between(older, newer):
         return None
 
 
+def pressure(symbol):
+    """Who is winning this stock RIGHT NOW. None until it has traded.
+
+    ---- SAME DAY, LIVE. 29 August 2026. ----
+
+        "no thats not the way order flow is used"
+        "it is used on same day"                  -- operator
+
+    The store on disk is for checking this reading afterwards. THIS is
+    the reading: a running total, this session, updated on every tick,
+    answering "are buyers lifting offers or are sellers hitting bids".
+
+    Nothing calls it yet, and that is deliberate -- the same rule the
+    recorder shipped under. It is measured before it is traded on.
+
+        delta       buy quantity minus sell quantity, since the open
+        buy, sell   the two sides
+        ticks       prints seen
+        book_ticks  how many were classified against a REAL bid/ask
+                    rather than inferred from the price change
+
+    The last one is the honesty column. book_ticks near ticks means
+    the delta is real. book_ticks near zero means the feed is in Quote
+    mode and this is the tick rule -- roughly 75-80% right, and worst
+    in exactly the fast markets it would be used in.
+    """
+    if not symbol:
+        return None
+    name = str(symbol).upper()
+    with _lock:
+        got = _session.get(name)
+        held = _open.get(name)
+        if not got and held is None:
+            return None
+        # TODAY only. A process that runs past midnight, or a session
+        # replayed over two dates, must not add this morning's open
+        # minute to yesterday's running total -- which is exactly what
+        # the first version did.
+        today = held["date"] if held is not None else got["date"]
+        buy = sell = 0.0
+        ticks = book = 0
+        if got and got["date"] == today:
+            buy, sell = got["buy"], got["sell"]
+            ticks, book = got["ticks"], got["book_ticks"]
+        if held is not None:
+            buy += held["up_qty"]
+            sell += held["down_qty"]
+            ticks += held["ticks"]
+            book += held.get("book_ticks", 0)
+        if not ticks:
+            return None
+    return {"symbol": name, "delta": buy - sell, "buy": buy, "sell": sell,
+            "ticks": ticks, "book_ticks": book,
+            "from_the_book": bool(ticks) and book / ticks > 0.5}
+
+
 def stats():
     """{"observed", "written", "dropped", "open", "pending"}."""
     with _lock:
@@ -308,6 +432,7 @@ def reset():
     with _lock:
         _open.clear()
         _done[:] = []
+        _session.clear()
         _last_px.clear()
         _last_dir.clear()
         for key in _stats:

@@ -64,7 +64,9 @@ from config import (
     ANNOUNCEMENT_LOOKBACK_HOURS, ENABLE_FILING_PDF_READING,
     ENABLE_NEWS_WATCHER, NEWS_POLL_SECONDS,
 )
-from config import ENABLE_ORDER_FLOW_RECORDER, ORDER_FLOW_FLUSH_SECONDS
+from config import (ENABLE_ORDER_FLOW_RECORDER,
+                    ORDER_FLOW_FLUSH_SECONDS,
+                    ENABLE_FULL_DEPTH_FEED)
 from core import order_flow
 from core.announcement_watcher import AnnouncementWatcher
 from core.results_ingest import ResultsIngestor, requests_downloader
@@ -1251,10 +1253,22 @@ def main():
     # change can't be validated offline -- needs a live smoke-test.
     # The volume path is fail-open end to end, so if Quote somehow
     # doesn't deliver volume, the filter simply does nothing.
+    # ---- QUOTE, OR FULL WITH THE BOOK. 29 August 2026. ----
+    # config.ENABLE_FULL_DEPTH_FEED swaps in the Full packet, which
+    # carries the five-level book beside every print. That is what
+    # core/order_flow.py needs to say whether a trade lifted the offer
+    # or hit the bid, instead of inferring it from the tick. See that
+    # flag's note -- it is OFF until a live session confirms the depth
+    # really arrives, because a feed mode cannot be tested offline.
+    _stock_mode = (MarketFeed.Full if ENABLE_FULL_DEPTH_FEED
+                   else MarketFeed.Quote)
     instruments = [
-        (MarketFeed.NSE, security_id, MarketFeed.Quote)
+        (MarketFeed.NSE, security_id, _stock_mode)
         for security_id in resolved.values()
     ]
+    decision(f"[FEED] Stocks subscribed in "
+             f"{'FULL (with market depth)' if ENABLE_FULL_DEPTH_FEED else 'QUOTE'}"
+             f" mode -- {len(instruments)} instruments.")
 
     # 2026-07-24 -- Market indices (Nifty / BankNifty / Midcap / India
     # VIX) on the IDX segment, in FULL mode so we get both LTP and a

@@ -2559,6 +2559,35 @@ ANNOUNCEMENT_PANEL_COUNT = 25
 # is catching the turn BEFORE a stock qualifies. PRECWIRE at 11:00 on
 # 28 August was not a candidate; by the time it was, it was +8%.
 # Roughly 490k rows a session, the same order as the candle store.
+# ---- THE FEED CANNOT SEE THE BOOK. 29 August 2026. ----
+#
+#     "no thats not the way order flow is used"
+#     "it is used on same day"                      -- operator
+#
+# He is right, and what shipped this morning was half of it. Delta is
+# not "did the price tick up" -- it is "did this trade LIFT THE OFFER
+# or HIT THE BID". That needs the best bid and ask beside the print.
+#
+# A Quote packet does not carry them. A FULL packet does: five levels,
+# depth[0] being the top of book, in the same message as LTP and LTQ.
+# Dhan's own order-flow terminal (DEXT T3) reads exactly that, live,
+# inside each candle. Indices already run in Full mode here; the
+# stocks do not.
+#
+# Without it core/order_flow.py falls back to the tick rule -- right
+# about 75-80% of the time, and worst in fast markets, which is the
+# only kind this bot trades in.
+#
+# OFF BY DEFAULT, deliberately. main.py's own note on the last feed
+# mode change says it "can't be validated offline -- needs a live
+# smoke-test", and this was built on a Saturday. Turn it on with the
+# session log in front of you: order_flow.pressure(symbol) reports
+# from_the_book, which is True once the depth is really arriving.
+#
+# The cost is bandwidth. A Full packet is 162 bytes against a Quote
+# packet's 50, across ~1,290 subscribed stocks.
+ENABLE_FULL_DEPTH_FEED = False
+
 ENABLE_ORDER_FLOW_RECORDER = True
 ORDER_FLOW_FLUSH_SECONDS = 30
 
