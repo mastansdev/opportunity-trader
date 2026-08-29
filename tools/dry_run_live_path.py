@@ -339,8 +339,11 @@ def _rank_to_plan():
     rows = got.get("rows") or []
     if not rows:
         return False, f"the ranker named nothing: {got.get('refusals')}"
+    # A FRACTION. core/mtf_margin.margin_pct() returns 0.33 for a
+    # stock on 33% margin; this passed 33.0 and sized 100x too small
+    # for months, harmlessly, until the stop began following the size.
     sized = plan(104.0, "BUY", day_low=99.0, day_high=105.0,
-                 margin_pct=33.0)
+                 margin_pct=0.33)
     if not sized.get("ok"):
         return False, f"nothing could be sized ({sized.get('why')})"
     return True, (f"ranked {rows[0]['symbol']}, qty {sized['qty']}, "

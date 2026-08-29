@@ -76,6 +76,7 @@ from core.rules import (
 # the same name for the position it manages -- if these two disagree,
 # the alert and the trade disagree.
 from config import FIXED_STOP_PCT, TARGET_REWARD_BY_REGIME
+from core.logger import diagnostic
 
 
 def _num(value):
@@ -241,7 +242,31 @@ def plan(entry, side, day_low=None, day_high=None, atr=None,
     # risk_rs by adjusting its distance, instead of the size adjusting
     # to a fixed distance. Same money at risk, a reachable target.
     if margin_pct:
-        per_share = entry * float(margin_pct)
+        # ---- A FRACTION, NOT A PERCENT. 29 August 2026. ----
+        #
+        # core/mtf_margin.margin_pct() returns 0.25 for a stock on 25%
+        # margin, and dashboard/state.py passes that straight through.
+        # tools/dry_run_live_path.py passed 33.0 instead, and for
+        # months it did not matter: the stop came from the day's low
+        # whatever the share count was, so a 100x-too-small position
+        # simply sized small and passed.
+        #
+        # The moment the stop started following the size, it became
+        # "stop too far -- the loss would not be small" and check 6 of
+        # the live-path dry run went BROKEN. That is the whole class of
+        # fault this repo already has twice over -- config's
+        # MIN_STOP_DISTANCE_PCT is 0.01 while core/rules' is 0.75.
+        #
+        # Real MTF margins run from about 15% to 100%. Anything above
+        # 1.0 is therefore a percent that someone forgot to divide, and
+        # is worth saying out loud rather than silently sizing wrong.
+        margin_pct = float(margin_pct)
+        if margin_pct > 1.0:
+            diagnostic(f"[PLAN] margin_pct came in as {margin_pct:g} -- "
+                       f"reading it as a percent. It should be a "
+                       f"fraction (0.25 for 25%).")
+            margin_pct /= 100.0
+        per_share = entry * margin_pct
         qty = int(budget_rs // per_share) if per_share > 0 else 0
         if qty < 1:
             return {"ok": False, "why": "one share costs more than the budget"}

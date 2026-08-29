@@ -134,6 +134,40 @@ def test_the_margin_cap_can_only_reduce_the_size():
     assert capped["qty"] <= free["qty"]
 
 
+def test_a_margin_percent_is_read_as_a_percent_not_a_fraction():
+    """The unit fault this repo keeps having, caught live.
+
+    core/mtf_margin.margin_pct() returns 0.33 for a stock on 33%
+    margin, and dashboard/state.py passes that through. But
+    tools/dry_run_live_path.py passed 33.0, and it did not matter for
+    months: the stop came from the day's low whatever the share count
+    was, so a 100x-too-small position simply sized small and passed.
+
+    The moment the stop started following the size (29 August 2026) it
+    became "stop too far -- the loss would not be small", and check 6
+    of the bot's own live-path dry run went BROKEN on startup.
+
+    Real MTF margins run 15% to 100%, so anything above 1.0 is a
+    percent somebody forgot to divide.
+    """
+    fraction = plan(104.0, "BUY", day_low=99.0, day_high=105.0,
+                    margin_pct=0.33)
+    percent = plan(104.0, "BUY", day_low=99.0, day_high=105.0,
+                   margin_pct=33.0)
+    assert fraction["ok"] and percent["ok"]
+    assert fraction["qty"] == percent["qty"]
+    assert fraction["stop"] == percent["stop"]
+
+
+def test_a_full_margin_stock_is_still_read_as_a_fraction():
+    """1.0 is 100% margin -- no leverage, and a real answer. The guard
+    must not treat the boundary as a percent and turn it into 1%."""
+    got = plan(100.0, "BUY", day_low=95.0, margin_pct=1.0,
+               budget_rs=50000.0)
+    assert got["ok"], got
+    assert got["qty"] == 500, got          # 50,000 / (100 x 1.0)
+
+
 def test_a_share_costing_more_than_the_whole_budget_is_refused():
     got = plan(60000.0, "BUY", day_low=57000.0, margin_pct=1.0,
                budget_rs=10000.0)
