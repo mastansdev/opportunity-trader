@@ -270,3 +270,78 @@ def test_two_clocks_disagreeing_says_nothing():
 
     now = datetime.now()
     assert age_text((now + timedelta(minutes=5)).isoformat(), now=now) is None
+
+
+# ------------------------------------------- what the state column means
+
+def _row(held=10):
+    return {"held": held}
+
+
+def _ago(hours):
+    from datetime import datetime, timedelta
+
+    return (datetime.now() - timedelta(hours=hours)).isoformat()
+
+
+def test_a_recent_post_that_arrived_slowly_is_late():
+    """The only version of "late" he can act on."""
+    from core.telegram_feed import TelegramFeed
+
+    assert TelegramFeed._channel_state(
+        "daily", False, _row(), 45, _ago(0.5)) == "late"
+
+
+def test_a_recent_post_that_arrived_fast_is_live():
+    from core.telegram_feed import TelegramFeed
+
+    assert TelegramFeed._channel_state(
+        "daily", False, _row(), 1, _ago(0.5)) == "live"
+
+
+def test_a_lag_from_days_ago_is_not_todays_fault():
+    """---- A STALE LAG IS NOT A LATE CHANNEL. 30 August 2026. ----
+
+    First run against the real store, on a Sunday evening:
+
+        Breakouts         last post 28 Aug 10:03   late 1043   LATE
+        OrderBook Pulse   last post 29 Aug 15:59   late  126   LATE
+
+    Both true, neither a fault to act on: 1,043 minutes is what a
+    backfill looks like and 126 was Friday evening. He would have
+    opened the board on Monday to two red flags describing last week.
+    """
+    from core.telegram_feed import TelegramFeed
+
+    assert TelegramFeed._channel_state(
+        "daily", False, _row(), 1043, _ago(40)) == "quiet"
+
+
+def test_the_number_is_never_hidden(board):
+    """The state may say quiet; the lag still has its own column, so
+    nothing is lost by softening the word."""
+    pane = board.split('id="tg-pane"')[1].split('id="brain-pane"')[0]
+    assert "Late by" in pane
+
+
+def test_a_results_channel_out_of_season_is_not_a_fault():
+    from core.telegram_feed import TelegramFeed
+
+    assert TelegramFeed._channel_state(
+        "results", False, _row(), 900, _ago(40)) == "off season"
+    assert TelegramFeed._channel_state(
+        "results", True, _row(), 1, _ago(0.2)) == "live"
+
+
+def test_a_channel_with_nothing_in_it_says_so():
+    from core.telegram_feed import TelegramFeed
+
+    assert TelegramFeed._channel_state(
+        "daily", False, {"held": 0}, None, None) == "nothing yet"
+
+
+def test_an_unreadable_timestamp_does_not_crash_the_column():
+    from core.telegram_feed import TelegramFeed
+
+    assert TelegramFeed._channel_state(
+        "daily", False, _row(), 2, "not-a-date") in ("live", "late", "quiet")

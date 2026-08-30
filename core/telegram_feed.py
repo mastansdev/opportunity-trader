@@ -1459,7 +1459,8 @@ class TelegramFeed:
                 "pictures": row.get("pictures") or 0,
                 "pictures_read": row.get("read_back") or 0,
                 "named_a_stock": row.get("named") or 0,
-                "state": self._channel_state(role, in_season, row, late),
+                "state": self._channel_state(role, in_season, row, late,
+                                             row.get("last_post")),
             })
         return out
 
@@ -1483,14 +1484,35 @@ class TelegramFeed:
             return None
         return gap if gap >= 0 else None
 
+    # A lag measured on a message that arrived days ago describes
+    # that day, not this one. Past this the channel is simply quiet.
+    STALE_STATE_HOURS = 6.0
+
     @staticmethod
-    def _channel_state(role, in_season, row, late):
+    def _channel_state(role, in_season, row, late, last_post=None):
         """One word for the right-hand column.
 
         A results channel silent in September is not a fault, and
         saying so would train him to ignore the column on the morning
         it IS one. See core/feed_clock.expected_today(), which has
         made the same distinction since it was written.
+
+        ---- A STALE LAG IS NOT A LATE CHANNEL. 30 August 2026. ----
+
+        First run against the real store, on a Sunday evening:
+
+            Breakouts         last post 28 Aug 10:03   late 1043   LATE
+            OrderBook Pulse   last post 29 Aug 15:59   late  126   LATE
+
+        Both readings were true and neither was a fault to act on.
+        1,043 minutes is what a backfill looks like, and 126 minutes
+        was Friday evening's collection lag. He would have opened the
+        board on Monday to two red flags describing last week.
+
+        So "late" now means the channel has posted RECENTLY and that
+        post was slow to reach us -- which is the only version of late
+        he can do anything about. The number itself stays in its own
+        column either way, so nothing is hidden.
         """
         if not row.get("held"):
             return "nothing yet"
@@ -1498,6 +1520,22 @@ class TelegramFeed:
             return "off season"
         if role == "episodic":
             return "quiet"
+
+        stale = False
+        if last_post:
+            try:
+                from core.feed_clock import to_ist
+                when = to_ist(last_post)
+                if when is not None:
+                    if getattr(when, "tzinfo", None) is not None:
+                        when = when.replace(tzinfo=None)
+                    hours = (datetime.now() - when).total_seconds() / 3600.0
+                    stale = hours > TelegramFeed.STALE_STATE_HOURS
+            except Exception:                              # noqa: BLE001
+                stale = False
+        if stale:
+            return "quiet"
+
         # `late` is passed IN. Reading it off the database row was
         # the first version, and the row does not carry it -- so the
         # column could never say "late" at all. OrderBook Pulse was

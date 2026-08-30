@@ -224,3 +224,36 @@ def test_the_fetch_warns_that_it_is_slow():
     rather than a hang."""
     src = open("tools/dashboard_preview.py", encoding="utf-8").read()
     assert "--no-fetch to skip it" in src
+
+
+def test_no_fetch_still_reads_the_stored_channels():
+    """---- NO FETCH IS NOT NO TELEGRAM. 30 August 2026. ----
+
+        "show me in another tab named Telegram"   -- 30 August
+
+    --no-fetch set telegram = None, so the whole panel went dark. Every
+    column on the new Telegram tab -- last post, when the bot read it,
+    how late, pictures read -- comes out of data/telegram.db and needs
+    no network at all. --no-fetch means "do not go and GET new
+    messages", not "pretend there are none".
+
+    Which is the exact fault this file already guards elsewhere: a
+    preview that silently shows LESS than main.py is indistinguishable
+    from a broken panel, and checking panels outside market hours is
+    the whole reason the script exists.
+    """
+    src = open("tools/dashboard_preview.py", encoding="utf-8").read()
+    block = src[src.find('if "--no-fetch" in sys.argv:'):]
+    block = block[:block.find("dashboard_state = DashboardState")]
+    assert "TelegramFeed(client=None" in block, (
+        "--no-fetch leaves the Telegram tab empty; it must still read "
+        "the stored channels")
+
+
+def test_the_read_only_feed_cannot_reach_the_network():
+    """client=None is the point: poll() refuses rather than fetching."""
+    from core.telegram_feed import TelegramFeed
+
+    feed = TelegramFeed(client=None)
+    assert feed.poll() == 0
+    assert "no Telegram client" in (feed._last_error or "")

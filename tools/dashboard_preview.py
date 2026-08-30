@@ -379,6 +379,39 @@ def _main_replay(date=None):
             warn(f"[PREVIEW] Telegram unavailable ({exc}) -- "
                  f"panel uses stored data only.")
 
+    # ---- NO FETCH IS NOT NO TELEGRAM. 30 August 2026. ----
+    #
+    # --no-fetch left telegram = None, so the whole panel went dark.
+    # From 30 August there is a Telegram TAB whose every column -- last
+    # post, when the bot read it, how late, pictures read -- comes out
+    # of data/telegram.db and needs no network at all. --no-fetch means
+    # "do not go and GET new messages", not "pretend there are none".
+    #
+    # Exactly the fault the note further down was written about on 30
+    # July: a preview that silently shows LESS than main.py is
+    # indistinguishable from a broken panel, and checking panels
+    # outside market hours is the whole job of this script.
+    #
+    # client=None is the read-only mode the feed already supports:
+    # poll() refuses, nothing reaches the network, every read is off
+    # disk.
+    #
+    # It sits AFTER the fetch branch rather than inside it, and the
+    # reason is a test: tests/test_preview_is_never_live.py reads this
+    # region and requires KeyboardInterrupt to be handled before any
+    # general handler, so that Ctrl+C during a download is never
+    # reported as "Telegram unavailable". Written inside the branch,
+    # this try/except came first and broke that guarantee's proof.
+    if telegram is None:
+        try:
+            from core.telegram_feed import TelegramFeed
+            telegram = TelegramFeed(client=None,
+                                    master_loader=master_loader,
+                                    news_impact=news_impact)
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[PREVIEW] Telegram store unreadable ({exc}) -- "
+                 f"the channel tab will be empty.")
+
     dashboard_state = DashboardState(
         engine, market_data, master_loader,
         quarterly_results=_opt("quarterly results", QuarterlyResults),

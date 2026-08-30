@@ -1,23 +1,10 @@
 {
- "verified_at": "2026-08-25 15:52:06",
- "checked": 1923,
+ "verified_at": "2026-08-30 21:22:07",
+ "checked": 1925,
  "source": "https://images.dhan.co/api-data/api-scrip-master.csv",
- "mismatches": [
-  "VIVIDEL: master 761771, Dhan 761768",
-  "NOIDATOLL: master 11214, Dhan 10786",
-  "SCPL: master 12072, Dhan 12081",
-  "UNITEDPOLY: master 7564, Dhan 7560",
-  "GLOTTIS: master 760118, Dhan 760116",
-  "ABINFRA: master 27020, Dhan 27016",
-  "UCAL: master 3570, Dhan 7739",
-  "DHABRIYA: master 764658, Dhan 764661",
-  "AMBALALSA: master 762543, Dhan 762546",
-  "KAYA: master 10276, Dhan 10282",
-  "AUTOIND: master 14110, Dhan 14106",
-  "MYSORPETRO: master 4377, Dhan 8220"
- ],
+ "mismatches": [],
  "not_found": [
   "KEL"
  ],
- "clean": false
+ "clean": true
 }
