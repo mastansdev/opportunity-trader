@@ -398,3 +398,63 @@ def test_an_unreadable_post_id_is_not_skipped(feed):
 def test_an_empty_store_has_no_floor(feed):
     channel = {"name": "News Pulse", "handle": "news_pulse_ai"}
     assert feed._store(channel, [_msg(7, "the first thing ever seen here")]) == 1
+
+
+# --------------------------------- not re-reading pictures it has read
+
+def test_a_picture_already_transcribed_is_not_read_again(feed, monkeypatch):
+    """It knew, and it re-read them anyway.
+
+        "timestamps for this purpose right? does bot knows about last
+         arrival of msgs/news/events from telegram"    -- operator
+
+    It does: feed_watermark holds the last post id and time per
+    channel, and every stored message carries its own ocr_text. But
+    _ocr_cache lives in MEMORY and dies with the process, so
+    catch_up() -- which walks back over pages it has mostly seen --
+    paid full OCR on every screenshot again.
+
+    Measured on a Sunday-morning restart: 3.5 minutes at 35% CPU, still
+    on page 1 of 7, of the first of ten channels. Day Trader Telugu had
+    581 transcripts already on disk.
+    """
+    channel = {"name": "Day Trader Telugu", "handle": "daytradertelugu"}
+    reads = []
+
+    def _never(url, data=None):
+        reads.append(url)
+        return "SHOULD NOT HAVE BEEN READ"
+
+    post = {"id": "5001", "text": "", "at": "2026-08-31T04:00:00+00:00",
+            "photos": ["https://cdn.example/a.jpg"]}
+    monkeypatch.setattr(feed, "_read_photo",
+                        lambda url, data=None: "GOLDIAM WINS RS 50 CR ORDER")
+    assert feed._store(channel, [post]) == 1
+
+    # second pass, fresh process: the transcript is on disk
+    feed._ocr_cache = {}
+    monkeypatch.setattr(feed, "_read_photo", _never)
+    feed._store(channel, [post], skip_known=False)
+    assert reads == [], "the picture was read again from the image"
+
+
+def test_the_transcript_lookup_is_one_query_not_one_per_message(feed):
+    """A per-message lookup would trade OCR for a database round trip
+    thirty times a pass."""
+    channel = {"name": "OrderBook Pulse", "handle": "orders_pulse"}
+    got = feed._stored_ocr("OrderBook Pulse")
+    assert isinstance(got, dict)
+    assert got == {}, "an empty store should have no transcripts"
+
+
+def test_a_picture_never_read_before_is_still_read(feed, monkeypatch):
+    """Reusing what is on disk must not stop it reading what is not."""
+    channel = {"name": "Day Trader Telugu", "handle": "daytradertelugu"}
+    reads = []
+    monkeypatch.setattr(
+        feed, "_read_photo",
+        lambda url, data=None: reads.append(url) or "HCC BAGS RS 524 CR")
+    post = {"id": "6001", "text": "", "at": "2026-08-31T04:00:00+00:00",
+            "photos": ["https://cdn.example/new.jpg"]}
+    assert feed._store(channel, [post]) == 1
+    assert reads == ["https://cdn.example/new.jpg"]

@@ -1570,6 +1570,26 @@ class TelegramFeed:
             except Exception:                               # noqa: BLE001
                 pass
 
+    def _stored_ocr(self, channel_name):
+        """{message_id: ocr_text} for what this channel already holds.
+
+        The transcripts were always written; nothing ever read them
+        back, so every restart paid OCR again on pictures it had
+        already read. See _store(). Empty on any error -- re-reading a
+        picture is slow, not wrong.
+        """
+        try:
+            with self._lock:
+                conn = sqlite3.connect(self.db_path)
+                rows = conn.execute(
+                    "SELECT message_id, ocr_text FROM messages "
+                    "WHERE channel = ? AND ocr_text IS NOT NULL "
+                    "AND ocr_text != ''", (channel_name,)).fetchall()
+                conn.close()
+            return {str(mid): text for mid, text in rows}
+        except sqlite3.Error:
+            return {}
+
     def _newest_stored_id(self, channel_name):
         """The highest post id we already hold for one channel, as an
         int, or None. The stop signal for the catch-up walk."""
@@ -1928,10 +1948,15 @@ class TelegramFeed:
         # never a requirement.
         floor = self._newest_stored_id(name) if skip_known else None
 
+        # One query, not one per message: the transcripts this channel
+        # already holds, so a re-walk does not re-OCR what is on disk.
+        known_ocr = self._stored_ocr(name)
+
         rows = []
         filed = []
         fresh = []
         skipped = 0
+        reused = 0
         for message in messages:
             if floor is not None:
                 try:
@@ -1976,12 +2001,35 @@ class TelegramFeed:
             # with the same rules. A picture earns no extra trust for
             # having been harder to read.
             ocr = ""
+            # ---- IT HAD ALREADY READ THIS PICTURE. 30 Aug 2026. ----
+            #
+            #     "timestamps for this purpose right? does bot knows
+            #      about last arrival of msgs/news/events from
+            #      telegram"                          -- operator
+            #
+            # It does, precisely: feed_watermark holds the last post id
+            # and time per channel, and every stored message carries
+            # its own ocr_text. And it re-read the images anyway --
+            # _ocr_cache is in MEMORY, keyed by url, and dies with the
+            # process. So catch_up(), which walks back over pages it
+            # has mostly seen, paid full OCR on every screenshot again.
+            #
+            # Measured on a Sunday-morning restart: 3.5 minutes at 35%
+            # CPU still on page 1 of 7, of the first of ten channels.
+            # Day Trader Telugu posts its news AS screenshots, so most
+            # posts on a page carry one.
+            #
+            # The transcript is already on disk. Read it back instead.
+            stored_ocr = known_ocr.get(str(message.get("id") or ""))
+            if stored_ocr:
+                ocr = stored_ocr
+                reused += 1
             # photo_data is set only by the Telegram API reader, whose
             # images have no public URL. Either way one photo per
             # message is read -- the first is the card; the rest are
             # usually the same thing at another size.
             blobs = message.get("photo_data") or []
-            if (photos or blobs) and self.read_images:
+            if not ocr and (photos or blobs) and self.read_images:
                 ocr = self._read_photo(photos[0] if photos else None,
                                        data=blobs[0] if blobs else None)
                 # Tickers AND full company names. A results card prints
@@ -2015,9 +2063,10 @@ class TelegramFeed:
                           # to walk it in. None everywhere else.
                           "word_boxes": self._ocr_boxes.get(
                               message.get("url"))})
-        if skipped:
-            diagnostic(f"[TELEGRAM] {name}: {skipped} message(s) already on "
-                       f"file, skipped before parsing.")
+        if skipped or reused:
+            diagnostic(f"[TELEGRAM] {name}: {skipped} already on file, "
+                       f"{reused} picture(s) read back from disk instead "
+                       f"of OCR'd again.")
         # ---- ONLY THE NEW ONES. 29 August 2026. ----
         # This took `messages`, so news_impact.record() ran for every
         # post on the page every 90 seconds -- a database round trip
