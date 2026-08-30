@@ -174,8 +174,13 @@ class TelethonReader:
             f"channel use its exact title as shown in the app, and make "
             f"sure this account has joined it.")
 
-    def fetch(self, channel, limit=30, before=None):
+    def fetch(self, channel, limit=30, before=None, since_id=None):
         """Recent messages from one channel, newest first.
+
+        `since_id` is the newest post id already on file. Telegram
+        filters on it SERVER-SIDE, so a post we have read is never
+        sent, never downloaded, never OCR'd. See the note by min_id
+        below -- that one argument is the whole of it.
 
         ---- REBUILT 1 August 2026 ----
         This returned only `id`, `at` and `text`, and SKIPPED any
@@ -210,6 +215,30 @@ class TelethonReader:
             # Telethon counts BACKWARDS from an id, which is what the
             # web reader's ?before= does.
             kwargs["offset_id"] = int(before)
+        if since_id:
+            # ---- IT ASKED FOR WHAT IT ALREADY HAD. 30 Aug 2026. ----
+            #
+            #     "incase daytrader posted img at 30/08/2026 07:20:05 &
+            #      bot read it then laptop off . next day laptop on &
+            #      collector must check from that channel after
+            #      30/08/2026 07:20:06 not before that time"
+            #                                        -- the operator
+            #
+            # Without this the loop below received the whole page and
+            # threw most of it away AFTER the expensive part: the photo
+            # bytes are downloaded for every message it walks, and Day
+            # Trader Telugu is 77% pictures. A restart paid for a
+            # hundred image downloads to store nothing.
+            #
+            # min_id is a Telegram server-side filter -- only ids
+            # ABOVE it are sent. The already-read post does not arrive
+            # at all, so there is nothing to download and nothing to
+            # skip. This is why the watermark was worth keeping.
+            #
+            # NOT used by catch_up(), which walks backwards on purpose
+            # to fill a hole BELOW the newest id. See core/telegram_
+            # feed.py's _store() for the run that proved that.
+            kwargs["min_id"] = int(since_id)
         for message in client.iter_messages(entity, **kwargs):
             text = getattr(message, "message", None) or ""
             photo = getattr(message, "photo", None)
@@ -472,11 +501,32 @@ class FallbackReader:
             else TelegramWebReader()
         self._fell_back = set()
 
-    def fetch(self, channel, limit=30, before=None):
+    def fetch(self, channel, limit=30, before=None, since_id=None):
         handle = channel if isinstance(channel, str) else str(channel)
         if self.primary is not None:
+            # ---- "DOES NOT TAKE THAT ARGUMENT" IS NOT "FAILED". ----
+            #      30 August 2026.
+            #
+            # Passing since_id unconditionally made any reader without
+            # it look like a broken API, and the fallback then dropped
+            # to the public web view -- which a PRIVATE channel does
+            # not have. The channel would go quietly empty and the
+            # warning would blame Telegram. Caught by
+            # tests/test_telegram_api_reader.py in one run.
+            #
+            # So it is only sent when there is one, and a reader that
+            # cannot take it is retried without it rather than
+            # written off.
+            extra = {"since_id": since_id} if since_id else {}
             try:
-                return self.primary.fetch(handle, limit=limit, before=before)
+                try:
+                    return self.primary.fetch(handle, limit=limit,
+                                              before=before, **extra)
+                except TypeError:
+                    if not extra:
+                        raise
+                    return self.primary.fetch(handle, limit=limit,
+                                              before=before)
             except Exception as exc:                       # noqa: BLE001
                 # Once per channel per run. A rate limit that fires on
                 # every poll would otherwise fill the log with the same
@@ -487,6 +537,10 @@ class FallbackReader:
                          f"({str(exc)[:70]}). Falling back to the public "
                          f"web view -- a PRIVATE channel has none, so it "
                          f"will simply be empty until the API works.")
+        # The public web view has no min_id -- it serves whole pages.
+        # since_id is deliberately dropped rather than forwarded: the
+        # id floor in telegram_feed._store() still skips what we hold,
+        # so the fallback is slower, not wrong.
         return self.secondary.fetch(handle, limit=limit, before=before)
 
     def close(self):

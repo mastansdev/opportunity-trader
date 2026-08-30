@@ -1245,8 +1245,50 @@ class TelegramFeed:
                          f"already saved.")
                 break
             handle = channel["handle"]
+
+            # ---- ASK ONLY FOR WHAT CAME AFTER. 30 August 2026. ----
+            #
+            #     "the only issue i observed is bot looking back on
+            #      already stored info & re processing them, thats the
+            #      reason i asked to maintain the time stamps on all
+            #      channels ... collector must check from that channel
+            #      after 30/08/2026 07:20:06 not before that time"
+            #                                        -- the operator
+            #
+            # Each channel carries its own mark, so a quiet channel
+            # and a busy one are each resumed from their own last
+            # post rather than from a shared clock.
+            #
+            # The id, not the timestamp, is what is sent. They mean
+            # the same thing here -- Telegram ids rise with time
+            # within a channel -- but the id is exact, while a
+            # timestamp has to be compared across two clocks and ties
+            # inside the same second are ambiguous. His 07:20:05
+            # picture and its id are the same boundary; the id cannot
+            # be off by a second.
+            #
+            # The skip in _store() still stands behind this. This
+            # stops the post ARRIVING; that stops it being written.
+            # The web-view fallback has no server-side filter, so on
+            # that path the skip is the only guard -- which is why
+            # both exist.
+            since_id = self._newest_stored_id(
+                channel.get("name") or handle)
+            # The retry is NESTED, not a sibling clause. Raised from
+            # inside an `except TypeError:` handler, a dead channel's
+            # error would escape the `except Exception` below and end
+            # the whole pass -- which is exactly what
+            # test_one_dead_channel_does_not_cost_the_others caught.
             try:
-                messages = self.client.fetch(handle, limit=limit) or []
+                try:
+                    messages = self.client.fetch(handle, limit=limit,
+                                                 since_id=since_id) or []
+                except TypeError:
+                    # An older or stubbed reader without the argument.
+                    # Losing the channel because we asked it something
+                    # new is a far worse trade than reading a page
+                    # twice.
+                    messages = self.client.fetch(handle, limit=limit) or []
             except Exception as exc:                       # noqa: BLE001
                 warn(f"[TELEGRAM] {handle}: {exc}")
                 self._last_error = f"{handle}: {exc}"
@@ -1587,7 +1629,11 @@ class TelegramFeed:
                     "AND ocr_text != ''", (channel_name,)).fetchall()
                 conn.close()
             return {str(mid): text for mid, text in rows}
-        except sqlite3.Error:
+        except Exception:                                  # noqa: BLE001
+            # Same reasoning as _newest_stored_id below: this reaches
+            # for self._lock and self.db_path, so it can fail for more
+            # than sqlite3's reasons, and its own docstring already
+            # says re-reading a picture is slow rather than wrong.
             return {}
 
     def _newest_stored_id(self, channel_name):
@@ -1601,7 +1647,20 @@ class TelegramFeed:
                     "WHERE channel = ?", (channel_name,)).fetchone()
                 conn.close()
             return int(row[0]) if row and row[0] is not None else None
-        except (sqlite3.Error, TypeError, ValueError):
+        except Exception:                                  # noqa: BLE001
+            # ---- AN OPTIMISATION MUST NOT BE ABLE TO COST A ----
+            #      CHANNEL. 30 August 2026.
+            #
+            # This listed the three errors it expected, which was fine
+            # while only catch_up() called it. poll() now calls it for
+            # every channel on every pass, so anything it raises would
+            # take that channel down -- and tests/test_collector_
+            # stops.py found the fourth error immediately: a feed built
+            # without __init__ has no _lock, and AttributeError was not
+            # on the list.
+            #
+            # Not knowing the mark means reading a page we may already
+            # hold. That is slower. Losing the channel is wrong.
             return None
 
     def catch_up(self, max_pages=CATCH_UP_PAGES):
