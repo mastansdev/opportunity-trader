@@ -152,6 +152,56 @@ def stated_age_hours(headline):
     return count * _AGE_HOURS.get(found.group(2).lower(), 0.0)
 
 
+def age_text(at, now=None):
+    """How old this reason is, in day-to-day words, or None.
+
+        "22 minutes ago"    "3 hours ago"    "4 days old"
+
+    ---- THE GATE WAS SILENT. 30 August 2026. ----
+
+    is_stale_reason() below drops a reason the card says is a day or
+    more old, which is right -- a four-day-old order is not why a
+    stock is moving this morning. But it dropped it WITHOUT SAYING
+    SO, and the returned dict carried text, weight, direction and
+    source with no timestamp on it at all. The stock simply appeared
+    with no reason, indistinguishable from a stock nothing had ever
+    been published about.
+
+        "without visually seeing , how can i ask u or guide whats
+         wrong or correct?"              -- the operator, same day
+
+    "days old" rather than "days ago" past a day: the wording is the
+    warning.
+    """
+    if not at:
+        return None
+    try:
+        from core.feed_clock import to_ist
+        from datetime import datetime
+
+        when = to_ist(at)
+        if when is None:
+            return None
+        now = now or datetime.now()
+        if getattr(when, "tzinfo", None) is not None:
+            when = when.replace(tzinfo=None)
+        minutes = int((now - when).total_seconds() // 60)
+    except Exception:                                      # noqa: BLE001
+        return None
+
+    if minutes < 0:
+        return None                     # two clocks disagreeing
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = hours // 24
+    return f"{days} day{'s' if days != 1 else ''} old"
+
+
 def is_stale_reason(headline, limit_hours=None):
     """True when the card itself says its news is a day or more old.
 
@@ -411,6 +461,7 @@ def from_events(events, on_date=None):
             return {"text": str(reason).strip(),
                     "weight": float(event.get("ai_confidence") or 0.8),
                     "direction": direction,
+                    "at": event.get("at"),
                     "source": "PRO channel verdict"}
 
         grade_direction = direction_of_grade(event.get("grade"))
@@ -456,6 +507,7 @@ def from_events(events, on_date=None):
                 return {"text": headline,
                         "weight": 0.6,
                         "direction": UNKNOWN,
+                        "at": event.get("at"),
                         "source": "PRO channel " + str(
                             event.get("source") or "").strip()}
             continue
@@ -466,6 +518,7 @@ def from_events(events, on_date=None):
         return {"text": headline,
                 "weight": 0.9,
                 "direction": grade_direction,
+                "at": event.get("at"),
                 "source": "PRO channel " + str(event.get("source")
                                                or "").strip()}
     return None

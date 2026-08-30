@@ -970,6 +970,17 @@ class DashboardState:
             "calendar": self.build_calendar(),
             "results_today": self.build_results_today(),
             "watchlist": self._safe_watchlist(),
+            # ---- THE TELEGRAM TAB. 30 August 2026. ----
+            #
+            #     "show me in another tab named Telegram, under this
+            #      tab create a data structure for all channels
+            #      (currently -10 channels) & display"
+            #
+            # One row per channel: when it last posted, when the bot
+            # read it, how late that was, and which loop it is on. He
+            # has asked twice what the bot last heard and from where,
+            # and both times it had to be dug out of SQLite by hand.
+            "telegram_channels": self._safe_channel_report(),
             # ---- HE ASKED WHERE THE MONEY WENT. 16 August 2026. ----
             #
             #     "5$ completed within 5 days"
@@ -3003,6 +3014,33 @@ class DashboardState:
                 # from where the bot named it. The rows were all on
                 # file; nothing asked "has this happened before".
                 row["story"] = self._story_for(row.get("symbol"))
+                # ---- WHAT ACTUALLY TRADED, NOT WHAT IS RESTING. ----
+                #      30 August 2026.
+                #
+                #     "order flow reveals the pressure"
+                #                            -- the operator
+                #
+                # row["pressure"] above is core/tick_ohlc.py: the
+                # quantity STANDING in the book, which can be pulled.
+                # This is core/order_flow.py: what was actually paid
+                # for, buy against sell, classified off the real
+                # 5-level depth. It has been recorded since 29 August
+                # and reached no screen.
+                row["flow"] = self._flow_for(row.get("symbol"))
+                # And today's shape, beside the 7-day one. A stock can
+                # be STRONG_UP on daily bars and sideways since 10:20.
+                row["shape"] = self._shape_for(row.get("symbol"))
+                # ---- HOW OLD THE REASON IS. 30 August 2026. ----
+                #
+                #     "yes needs better show-up"     -- the operator
+                #
+                # core/why_moving.py drops a reason the card says is a
+                # day or more old, which is right: a four-day-old
+                # order is not why a stock is moving this morning. It
+                # dropped it SILENTLY, so the stock appeared with no
+                # reason at all and looked identical to one nothing
+                # had ever been published about.
+                row["reason_age"] = self._reason_age_for(row.get("symbol"))
                 source = by_symbol.get(row.get("symbol")) or {}
                 mtf = self._mtf_for(row.get("symbol"), source) or {}
                 row["plan"] = position_plan(
@@ -3386,6 +3424,134 @@ class DashboardState:
                     }
         except Exception:                                  # noqa: BLE001
             result = None       # a panel must never take the snapshot down
+        cache["rows"][symbol] = result
+        return result
+
+    def _safe_channel_report(self):
+        """One row per Telegram channel. Never raises, never blocks.
+
+        Cached for a minute: the poller runs at 90 seconds, so a
+        fresher reading than this cannot exist, and the dashboard
+        cycle asks once a second.
+        """
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cache = getattr(self, "_tg_report_cache", None)
+        if cache is not None and cache.get("minute") == stamp:
+            return cache["rows"]
+        rows = []
+        try:
+            feed = getattr(self, "telegram", None) or getattr(
+                self, "telegram_feed", None)
+            if feed is not None and hasattr(feed, "channel_report"):
+                rows = feed.channel_report() or []
+        except Exception:                                  # noqa: BLE001
+            rows = []
+        self._tg_report_cache = {"minute": stamp, "rows": rows}
+        return rows
+
+    def _reason_age_for(self, symbol):
+        """"22 minutes ago" / "4 days old", or None.
+
+        Reads the SAME cached reason the row already carries -- see
+        _mechanism_for() and config.REASON_CACHE_SECONDS -- so this
+        costs a dictionary lookup rather than a second pass over the
+        event store.
+        """
+        if not symbol:
+            return None
+        try:
+            got = self._mechanism_for(symbol)
+            if isinstance(got, dict):
+                from core.why_moving import age_text
+                return age_text(got.get("at"))
+        except Exception:                                  # noqa: BLE001
+            return None
+        return None
+
+    def _flow_for(self, symbol):
+        """Who is winning this stock today, and whether that is
+        measured or inferred. None until it has traded.
+
+            {"delta": 482140.0, "buy":.., "sell":.., "share": 63.0,
+             "book_pct": 96.0, "measured": True,
+             "diverged": {...} or None}
+
+        CACHED PER MINUTE. divergence() reads today's minutes off
+        data/order_flow.db, and this is called for every board row on
+        every dashboard cycle -- which is once a second. The store
+        only changes when the recorder flushes (30s), so a per-minute
+        cache cannot go stale in a way that matters and it takes ~20
+        queries a second down to ~20 a minute.
+        """
+        if not symbol:
+            return None
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cache = getattr(self, "_flow_cache", None)
+        if cache is None or cache.get("minute") != stamp:
+            cache = {"minute": stamp, "rows": {}}
+            self._flow_cache = cache
+        if symbol in cache["rows"]:
+            return cache["rows"][symbol]
+
+        result = None
+        try:
+            from core import order_flow
+
+            live = order_flow.pressure(symbol)
+            if live:
+                buy = float(live.get("buy") or 0.0)
+                sell = float(live.get("sell") or 0.0)
+                traded = buy + sell
+                ticks = int(live.get("ticks") or 0)
+                book = int(live.get("book_ticks") or 0)
+                book_pct = (book / ticks * 100.0) if ticks else 0.0
+                try:
+                    from config import FLOW_MIN_BOOK_PCT as _floor
+                except Exception:                          # noqa: BLE001
+                    _floor = 60.0
+                result = {
+                    "delta": live.get("delta"),
+                    "buy": buy, "sell": sell,
+                    # "63 shares in every 100 traded that way" -- the
+                    # sentence on the card, so the number it needs is
+                    # computed here rather than in JavaScript.
+                    "share": round(buy / traded * 100.0, 1) if traded else None,
+                    "book_pct": round(book_pct, 1),
+                    "measured": book_pct >= _floor,
+                    "ticks": ticks,
+                    "diverged": order_flow.divergence(symbol),
+                }
+        except Exception:                                  # noqa: BLE001
+            result = None       # a panel must never take the snapshot down
+        cache["rows"][symbol] = result
+        return result
+
+    def _shape_for(self, symbol):
+        """Today's shape -- "going up all session", "sideways since
+        10:20" -- or None before about 10:00, which is the honest
+        answer rather than "sideways".
+
+        Cached per minute for the same reason as _flow_for: it reads
+        the same minutes off the same store.
+        """
+        if not symbol:
+            return None
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cache = getattr(self, "_shape_cache", None)
+        if cache is None or cache.get("minute") != stamp:
+            cache = {"minute": stamp, "rows": {}}
+            self._shape_cache = cache
+        if symbol in cache["rows"]:
+            return cache["rows"][symbol]
+        result = None
+        try:
+            from core import intraday_shape
+            result = intraday_shape.today(symbol)
+        except Exception:                                  # noqa: BLE001
+            result = None
         cache["rows"][symbol] = result
         return result
 

@@ -1373,6 +1373,139 @@ class TelegramFeed:
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[TELEGRAM] could not measure lag ({exc}).")
 
+    def channel_report(self):
+        """One row per channel, for the Telegram tab. Never raises.
+
+            "yes even i felt that . show me in another tab named
+             Telegram, under this tab create a data structure for all
+             channels (currently -10 channels) & display"
+                                        -- operator, 30 August 2026
+
+        Everything here was already on disk and reached no screen. He
+        has asked twice what the bot last heard and from where, and
+        both times the answer had to be dug out of SQLite by hand.
+
+        ONE query for all ten channels, not one each -- this is built
+        on a dashboard cycle and there is a websocket feed waiting on
+        it.
+
+        "late by" is measured on the LATEST message, not across the
+        day. A median would be an average of unlike things -- a
+        backfilled weekend and a live morning tick in one number --
+        and it would hide the only reading that matters, which is how
+        late the last thing to arrive was.
+        """
+        try:
+            with self._lock:
+                conn = sqlite3.connect(self.db_path)
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    "SELECT channel, COUNT(*) AS held, MAX(at) AS last_post, "
+                    "SUM(CASE WHEN photos IS NOT NULL AND photos != '' "
+                    "         THEN 1 ELSE 0 END) AS pictures, "
+                    "SUM(CASE WHEN ocr_text IS NOT NULL AND ocr_text != '' "
+                    "         THEN 1 ELSE 0 END) AS read_back, "
+                    "SUM(CASE WHEN symbols IS NOT NULL AND symbols != '' "
+                    "         THEN 1 ELSE 0 END) AS named "
+                    "FROM messages GROUP BY channel").fetchall()
+                held = {r["channel"]: dict(r) for r in rows}
+                # The newest message's own pair of stamps, which is
+                # what "late by" is measured on.
+                for name in list(held):
+                    got = conn.execute(
+                        "SELECT at, seen_at FROM messages WHERE channel = ? "
+                        "ORDER BY at DESC LIMIT 1", (name,)).fetchone()
+                    if got:
+                        held[name]["last_post"] = got["at"]
+                        held[name]["last_read"] = got["seen_at"]
+                conn.close()
+        except Exception:                                  # noqa: BLE001
+            held = {}
+
+        try:
+            fast = {(c.get("name") or c.get("handle"))
+                    for c in self._channels_for(fast=True)}
+        except Exception:                                  # noqa: BLE001
+            fast = set()
+        try:
+            in_season = self._results_matter_today()
+        except Exception:                                  # noqa: BLE001
+            in_season = False
+
+        out = []
+        for entry in self.channels:
+            name = entry.get("name") or entry.get("handle")
+            row = dict(held.get(name) or {})
+            try:
+                from core.feed_clock import channel_kind
+                role = channel_kind(entry.get("handle")) or "other"
+                if role == "other":
+                    role = channel_kind(name) or "other"
+            except Exception:                              # noqa: BLE001
+                role = "other"
+
+            quick = name in fast
+            late = self._late_by(row.get("last_post"), row.get("last_read"))
+            out.append({
+                "name": name,
+                "handle": entry.get("handle"),
+                "role": role,
+                "quick": quick,
+                "loop_seconds": POLL_SECONDS if quick else SLOW_POLL_SECONDS,
+                "last_post": row.get("last_post"),
+                "last_read": row.get("last_read"),
+                "late_minutes": late,
+                "held": row.get("held") or 0,
+                "pictures": row.get("pictures") or 0,
+                "pictures_read": row.get("read_back") or 0,
+                "named_a_stock": row.get("named") or 0,
+                "state": self._channel_state(role, in_season, row, late),
+            })
+        return out
+
+    @staticmethod
+    def _late_by(posted, stored):
+        """Whole minutes between posting and storing, or None.
+
+        Negative readings are dropped rather than shown. They mean the
+        two stamps came off different clocks, and a screen that says
+        "-3 minutes late" teaches him to distrust the column.
+        """
+        if not posted or not stored:
+            return None
+        try:
+            from core.feed_clock import to_ist
+            a, b = to_ist(posted), to_ist(stored)
+            if a is None or b is None:
+                return None
+            gap = int((b - a).total_seconds() // 60)
+        except Exception:                                  # noqa: BLE001
+            return None
+        return gap if gap >= 0 else None
+
+    @staticmethod
+    def _channel_state(role, in_season, row, late):
+        """One word for the right-hand column.
+
+        A results channel silent in September is not a fault, and
+        saying so would train him to ignore the column on the morning
+        it IS one. See core/feed_clock.expected_today(), which has
+        made the same distinction since it was written.
+        """
+        if not row.get("held"):
+            return "nothing yet"
+        if role == "results" and not in_season:
+            return "off season"
+        if role == "episodic":
+            return "quiet"
+        # `late` is passed IN. Reading it off the database row was
+        # the first version, and the row does not carry it -- so the
+        # column could never say "late" at all. OrderBook Pulse was
+        # 126 minutes behind and reading "live".
+        if late is not None and late > SLOW_FEED_WARN_MINUTES:
+            return "late"
+        return "live"
+
     def lag_summary(self):
         """Posted-to-stored lag for the session. {} until something
         has arrived. Read by the close-of-session score."""

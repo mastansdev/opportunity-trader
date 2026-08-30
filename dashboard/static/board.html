@@ -60,6 +60,20 @@ SERVED ALONGSIDE, NOT INSTEAD
        background:var(--card);border:1px solid var(--hair);border-radius:12px;
        padding:10px 14px;margin-bottom:10px;}
   .chip{font-size:13px;padding:3px 10px;border-radius:8px;white-space:nowrap;}
+  /* ---- BOTH WORDS. 30 August 2026. ----
+     "i would love incase u used simpler words in whole dashboard like
+      day to day usage words which doesn't disturb the actual meaning
+      of the real trading terminology"          -- the operator
+     "keep both words"                          -- his decision
+     Plain english leads; the real term sits under it in grey, so the
+     screen reads at a glance without costing him the vocabulary he
+     needs when he opens Dhan or talks to a broker. */
+  .jargon{display:block;font-size:10px;color:var(--muted);font-weight:400;
+          letter-spacing:.02em;margin-top:1px;}
+  .flowsub{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.3;}
+  .exitline{font-size:11px;margin-top:3px;line-height:1.3;color:var(--stop-fg);}
+  .estim{font-size:11px;margin-top:3px;color:var(--warn-fg);}
+  .tgstate{font-size:11px;padding:1px 8px;border-radius:10px;white-space:nowrap;}
   /* The arm / disarm switch. Reads at a glance, in the dark, from a
      metre away -- which is the only distance that matters when the
      market is moving and he wants it OFF. */
@@ -359,6 +373,7 @@ impressive -- if there is no store behind it, it is not on the list.
   <button class="tab" data-tab="post">Post</button>
   <button class="tab" data-tab="watch">Watch</button>
   <button class="tab" data-tab="brain">Brain</button>
+  <button class="tab" data-tab="tg">Telegram</button>
 </div>
 
 <div id="live-pane">
@@ -410,12 +425,17 @@ impressive -- if there is no store behind it, it is not on the list.
   </div>
   <table>
     <thead><tr>
-      <th>Stock &amp; order</th><th>Grade</th>
-      <th class="num">Prev close</th><th class="num">Open</th><th class="num">High</th>
-      <th class="num">Low</th><th class="num">CMP</th><th class="num">Chg</th>
-      <th class="num">Turnover</th><th>Why it is moving</th><th>Verdict</th>
+      <th>Stock &amp; order</th><th>Grade<span class="jargon">channel rating</span></th>
+      <th class="num">Yesterday<span class="jargon">prev close</span></th>
+      <th class="num">Open</th><th class="num">High</th><th class="num">Low</th>
+      <th class="num">Price now<span class="jargon">CMP</span></th>
+      <th class="num">Today<span class="jargon">change</span></th>
+      <th class="num">Money traded<span class="jargon">turnover</span></th>
+      <th>Buying pressure<span class="jargon">order flow / delta</span></th>
+      <th>Trend<span class="jargon">price action</span></th>
+      <th>Why it is moving</th><th>Verdict</th>
     </tr></thead>
-    <tbody id="body"><tr><td colspan="11" class="empty">waiting for the first snapshot&hellip;</td></tr></tbody>
+    <tbody id="body"><tr><td colspan="13" class="empty">waiting for the first snapshot&hellip;</td></tr></tbody>
   </table>
 </div>
 
@@ -531,6 +551,50 @@ NOTHING HERE VOTES. tests/test_opportunity_brain.py fails the build if
 core/opportunity.py is ever imported by the engine, the ranker or
 either plan module.
 -->
+<!-- ==========================================================
+     THE TELEGRAM TAB.  30 August 2026.
+     ==========================================================
+
+       "yes even i felt that . show me in another tab named Telegram,
+        under this tab create a data structure for all channels
+        (currently -10 channels) & display"       -- the operator
+
+     He has asked twice what the bot last heard and from where, and
+     both times the answer had to be dug out of SQLite by hand. Every
+     column here was already on disk:
+
+       last post / bot read it   messages.at and messages.seen_at
+       late by                   the difference, on the LATEST message
+       checked every             which loop -- 90s or 5 min
+       pictures read             ocr_text, written for weeks, never
+                                 read back until 29 August
+
+     "late by" is the newest message only. A median across the day
+     would average a backfilled weekend together with a live morning
+     tick, and hide the one reading that matters.
+     ========================================================== -->
+<div id="tg-pane" style="display:none">
+  <div class="bar" style="justify-content:flex-start;">
+    <span style="font-size:13px;">Telegram channels</span>
+    <span id="tgnote" style="font-size:12px;color:var(--muted);">&mdash;</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>Channel</th>
+      <th>Posts<span class="jargon">role</span></th>
+      <th>Checked every<span class="jargon">poll loop</span></th>
+      <th>Last post</th><th>Bot read it</th>
+      <th class="num">Late by<span class="jargon">lag</span></th>
+      <th class="num">Messages kept<span class="jargon">held</span></th>
+      <th class="num">Pictures read<span class="jargon">OCR</span></th>
+      <th class="num">Named a stock</th>
+      <th>State</th>
+    </tr></thead>
+    <tbody id="tgbody"><tr><td colspan="10" class="empty">waiting for the first
+      snapshot&hellip;</td></tr></tbody>
+  </table>
+</div>
+
 <div id="brain-pane" style="display:none">
   <div class="cap">What each kind of opportunity has been worth</div>
   <div id="brainverdict" class="note" style="margin:0 0 12px;"></div>
@@ -810,15 +874,19 @@ function reasonChips(r){
   //
   // A chip, matching delivery. Colour carries the direction so it can
   // be read without stopping: up green, down red, range neutral.
-  if (r.trend && r.trend.structure) {
-    const t = String(r.trend.structure);
-    const tone = /UP$/.test(t) ? "earn" : (/DOWN$/.test(t) ? "stop" : "flat");
-    const streak = r.trend.hh_streak
-      ? " (" + r.trend.hh_streak + "d higher highs)" : "";
-    add(t.replace("_", " ").toLowerCase(), tone,
-        "7-day structure: " + t + streak
-        + (r.trend.broke ? " -- structure just BROKE" : ""));
-  }
+  // ---- MOVED TO ITS OWN COLUMN. 30 August 2026. ----
+  //
+  //     "Duplicates of data is not acceptable at all"
+  //                                 -- operator, 29 August 2026
+  //
+  // The 7-day structure was a chip here from 24 August. It now has a
+  // Trend column of its own, beside today's shape, because he asked
+  // for both readings. Leaving the chip as well printed the same fact
+  // twice on one row -- visible the first time the new column was
+  // rendered: "climbing / 3 higher highs" in the Trend column and
+  // "strong up" again under Why it is moving.
+  //
+  // See trendCell().
 
   // ---- A RUN OF EVENTS, NOT JUST TODAY'S. 29 August 2026. ----
   //
@@ -958,6 +1026,22 @@ function reasonChips(r){
         + Number(r.excess_pct).toFixed(1) + "%");
   if (r.state === "fading") add("fading", "stop", "faded from the high -- the move is over");
 
+  // ---- SAY HOW OLD IT IS. 30 August 2026. ----
+  //
+  //     "whats this? the stock is moving on 4 days old news?"
+  //
+  // A reason with no date on it invites exactly that question. Past a
+  // day the wording changes from "ago" to "old", because at that point
+  // the age IS the warning -- core/why_moving.py stops counting it as
+  // today's reason at 24 hours.
+  if (r.reason_age){
+    const old = /day|week|month/.test(r.reason_age);
+    out.push(`<span class="chip rc" style="background:var(${
+      old ? "--warn-bg" : "--flat-bg"});color:var(${
+      old ? "--warn-fg" : "--flat-fg"})" title="when this was published"
+      >${r.reason_age}</span>`);
+  }
+
   return out.length ? out.join(" ") : `<span class="chip rc"
     style="background:var(--flat-bg);color:var(--flat-fg)">no reason yet</span>`;
 }
@@ -1040,7 +1124,115 @@ function row(r){
     <td class="num" style="font-weight:500">${n2(r.ltp)}</td>
     <td class="num ${ch >= 0 ? "up" : "dn"}">${ch >= 0 ? "+" : ""}${ch.toFixed(2)}%</td>
     <td class="num">${cr(r.turnover_window || r.turnover_day)}</td>
-    <td class="why">${reasonChips(r)}</td><td>${vc}</td></tr>`;
+    <td>${flowCell(r)}</td>
+    <td>${trendCell(r)}</td>
+    <td class="why">${reasonChips(r)}</td><td>${vc}${exitLine(r)}</td></tr>`;
+}
+
+// ==========================================================
+// BUYING PRESSURE, AND WHETHER IT WAS MEASURED. 30 Aug 2026.
+// ==========================================================
+//
+//     "order flow reveals the pressure"        -- the operator
+//
+// The chip elsewhere on this page, r.pressure, is core/tick_ohlc.py:
+// the quantity RESTING in the book, which anybody can pull. This is
+// core/order_flow.py -- what was actually paid for, buy against sell,
+// classified off the real 5-level depth. Recorded since 29 August and
+// on no screen until today.
+//
+// FULL NUMBERS, his instruction of 30 August. "+4.82 L" was the first
+// draft; 4,82,140 is what he asked for.
+function inr(v){
+  if (v === null || v === undefined || isNaN(v)) return "\u2014";
+  return Math.round(Math.abs(Number(v))).toLocaleString("en-IN");
+}
+
+function flowCell(r){
+  const f = r.flow;
+  if (!f || f.delta === null || f.delta === undefined)
+    return `<span style="font-size:12px;color:var(--muted)">not trading yet</span>`;
+  const d = Number(f.delta);
+  const tone = d > 0 ? ["--ok-bg", "--ok-fg"]
+                     : (d < 0 ? ["--stop-bg", "--stop-fg"]
+                              : ["--flat-bg", "--flat-fg"]);
+  const word = d > 0 ? "more bought" : (d < 0 ? "more sold" : "even");
+  let sub = "";
+  if (f.share !== null && f.share !== undefined)
+    sub += `${Math.round(f.share)} in every 100 bought at the asking price`;
+  // The honesty line. The tick rule is 75-80% right and worst in
+  // exactly the fast markets this would be read in, so a reading built
+  // on it must never look like a measurement.
+  if (f.book_pct !== null && f.book_pct !== undefined)
+    sub += `${sub ? " &middot; " : ""}${Math.round(f.book_pct)}% measured`;
+  const est = (f.measured === false)
+    ? `<div class="estim">mostly estimated &mdash; treat with care</div>` : "";
+  return `${chip(inr(d) + " " + word, tone[0], tone[1])}
+          <div class="flowsub">${sub}</div>${est}`;
+}
+
+// ==========================================================
+// TREND: SEVEN DAYS, AND TODAY.  30 August 2026.
+// ==========================================================
+//
+//     "stock displayed on dashboard is not showing its price action
+//      (uptrend , downtrend, sideways)"
+//     "both"    -- asked which of the two readings he wanted
+//
+// The 7-day structure has been on this page since 24 August, as one
+// chip among a dozen. It answers a different question from the one he
+// is asking: a stock can be climbing on daily bars and sideways since
+// 10:20 this morning, and the second fact decides whether to hold it
+// through lunch. core/intraday_shape.py runs the same higher-high /
+// lower-low test over fifteen-minute blocks, so both readings speak
+// one vocabulary and sit in one column.
+const PLAIN_TREND = {
+  STRONG_UP:  ["climbing", "--good-bg", "--good-fg"],
+  UPTREND:    ["climbing", "--good-bg", "--good-fg"],
+  RANGE:      ["sideways", "--flat-bg", "--flat-fg"],
+  DOWNTREND:  ["sliding",  "--stop-bg", "--stop-fg"],
+  STRONG_DOWN:["falling",  "--stop-bg", "--stop-fg"]
+};
+
+function trendCell(r){
+  let out = "";
+  const t = r.trend;
+  if (t && t.structure && PLAIN_TREND[t.structure]) {
+    const w = PLAIN_TREND[t.structure];
+    const streak = t.hh_streak ? `${t.hh_streak} higher highs` : "last 7 days";
+    out += `${chip(w[0], w[1], w[2])}<div class="flowsub">${streak}${
+      t.broke ? " &middot; just turned" : ""}</div>`;
+  }
+  const sh = r.shape;
+  if (sh && sh.text) {
+    const up = /up|climb/.test(sh.text);
+    const dn = /down|slid|fall/.test(sh.text);
+    const col = up ? "--ok-fg" : (dn ? "--stop-fg" : "--muted");
+    out += `<div class="flowsub" style="color:var(${col})">today: ${sh.text}</div>`;
+  }
+  return out || `<span style="font-size:12px;color:var(--muted)">&mdash;</span>`;
+}
+
+// ---- THE HARDER VERDICT. 30 August 2026. ----
+//
+//     "harder verdict"                          -- the operator
+//
+// Price kept making new highs and the buying did not follow, so the
+// last buyers have stopped paying up. NinjaTrader, Bookmap and
+// GoCharting all describe this read, and he arrived at it himself on
+// 24 August: "at some point the momentum fades out, we can book the
+// profits".
+//
+// ONLY WHEN IT WAS MEASURED. core/order_flow.divergence() marks a
+// reading built on the tick rule as estimated, and a screen that says
+// Exit on the strength of a guess would cost him a winner.
+function exitLine(r){
+  const f = r.flow;
+  const d = f && f.diverged;
+  if (!d || !d.diverged || !d.measured) return "";
+  return `<div class="exitline">Buyers have walked away &mdash; Exit<br>
+    price made ${d.new_highs} new highs after ${d.since} and buying did
+    not follow</div>`;
 }
 
 function draw(s){
@@ -1409,7 +1601,8 @@ start of day limit: Rs ${bf.sod}` : "");
   const typing = document.activeElement
     && document.activeElement.classList
     && document.activeElement.classList.contains("qty");
-  if (typing){ drawPre(s); drawPost(s); drawWatch(s); drawBrain(s); return; }
+  if (typing){ drawPre(s); drawPost(s); drawWatch(s); drawBrain(s);
+               drawTelegram(s); return; }
 
   $("body").innerHTML = drawn.length
     // He asked for this line gone, 11 August. The count of what did
@@ -1418,9 +1611,9 @@ start of day limit: Rs ${bf.sod}` : "");
     // the seat the best stock of the day should have.
     ? drawn.map(row).join("")
       + (all.length > SHOW
-         ? `<tr><td colspan="11" class="empty">+ ${all.length - SHOW} more the bot is
+         ? `<tr><td colspan="13" class="empty">+ ${all.length - SHOW} more the bot is
             still watching &mdash; only the top ${SHOW} are drawn</td></tr>` : "")
-    : `<tr><td colspan="11" class="empty">${(s.ranked && s.ranked.note)
+    : `<tr><td colspan="13" class="empty">${(s.ranked && s.ranked.note)
         || "no prices have arrived yet"} &mdash; watching
         ${s.universe_size ?? "?"}, ${((s.ranked && s.ranked.rows) || []).length}
         cleared, ${((s.ranked && s.ranked.refused_rows) || []).length} refused.
@@ -1431,6 +1624,7 @@ start of day limit: Rs ${bf.sod}` : "");
   drawPost(s);
   drawWatch(s);
   drawBrain(s);
+  drawTelegram(s);
 }
 
 // "20 stocks is good number to see. less is more."
@@ -1676,6 +1870,10 @@ async function openCard(symbol){
         v >= 0 ? "+" : ""}${Number(v).toFixed(2)}%</span>`;
 
   let html = "";
+  // Filled by flowCard() a moment later, from GET /api/flow/{symbol}.
+  // It sits FIRST because "is the rise being paid for" is the question
+  // he opens the card to answer.
+  html += `<div id="flowcard"></div>`;
   html += cardSection("What this company does", [
     ["Name", b.name], ["Sector", b.sector], ["Industry", b.industry],
     ["Business", b.does], ["Type", b.type], ["Ownership", b.ownership],
@@ -1734,6 +1932,143 @@ async function openCard(symbol){
   if (!html) html = `<div class="empty">The bot holds nothing on `
     + `${att(sym)} yet.</div>`;
   $("cardbody").innerHTML = html;
+  flowCard(sym);
+}
+
+// ==========================================================
+// BUYING, ADDED UP SINCE 9:15.  30 August 2026.
+// ==========================================================
+//
+//     "whats the green line & dotted line as graph, Cummulative
+//      delta , Reading info ?"                  -- the operator
+//
+// The first version of this card printed "delta" and "cumulative
+// delta" and never said what either was. Both lines are labelled on
+// the chart itself now, in day-to-day words, with the real term in
+// grey beneath -- his instruction of 30 August, "keep both words".
+//
+// The two lines only mean something TOGETHER. Price alone can rise on
+// nothing. While the green climbs with it, somebody is paying the
+// asking price for the rise; when price keeps climbing and green goes
+// flat, the last buyers have stopped and the price is coasting.
+async function flowCard(sym){
+  const host = $("flowcard");
+  if (!host) return;
+  let d = null;
+  try {
+    const res = await fetch(`/api/flow/${encodeURIComponent(sym)}`,
+                            {cache: "no-store"});
+    if (res.ok) d = await res.json();
+  } catch (e) { /* a panel must never take the card down */ }
+
+  const rows = (d && d.series) || [];
+  const priced = rows.filter(r => r.ltp !== null && r.ltp !== undefined);
+  if (priced.length < 3){
+    host.innerHTML = `<div class="cap">Buying pressure
+      <span class="jargon">order flow</span></div>
+      <div class="empty">nothing has traded yet today</div>`;
+    return;
+  }
+
+  const W = 520, H = 150, L = 34, R = 8, T = 10, B = 26;
+  const cums = priced.map(r => Number(r.cum) || 0);
+  const pxs  = priced.map(r => Number(r.ltp));
+  const span = (a) => {
+    const lo = Math.min(...a), hi = Math.max(...a);
+    return [lo, hi === lo ? lo + 1 : hi];
+  };
+  const [clo, chi] = span(cums), [plo, phi] = span(pxs);
+  const x = i => L + (W - L - R) * (priced.length === 1 ? 0
+                                    : i / (priced.length - 1));
+  const yc = v => T + (H - T - B) * (1 - (v - clo) / (chi - clo));
+  const yp = v => T + (H - T - B) * (1 - (v - plo) / (phi - plo));
+  const line = (vals, f) => vals.map((v, i) => `${x(i).toFixed(1)},${
+    f(v).toFixed(1)}`).join(" ");
+
+  const zero = (clo <= 0 && chi >= 0)
+    ? `<line x1="${L}" y1="${yc(0).toFixed(1)}" x2="${W - R}"
+             y2="${yc(0).toFixed(1)}" stroke="var(--hair)"/>` : "";
+
+  const dv = d && d.diverged;
+  const mark = (dv && dv.diverged && dv.since)
+    ? (() => {
+        const i = priced.findIndex(r => r.minute >= dv.since);
+        if (i < 0) return "";
+        return `<line x1="${x(i).toFixed(1)}" y1="${T}" x2="${x(i).toFixed(1)}"
+                 y2="${H - B}" stroke="var(--stop-fg)" stroke-dasharray="3 3"/>`;
+      })() : "";
+
+  const now = (d && d.now) || {};
+  const ticks = Number(now.ticks || 0);
+  const book = Number(now.book_ticks || 0);
+  const bookPct = ticks ? Math.round(book / ticks * 100) : 0;
+  const buy = Number(now.buy || 0), sell = Number(now.sell || 0);
+  const share = (buy + sell) ? Math.round(buy / (buy + sell) * 100) : null;
+
+  let verdict = "";
+  if (dv && dv.diverged && dv.measured){
+    verdict = `<div style="margin-top:9px;padding:9px 11px;
+      background:var(--stop-bg);color:var(--stop-fg);
+      border-left:3px solid var(--stop-fg)">
+      <div style="font-size:14px">Buyers have walked away &mdash; Exit</div>
+      <div style="font-size:12px;margin-top:4px">The price made
+      ${dv.new_highs} new highs after ${dv.since} and the buying did not
+      follow, so the last buyers have stopped paying up.
+      ${dv.book_pct}% of this was measured from the real order book.</div>
+    </div>`;
+  } else if (dv && dv.diverged){
+    verdict = `<div style="margin-top:9px;padding:9px 11px;
+      background:var(--warn-bg);color:var(--warn-fg);
+      border-left:3px solid var(--warn-fg)">
+      <div style="font-size:14px">Buying may have stopped &mdash; not sure</div>
+      <div style="font-size:12px;margin-top:4px">Only ${dv.book_pct}% of this
+      was measured against a real buyer and seller; the rest is estimated,
+      so this is not called an exit.</div>
+    </div>`;
+  } else if (Number(now.delta || 0) > 0){
+    verdict = `<div style="margin-top:9px;padding:9px 11px;
+      background:var(--ok-bg);color:var(--ok-fg);
+      border-left:3px solid var(--ok-fg)">
+      <div style="font-size:14px">Keep holding</div>
+      <div style="font-size:12px;margin-top:4px">Buyers are still paying the
+      seller&rsquo;s asking price rather than waiting for a cheaper one${
+        share !== null ? ` &mdash; ${share} shares in every 100 traded that
+        way` : ""}. Nothing here says leave yet.</div>
+    </div>`;
+  }
+
+  host.innerHTML = `
+    <div class="cap">Buying pressure
+      <span class="jargon">order flow &middot; resets at the open</span></div>
+    <svg viewBox="0 0 ${W} ${H + 26}" style="width:100%;height:auto;display:block">
+      <line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}" stroke="var(--hair)"/>
+      <line x1="${L}" y1="${T}" x2="${L}" y2="${H - B}" stroke="var(--hair)"/>
+      ${zero}${mark}
+      <polyline points="${line(pxs, yp)}" fill="none" stroke="var(--muted)"
+                stroke-width="1.3" stroke-dasharray="4 3"/>
+      <polyline points="${line(cums, yc)}" fill="none" stroke="var(--ok-fg)"
+                stroke-width="2.2"/>
+      <rect x="${L}" y="${H - 8}" width="13" height="3" fill="var(--ok-fg)"/>
+      <text x="${L + 18}" y="${H - 4}" font-size="11"
+            fill="var(--ink)">buying, added up since 9:15</text>
+      <rect x="${L + 210}" y="${H - 7}" width="13" height="2" fill="var(--muted)"/>
+      <text x="${L + 228}" y="${H - 4}" font-size="11"
+            fill="var(--ink)">share price</text>
+      <text x="${L}" y="${H + 16}" font-size="11" fill="var(--muted)">both
+        climbing together means the rise is being paid for, not drifting</text>
+    </svg>
+    ${verdict}
+    <div class="cap" style="margin-top:12px">What this means</div>
+    <table><tbody>
+      <tr><td style="width:46%;color:var(--muted)">Bought more than sold,
+        today<span class="jargon">delta</span></td>
+        <td>${inr(now.delta)} shares</td></tr>
+      <tr><td style="color:var(--muted)">How sure we are
+        <span class="jargon">classified against a real bid/ask</span></td>
+        <td>${bookPct}% measured, ${100 - bookPct}% estimated</td></tr>
+      <tr><td style="color:var(--muted)">Trades seen today</td>
+        <td>${inr(ticks)}</td></tr>
+    </tbody></table>`;
 }
 
 // ---------------------------------------------------------------
@@ -1915,6 +2250,103 @@ async function runCommand(text){
   }catch(err){ showPanel(head, `<div class="empty">${att(err.message)}</div>`); }
 }
 
+// ==========================================================
+// THE TELEGRAM TAB.  30 August 2026.
+// ==========================================================
+//
+// Every figure here was already on disk and reached no screen. See
+// core/telegram_feed.channel_report(), which reads all ten channels
+// in one query because this runs on a dashboard cycle.
+const TG_STATE = {
+  live:         ["--ok-bg", "--ok-fg"],
+  late:         ["--warn-bg", "--warn-fg"],
+  quiet:        ["--flat-bg", "--flat-fg"],
+  "off season": ["--flat-bg", "--flat-fg"],
+  "nothing yet":["--stop-bg", "--stop-fg"]
+};
+
+function whenText(v){
+  // "2026-08-30T04:15:42+00:00" -> "30 Aug 09:45", in IST. The stamps
+  // arrive from Telegram in UTC and from us in local time, so the
+  // marker decides which needs shifting -- a column that silently
+  // mixed the two would be worse than no column.
+  // ---- ONE FORMAT IN BOTH COLUMNS. 30 August 2026. ----
+  //
+  // The first version formatted a UTC stamp as "30 Aug 09:45" and fell
+  // back to a raw slice for a local one -- so "Last post" and "Bot
+  // read it", side by side on the same row, read "30 Aug 09:45" and
+  // "08-30 09:47". Two formats in adjacent columns is how a reader
+  // starts doubting both.
+  //
+  // Telegram sends UTC and we store local, so only the first needs
+  // shifting; the marker on the string decides which it is.
+  if (!v) return "\u2014";
+  const raw = String(v);
+  const d = new Date(raw);
+  if (isNaN(d)) return raw.slice(0, 16).replace("T", " ");
+  const utc = /[Zz]|[+-]\d\d:?\d\d$/.test(raw);
+  const at = utc ? new Date(d.getTime() + (5 * 60 + 30) * 60000) : d;
+  const mon = ["Jan","Feb","Mar","Apr","May","Jun",
+               "Jul","Aug","Sep","Oct","Nov","Dec"];
+  const pad = x => String(x).padStart(2, "0");
+  const day = utc ? at.getUTCDate() : at.getDate();
+  const m   = utc ? at.getUTCMonth() : at.getMonth();
+  const hh  = utc ? at.getUTCHours() : at.getHours();
+  const mm  = utc ? at.getUTCMinutes() : at.getMinutes();
+  return `${pad(day)} ${mon[m]} ${pad(hh)}:${pad(mm)}`;
+}
+
+function lateText(m){
+  if (m === null || m === undefined) return "\u2014";
+  if (m < 60) return m + " min";
+  const h = Math.floor(m / 60);
+  return h + "h " + (m % 60) + "m";
+}
+
+function drawTelegram(s){
+  const rows = s.telegram_channels || [];
+  const body = $("tgbody");
+  if (!body) return;
+  if (!rows.length){
+    body.innerHTML = `<tr><td colspan="10" class="empty">no channels
+      configured &mdash; run py tools/telegram_setup.py</td></tr>`;
+    $("tgnote").textContent = "\u2014";
+    return;
+  }
+  // The banner that answers "why is Earnings Pulse on the slow loop?"
+  // before he asks it.
+  const season = rows.some(r => r.role === "results" && r.quick);
+  const behind = rows.filter(r => r.state === "late").length;
+  $("tgnote").innerHTML = `${rows.length} channels &middot; ` +
+    (season ? "results season &mdash; results channels on the fast loop"
+            : "out of results season &mdash; results channels on the 5 min loop") +
+    (behind ? ` &middot; <span style="color:var(--warn-fg)">${behind} running late</span>` : "");
+
+  body.innerHTML = rows.map(r => {
+    const tone = TG_STATE[r.state] || TG_STATE.quiet;
+    const pics = r.pictures
+      ? `${r.pictures_read} of ${r.pictures}`
+      : `<span style="color:var(--muted)">text only</span>`;
+    const loop = r.loop_seconds >= 300 ? "5 min" : (r.loop_seconds + " sec");
+    const lateTone = (r.late_minutes !== null && r.late_minutes !== undefined
+                      && r.late_minutes > 10) ? "var(--warn-fg)" : "var(--muted)";
+    return `<tr>
+      <td>${r.name || ""}<div class="flowsub">@${r.handle || ""}</div></td>
+      <td><span style="font-size:12px;color:var(--muted)">${r.role || ""}</span></td>
+      <td>${chip(loop, r.quick ? "--ok-bg" : "--flat-bg",
+                 r.quick ? "--ok-fg" : "--flat-fg")}</td>
+      <td style="font-size:12px">${whenText(r.last_post)}</td>
+      <td style="font-size:12px">${whenText(r.last_read)}</td>
+      <td class="num" style="color:${lateTone}">${lateText(r.late_minutes)}</td>
+      <td class="num">${r.held || 0}</td>
+      <td class="num">${pics}</td>
+      <td class="num">${r.named_a_stock || 0}</td>
+      <td><span class="tgstate" style="background:var(${tone[0]});
+          color:var(${tone[1]})">${r.state || ""}</span></td>
+    </tr>`;
+  }).join("");
+}
+
 function drawBrain(s){
   const m = (s && s.opportunity_memory) || {};
   const rows = m.families || [];
@@ -2093,11 +2525,11 @@ document.addEventListener("keydown", e => {
 document.querySelectorAll(".tabs [data-tab]").forEach(b =>
   b.addEventListener("click", () => {
     const name = b.dataset.tab;
-    if (!["pre", "live", "post", "watch", "brain"].includes(name)) return;
+    if (!["pre", "live", "post", "watch", "brain", "tg"].includes(name)) return;
     document.querySelectorAll(".tabs [data-tab]").forEach(
       x => x.classList.remove("on"));
     b.classList.add("on");
-    for (const pane of ["pre", "live", "post", "watch", "brain"])
+    for (const pane of ["pre", "live", "post", "watch", "brain", "tg"])
       $(pane + "-pane").style.display = (pane === name) ? "" : "none";
   }));
 

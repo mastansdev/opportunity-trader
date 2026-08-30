@@ -853,6 +853,43 @@ def build_app(dashboard_state, trade_controller, master_loader,
             warn(f"[SCORE] failed: {exc}")
             return {"available": False, "why": str(exc)}
 
+    @app.get("/api/flow/{symbol}")
+    def flow_for(symbol: str):
+        """Today's buying and selling for one stock, minute by minute.
+
+        ---- NOT ON THE SNAPSHOT. 30 August 2026. ----
+
+        A session is up to 375 minutes. Carrying that for every row on
+        the board would put tens of thousands of points through the
+        websocket once a second to draw a chart nobody is looking at.
+        This is fetched when he opens the card, and only then.
+
+            series    [{"minute","cum","ltp"}] -- oldest first, with
+                      the running total built on read
+            now       the live reading, which is fresher than the
+                      store: order_flow flushes every 30 seconds
+            diverged  set when price kept making highs after the
+                      buying stopped -- see core/order_flow.py
+
+        Read-only, no token: it says nothing a price screen does not.
+        """
+        try:
+            from core import order_flow
+
+            name = str(symbol or "").upper()
+            series = order_flow.session_series(name)
+            return _json_safe({
+                "symbol": name,
+                "series": [{"minute": r["minute"], "cum": r["cum"],
+                            "ltp": r["ltp"]} for r in series],
+                "now": order_flow.pressure(name),
+                "diverged": order_flow.divergence(name, series=series),
+            })
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[FLOW] {symbol}: {exc}")
+            return {"symbol": symbol, "series": [], "now": None,
+                    "diverged": None, "why": str(exc)}
+
     @app.get("/api/stock/{symbol}")
     def stock_card(symbol: str):  # noqa: D401  (see _json_safe above)
         """Everything the bot knows about one stock.

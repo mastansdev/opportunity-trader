@@ -84,9 +84,26 @@ def test_the_board_is_served():
 
 
 def test_every_column_he_asked_for_is_on_it():
+    """---- THE HEADINGS ARE IN ENGLISH NOW. 30 August 2026. ----
+
+        "i would love incase u used simpler words in whole dashboard
+         like day to day usage words which doesn't disturb the actual
+         meaning of the real trading terminology"
+        "keep both words"                        -- the operator
+
+    The columns are all still here. CMP is headed "Price now" with
+    "CMP" under it in grey, and the same for the rest -- so this
+    checks the reading is present AND that the real term survived the
+    rename, which is the half he was protecting.
+    """
     page = _board().text
-    for column in ("CMP", "Chg", "Open", "High", "Low", "Volume",
-                   "Prev close"):
+    for plain, jargon in (("Price now", "CMP"),
+                          ("Today", "change"),
+                          ("Yesterday", "prev close"),
+                          ("Money traded", "turnover")):
+        assert f'>{plain}<span class="jargon">{jargon}<' in page, (
+            f"{plain} ({jargon}) column is missing")
+    for column in ("Open", "High", "Low", "Volume"):
         assert f">{column}<" in page, f"{column} column is missing"
 
 
