@@ -281,7 +281,10 @@ def fetch_symbol(bse, symbol, store, verbose=False):
             source="bse:resultsSnapshot",
             sales=rec.get("sales"), pat=rec.get("pat"), eps=rec.get("eps"),
             operating_profit=rec.get("operating_profit"),
-            opm_pct=rec.get("opm_pct"), other_income=rec.get("other_income"))
+            opm_pct=rec.get("opm_pct"), other_income=rec.get("other_income"),
+            # Which set of books, decided from the payload's own
+            # full-year column. See core/quarterly_results.py.
+            basis=rec.get("basis"))
         counts[outcome] += 1
     if verbose:
         print(f"   {symbol:<12} code {code}  "

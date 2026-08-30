@@ -105,8 +105,11 @@ def test_unrecognised_line_items_are_skipped_not_guessed():
     payload = {"results_in_crores": {
         "fields": ["title", "Jun-26"],
         "data": [["Revenue", "100"], ["Some Exotic Metric", "42"]]}}
+    # `basis` joined every record on 30 August -- which set of books the
+    # figure is from, decided off the payload's own full-year column.
+    # There is no year column here, so it is None: unknown, not "alt".
     assert parse_results_snapshot(payload) == [
-        {"period_label": "Jun-26", "sales": 100.0}]
+        {"period_label": "Jun-26", "sales": 100.0, "basis": None}]
 
 
 def test_a_manufacturers_line_items_also_parse():

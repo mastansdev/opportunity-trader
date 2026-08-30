@@ -161,9 +161,61 @@ class QuarterlyResults:
             # Without this column, "the bot knew" and "the bot could have
             # known" are indistinguishable after the fact.
             Column("read_at", DateTime(timezone=True), default=_utcnow),
+            # ==========================================================
+            # WHICH SET OF BOOKS THIS QUARTER IS FROM. 30 Aug 2026.
+            # ==========================================================
+            #
+            #     "fix that basis column so those 8 grade properly"
+            #                                     -- the operator
+            #
+            # A company files STANDALONE and CONSOLIDATED accounts, and
+            # for a holding company they are wildly different numbers.
+            # Every source here serves whichever it has and none of them
+            # says which:
+            #
+            #     COROMANDEL, from BSE on 30 August
+            #       Revenue  Jun-26 7,743.55  Mar-26 56.61  FY 305.31
+            #
+            # Both quarters stored, compared, +13,579% QoQ, no grade.
+            # The arithmetic was perfect and the two figures were never
+            # comparable.
+            #
+            # HOW IT IS DECIDED, without guessing: the payload's own
+            # full-year column is the anchor. A quarter that sits at a
+            # sane share of that year belongs to the year's basis; one
+            # that does not belongs to a different set of books. That is
+            # arithmetic on figures BSE printed together, not an opinion
+            # about the company.
+            #
+            # "main"  agrees with the full-year column beside it
+            # "alt"   does not -- a different basis, whichever it is
+            # None    no year column to judge against, so unknown
+            Column("basis", String(16)),
             UniqueConstraint("symbol", "period_end", name="uq_quarter"),
         )
         self.metadata.create_all(self.engine)
+        self._add_missing_columns()
+
+    def _add_missing_columns(self):
+        """Add columns this build knows about to a store written by an
+        older one. Never raises: a store that cannot be migrated must
+        still be readable, and every caller treats a missing value as
+        unknown already."""
+        try:
+            with self.engine.begin() as conn:
+                have = {r[1] for r in conn.exec_driver_sql(
+                    "PRAGMA table_info(quarterly_results)")}
+                if "basis" not in have:
+                    conn.exec_driver_sql(
+                        "ALTER TABLE quarterly_results ADD COLUMN basis TEXT")
+                    from core.logger import decision
+                    decision("[RESULTS] Added the `basis` column. Rows "
+                             "written before today carry NULL, which reads "
+                             "as unknown and compares as it always did.")
+        except Exception as exc:                           # noqa: BLE001
+            from core.logger import warn
+            warn(f"[RESULTS] Could not add the basis column ({exc}). "
+                 f"Comparisons fall back to matching on source.")
 
     # ----------------------------------------------------------
     # WRITE
@@ -224,7 +276,8 @@ class QuarterlyResults:
 
     def remember(self, symbol, period_end, sales=None, other_income=None,
                  operating_profit=None, opm_pct=None, pat=None, eps=None,
-                 period_label=None, source="bse", trusted=False):
+                 period_label=None, source="bse", trusted=False,
+                 basis=None):
         """Store or update one quarter. Returns "new", "updated" or
         "unchanged" so a fetcher can report honestly -- "0 new" is
         ambiguous between "nothing arrived" and "nothing was different",
@@ -277,6 +330,7 @@ class QuarterlyResults:
             sales=sales, other_income=other_income,
             operating_profit=operating_profit, opm_pct=opm_pct,
             pat=pat, eps=eps, period_label=period_label, source=source,
+            basis=basis,
         )
         with self.engine.begin() as conn:
             row = conn.execute(
@@ -351,9 +405,21 @@ class QuarterlyResults:
         # one exists. Falling back to the next row otherwise keeps the
         # old behaviour for the single-source case, which is most of
         # them -- and _implausible_change() still guards what is left.
-        prev = next((r for r in rows[1:]
-                     if r.get("source") and r.get("source") == latest.get("source")),
-                    rows[1])
+        # BASIS FIRST, then source. A stock's standalone quarter and its
+        # consolidated one are different companies as far as arithmetic
+        # is concerned, and no source labels which it is serving -- see
+        # the basis column above for how it is decided.
+        def _match(row):
+            here, there = latest.get("basis"), row.get("basis")
+            if here and there:
+                return here == there
+            return bool(row.get("source")) and row["source"] == latest.get("source")
+
+        prev = next((r for r in rows[1:] if _match(r)), None)
+        if prev is None:
+            # Nothing comparable. Saying so is the answer -- the
+            # alternative is the +13,579% that started this.
+            return None
 
         # Same quarter a year ago: the row closest to 365 days back,
         # matched by date rather than by counting four rows back -- a
@@ -363,16 +429,11 @@ class QuarterlyResults:
         # Same source first, for the same reason as prev above: AVL
         # read +1,454% YoY off a filing_pdf quarter against a
         # pulse_grid one.
-        for same_source in (True, False):
-            for r in rows[1:]:
-                if r is prev:
-                    continue
-                if same_source and r.get("source") != latest.get("source"):
-                    continue
-                if abs(r["period_end"].toordinal() - target) <= 45:
-                    year_ago = r
-                    break
-            if year_ago is not None:
+        for r in rows[1:]:
+            if r is prev or not _match(r):
+                continue
+            if abs(r["period_end"].toordinal() - target) <= 45:
+                year_ago = r
                 break
 
         def block(base):
@@ -472,6 +533,11 @@ MAX_BELIEVABLE_SALES_CHANGE_PCT = 400.0
 # newest quarter belongs to the NEXT financial year, so exceeding the
 # previous year's total is growth, not a fault. COROMANDEL's was 25x.
 QUARTER_OVER_YEAR = 1.5
+
+# ...and the other end. A quarter worth less than this share of its own
+# year is not that year's fourth quarter; COROMANDEL's Mar-26 sat at
+# 18.5% of its year (fine) while Jun-26 sat at 2,537% (not).
+QUARTER_MIN_SHARE = 0.02
 
 
 def _implausible_change(qoq, yoy):
@@ -644,6 +710,16 @@ def parse_results_snapshot(payload):
     # Nothing is kept from a payload that fails. Storing the columns
     # that happen to agree would leave the store holding a mixture and
     # no way to tell afterwards which basis each row came from.
+    # THE FULL-YEAR COLUMN IS THE ANCHOR, and it was being discarded.
+    # A quarter sitting at a sane share of the year beside it belongs
+    # to that year's set of books; one that does not belongs to a
+    # different set. Arithmetic on figures BSE printed together, not an
+    # opinion about the company.
+    #
+    # The first version of this DROPPED the whole payload. Labelling is
+    # strictly better: nothing is thrown away, the bad comparison is
+    # still prevented, and the day a second quarter arrives on the same
+    # basis the pair grades on its own.
     year_sales = None
     for row in rows:
         if not isinstance(row, (list, tuple)) or len(row) < 2:
@@ -654,24 +730,14 @@ def parse_results_snapshot(payload):
             if str(label).strip().upper().startswith("FY") and len(row) > col:
                 year_sales = _num(row[col])
         break
-    if year_sales and year_sales > 0:
-        for row in rows:
-            if not isinstance(row, (list, tuple)) or len(row) < 2:
-                continue
-            if _TITLE_MAP.get(str(row[0]).strip().lower()) != "sales":
-                continue
-            for col, label in enumerate(fields[1:], start=1):
-                if str(label).strip().upper().startswith("FY"):
-                    continue
-                got = _num(row[col]) if len(row) > col else None
-                if got is not None and got > year_sales * QUARTER_OVER_YEAR:
-                    from core.logger import warn
-                    warn(f"[RESULTS] Dropping a snapshot whose own columns "
-                         f"disagree: {label} sales {got:,.2f} against a full "
-                         f"year of {year_sales:,.2f}. BSE is serving more "
-                         f"than one reporting basis; none of it is stored.")
-                    return []
-            break
+
+    def _basis_for(quarter_sales):
+        """"main", "alt", or None when there is nothing to judge by."""
+        if not year_sales or year_sales <= 0 or quarter_sales is None:
+            return None
+        share = quarter_sales / year_sales
+        return "main" if QUARTER_MIN_SHARE <= share <= QUARTER_OVER_YEAR \
+            else "alt"
 
     out = []
     for col, label in enumerate(fields[1:], start=1):
@@ -694,7 +760,21 @@ def parse_results_snapshot(payload):
                 value *= scale
             record[key] = value
         if len(record) > 1:
+            record["basis"] = _basis_for(record.get("sales"))
             out.append(record)
+
+    # Say it once, loudly, when a payload turns out to hold two sets of
+    # books. Silence here is how COROMANDEL's +13,579% reached a screen.
+    kinds = {r.get("basis") for r in out if r.get("basis")}
+    if len(kinds) > 1:
+        from core.logger import warn
+        detail = ", ".join(f"{r['period_label']} {r.get('sales'):,.2f} "
+                           f"[{r['basis']}]" for r in out
+                           if r.get("sales") is not None)
+        warn(f"[RESULTS] This snapshot holds more than one reporting "
+             f"basis against a full year of {year_sales:,.2f}: {detail}. "
+             f"They are stored, labelled, and never compared with each "
+             f"other.")
     return out
 
 

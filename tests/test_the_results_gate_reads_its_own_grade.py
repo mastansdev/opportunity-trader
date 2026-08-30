@@ -102,24 +102,23 @@ _COROMANDEL = {
                  ["NPM %", "4.87", "2.73", "6.58"]]}}
 
 
-def test_a_quarter_bigger_than_its_own_year_is_not_stored():
+def test_a_quarter_bigger_than_its_own_year_is_kept_and_labelled():
     """Fetched live from BSE on 30 August. Every column is internally
     consistent -- 376.96/7743.55 = 4.87% and 1.54/56.61 = 2.72%, both
     matching the NPM row BSE printed beside them -- and one quarter is
     twenty-five times the whole financial year next to it.
 
-    Those cannot be the same company on the same basis. Storing them
-    as one series produced the +13,579% that left COROMANDEL ungraded.
+    Those cannot be the same company on the same basis. Storing them as
+    one series produced the +13,579% that left COROMANDEL ungraded.
+
+    The first fix DROPPED the payload. Labelling replaced it: nothing
+    is thrown away, the bad comparison is still prevented, and the day
+    a second quarter arrives on the same basis the pair grades by
+    itself. See test_a_snapshot_with_two_bases_is_labelled_not_dropped.
     """
-    assert parse_results_snapshot(_COROMANDEL) == []
-
-
-def test_nothing_is_kept_from_a_payload_that_fails():
-    """Keeping the columns that happen to agree would leave the store
-    holding a mixture, with no way to tell afterwards which basis any
-    row came from."""
-    got = parse_results_snapshot(_COROMANDEL)
-    assert not any(r.get("period_label") == "Mar-26" for r in got)
+    rows = parse_results_snapshot(_COROMANDEL)
+    assert len(rows) == 2
+    assert {r["basis"] for r in rows} == {"main", "alt"}
 
 
 def test_growth_is_not_mistaken_for_a_broken_payload():
@@ -149,3 +148,96 @@ def test_the_threshold_is_stated_and_loose():
     from core.quarterly_results import QUARTER_OVER_YEAR
 
     assert 1.0 < QUARTER_OVER_YEAR <= 4.0
+
+
+# ------------------------------------------------ which set of books
+
+def test_a_snapshot_with_two_bases_is_labelled_not_dropped():
+    """---- WHICH SET OF BOOKS. 30 August 2026. ----
+
+        "fix that basis column so those 8 grade properly"
+
+    A company files STANDALONE and CONSOLIDATED accounts, and for a
+    holding company they are wildly different numbers. No source says
+    which it is serving.
+
+    The payload's own full-year column decides it: a quarter sitting at
+    a sane share of that year belongs to the year's books; one that
+    does not belongs to a different set. Arithmetic on figures BSE
+    printed together, not an opinion about the company.
+
+    The first version DROPPED such a payload. Labelling is strictly
+    better -- nothing is thrown away, the bad comparison is still
+    prevented, and the day a second quarter arrives on the same basis
+    the pair grades on its own.
+    """
+    rows = {r["period_label"]: r for r in parse_results_snapshot(_COROMANDEL)}
+    assert rows["Mar-26"]["basis"] == "main"     # 56.61 of a 305.31 year
+    assert rows["Jun-26"]["basis"] == "alt"      # 7,743.55 of the same year
+
+
+def test_one_basis_throughout_is_all_main():
+    clean = {"results_in_crores": {
+        "fields": ["title", "Jun-26", "Mar-26", "FY25-26"],
+        "data": [["Revenue", "130.00", "120.00", "480.00"]]}}
+    assert {r["basis"] for r in parse_results_snapshot(clean)} == {"main"}
+
+
+def test_no_year_column_means_the_basis_is_unknown():
+    """Unknown is not "alt". With nothing to anchor on, the comparison
+    falls back to matching on source, exactly as before."""
+    two_only = {"results_in_crores": {
+        "fields": ["title", "Jun-26", "Mar-26"],
+        "data": [["Revenue", "130.00", "120.00"]]}}
+    assert all(r["basis"] is None for r in parse_results_snapshot(two_only))
+
+
+def test_two_bases_are_never_compared(tmp_path):
+    """The whole point. COROMANDEL held Jun-26 on one basis and Mar-26
+    on another, and the store compared them: +13,579% QoQ, no grade,
+    and a number on screen that meant nothing."""
+    import datetime
+
+    from core.quarterly_results import QuarterlyResults
+
+    store = QuarterlyResults(url="sqlite:///" + str(tmp_path / "q.db"))
+    store.remember("TESTCO", datetime.date(2026, 3, 31), sales=56.61,
+                   pat=1.54, period_label="Mar-26", basis="main",
+                   source="bse", trusted=True)
+    store.remember("TESTCO", datetime.date(2026, 6, 30), sales=7743.55,
+                   pat=376.96, period_label="Jun-26", basis="alt",
+                   source="bse", trusted=True)
+    assert store.compare("TESTCO") is None, (
+        "two sets of books were compared with each other")
+
+
+def test_the_same_basis_still_compares(tmp_path):
+    import datetime
+
+    from core.quarterly_results import QuarterlyResults
+
+    store = QuarterlyResults(url="sqlite:///" + str(tmp_path / "q.db"))
+    store.remember("TESTCO", datetime.date(2026, 3, 31), sales=120.0,
+                   pat=12.0, period_label="Mar-26", basis="main",
+                   source="bse", trusted=True)
+    store.remember("TESTCO", datetime.date(2026, 6, 30), sales=130.0,
+                   pat=14.0, period_label="Jun-26", basis="main",
+                   source="bse", trusted=True)
+    got = store.compare("TESTCO")
+    assert got is not None and got["qoq"]["sales"] is not None
+
+
+def test_an_older_store_without_the_column_still_reads(tmp_path):
+    """Rows written before today carry NULL, which reads as unknown and
+    compares on source exactly as it always did."""
+    import datetime
+
+    from core.quarterly_results import QuarterlyResults
+
+    store = QuarterlyResults(url="sqlite:///" + str(tmp_path / "q.db"))
+    for end, label, sales in ((datetime.date(2026, 3, 31), "Mar-26", 120.0),
+                              (datetime.date(2026, 6, 30), "Jun-26", 130.0)):
+        store.remember("OLDCO", end, sales=sales, pat=sales / 10,
+                       period_label=label, source="bse", trusted=True)
+    got = store.compare("OLDCO")
+    assert got is not None and got["qoq"]["sales"] is not None
