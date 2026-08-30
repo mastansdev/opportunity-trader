@@ -64,8 +64,8 @@
    "last": 99.677,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 0.52,
-   "previous": 99.16,
+   "change_pct": -0.03,
+   "previous": 99.702,
    "label": "Dollar index",
    "group": "RATES",
    "symbol": "DX-Y.NYB"
@@ -74,8 +74,8 @@
    "last": 83.4,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -0.16,
-   "previous": 83.53,
+   "change_pct": 0.0,
+   "previous": 83.4,
    "label": "Crude oil",
    "group": "ENERGY",
    "symbol": "CL=F"
@@ -84,8 +84,8 @@
    "last": 2.888,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -0.65,
-   "previous": 2.907,
+   "change_pct": 0.0,
+   "previous": 2.888,
    "label": "Natural gas",
    "group": "ENERGY",
    "symbol": "NG=F"
@@ -94,8 +94,8 @@
    "last": 4529.9,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -1.73,
-   "previous": 4609.7,
+   "change_pct": 1.16,
+   "previous": 4478.1,
    "label": "Gold",
    "group": "METALS",
    "symbol": "GC=F"
@@ -104,8 +104,8 @@
    "last": 67.786,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -2.37,
-   "previous": 69.429,
+   "change_pct": 1.18,
+   "previous": 66.995,
    "label": "Silver",
    "group": "METALS",
    "symbol": "SI=F"
@@ -114,8 +114,8 @@
    "last": 6.659,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 1.09,
-   "previous": 6.587,
+   "change_pct": 1.48,
+   "previous": 6.562,
    "label": "Copper",
    "group": "METALS",
    "symbol": "HG=F"
@@ -211,7 +211,7 @@
    "symbol": "JPY=X"
   }
  },
- "fetched_at": "2026-08-30 07:47:21",
- "last_success_at": "2026-08-30 07:47:21",
+ "fetched_at": "2026-08-30 09:31:00",
+ "last_success_at": "2026-08-30 09:31:00",
  "failed": []
 }

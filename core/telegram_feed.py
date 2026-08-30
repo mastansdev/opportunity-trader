@@ -1458,16 +1458,68 @@ class TelegramFeed:
         try:
             from core.feed_clock import channel_kind
 
+            in_season = self._results_matter_today()
             picked = []
             for entry in self.channels:
                 kinds = {channel_kind(entry.get(key))
                          for key in ("handle", "name")}
                 if kinds & set(self.SLOW_KINDS):
+                    # ---- IN SEASON THE RESULTS CHANNELS LEAD. ----
+                    #      30 August 2026.
+                    #
+                    #     "bot must follow the NSE calendar - follow
+                    #      results period . (only that time bot
+                    #      prioritizes the result channels from
+                    #      telegram too)"          -- the operator
+                    #
+                    # "results" was in SLOW_KINDS unconditionally, so
+                    # Earnings Pulse, Earnings 360 and Earnings Pro sat
+                    # on the five minute loop on 14 August -- the Q1
+                    # deadline, the single busiest filing day of the
+                    # quarter -- for exactly the same reason they sit
+                    # there on a quiet Tuesday in September.
+                    #
+                    # core/results_calendar.in_results_season() has
+                    # known the answer since it was written. Only
+                    # core/feed_clock.py ever asked it, and only to
+                    # decide whether a quiet channel was a fault.
+                    if "results" in kinds and in_season:
+                        picked.append(entry)
                     continue
                 picked.append(entry)
             return picked or list(self.channels)
         except Exception:                                  # noqa: BLE001
             return list(self.channels)
+
+    def _results_matter_today(self, day=None):
+        """Should the results channels be read on the fast loop?
+
+        Two ways to say yes, because neither alone is enough:
+
+            in_results_season()   the SEBI Regulation 33 windows --
+                                  the four weeks running up to each
+                                  deadline, which is when the bulk
+                                  files. 14 August yes, 24 August no.
+            symbols_on(day)       a straggler reporting OUTSIDE the
+                                  window. One company is scheduled for
+                                  31 August 2026; the window closed on
+                                  the 14th.
+
+        False on any failure. Being slow on the results channels out
+        of season is the behaviour that has shipped for weeks; being
+        wrong about the date must not make the pass blind.
+        """
+        try:
+            from core.results_calendar import in_results_season
+            if in_results_season(day):
+                return True
+        except Exception:                                  # noqa: BLE001
+            return False
+        try:
+            from core.results_calendar import ResultsCalendar
+            return bool(ResultsCalendar().symbols_on(day))
+        except Exception:                                  # noqa: BLE001
+            return False
 
     # ------------------------------------------------------------
     # keeping it CURRENT
