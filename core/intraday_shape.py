@@ -34,18 +34,55 @@ Author : H&M Opportunity Trader
 
 BLOCK_MINUTES = 15
 
-# analyse() needs three bars to name a structure, so this is 45
-# minutes of session -- a first reading at about 10:00.
+# analyse() needs three bars to name a structure. Blocks slot on the
+# wall clock -- 09:15, 09:30, 09:45 -- so the third completes at 09:45
+# and that is when the first reading appears.
 MIN_BLOCKS = 3
 
+# ==========================================================
+# HOW EARLY IS THIS WORTH READING?  30 August 2026.
+# ==========================================================
+#
+#     "why we need to wait until 10 ? who ordered that & reason"
+#                                         -- the operator
+#
+# Nobody ordered it, and 10:00 was wrong as well: the first reading
+# lands at 09:45. But the honest answer to his question turned out to
+# be about TRUST, not timing, so it was measured rather than argued.
+#
+# Six sessions (21-28 August), the 120 most-traded stocks, 5,040
+# readings. The test is not "does it predict the close" -- the label
+# describes what has happened so far, and a day that changes should
+# change it. The test is whether it STAYS PUT long enough to act on:
+# does the reading at T still stand at T+30 minutes?
+#
+#     block     09:30  09:45  10:00  10:30  11:00  12:00  13:30
+#      5 min      35%    45%    51%    56%    59%    67%    68%
+#     15 min       --    45%    48%    59%    66%    70%    75%
+#
+# Fifteen wins from 10:30 on, which is why the block size stays. But
+# at 09:45 the label is a coin flip, and a screen that shows an
+# unsettled reading the same way as a settled one is lying by layout.
+#
+# Seven blocks is 10:50, the point the measurement crosses 60%.
+# Before that the reading is given AND marked.
+SETTLED_BLOCKS = 7
 
-def blocks(series, minutes=BLOCK_MINUTES):
+
+def blocks(series, minutes=None):
     """Group a minute series into blocks carrying high/low/close.
+
+    `minutes` defaults to BLOCK_MINUTES, read AT CALL TIME. Binding it
+    as a default argument -- which is how this was first written --
+    freezes it at import, so setting the module constant to measure a
+    different block size silently changed nothing and three sizes
+    produced identical results.
 
     series: [{"minute": "09:15", "ltp": 598.1}, ...] oldest first.
     Rows without a price are skipped -- a minute nothing traded in is
     not a flat minute, it is an absent one.
     """
+    minutes = int(minutes or BLOCK_MINUTES)
     held, out = None, []
     for row in (series or []):
         price = row.get("ltp")
@@ -110,7 +147,7 @@ def describe(structure, since, broke=None):
     return f"{words} since {since}" if since else f"{words} all session"
 
 
-def today(symbol=None, series=None, date=None, db_path=None):
+def today(symbol=None, series=None, date=None, db_path=None, minutes=None):
     """Today's shape for one stock, or None.
 
         {"structure": "UPTREND",         same words as the 7-day read
@@ -119,8 +156,11 @@ def today(symbol=None, series=None, date=None, db_path=None):
          "blocks": 9}
 
     None means not enough of the session has traded yet, and that is
-    the honest answer before about 10:00 -- not "sideways", which is a
-    claim.
+    the honest answer before 09:45 -- not "sideways", which is a claim.
+
+    `settled` is False until roughly 10:50. The reading before that is
+    real but flips within half an hour about as often as it holds, and
+    the caller is expected to say so rather than print it plainly.
 
     `series` is accepted so the caller can supply minutes it already
     holds; otherwise today's are read from the order flow store.
@@ -132,7 +172,7 @@ def today(symbol=None, series=None, date=None, db_path=None):
         except Exception:                                  # noqa: BLE001
             return None
 
-    bars = blocks(series)
+    bars = blocks(series, minutes=minutes)
     if len(bars) < MIN_BLOCKS:
         return None
 
@@ -157,4 +197,8 @@ def today(symbol=None, series=None, date=None, db_path=None):
     if not text:
         return None
     return {"structure": structure, "text": text, "since": since,
-            "blocks": len(bars), "broke": broke}
+            "blocks": len(bars), "broke": broke,
+            # False until about 10:50. Measured, not guessed -- see
+            # SETTLED_BLOCKS above. The reading is still shown; it is
+            # the certainty that is withheld, not the fact.
+            "settled": len(bars) >= SETTLED_BLOCKS}

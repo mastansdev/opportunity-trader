@@ -981,6 +981,16 @@ class DashboardState:
             # has asked twice what the bot last heard and from where,
             # and both times it had to be dug out of SQLite by hand.
             "telegram_channels": self._safe_channel_report(),
+            # ---- WHICH STOCKS WERE BLOCKED, AND WHY. 30 Aug 2026. ----
+            #
+            #     "why still today i cannot see which stocks were
+            #      blocked & reason"          -- the operator
+            #
+            # Because the name was never written down. See
+            # core/decision_log.py: `refusals` is (date, at, reason, n)
+            # and carries no symbol, while core/select.py has had
+            # {symbol: reason} in its hand the whole time.
+            "refused_today": self._safe_refused_today(),
             # ---- HE ASKED WHERE THE MONEY WENT. 16 August 2026. ----
             #
             #     "5$ completed within 5 days"
@@ -3426,6 +3436,33 @@ class DashboardState:
             result = None       # a panel must never take the snapshot down
         cache["rows"][symbol] = result
         return result
+
+    def _safe_refused_today(self):
+        """Which stocks the gates turned away today, and why.
+
+        Cached for a minute. The ranker refuses roughly 1,100 stocks a
+        cycle and this screen is rebuilt once a second; the store only
+        gains a row when a stock is refused for a NEW reason, so a
+        fresher read than a minute buys nothing.
+
+        Capped at 60 rows. The full list is every stock that did not
+        move enough, which is most of the universe on most days and is
+        not a thing anybody reads down.
+        """
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        cache = getattr(self, "_refused_cache", None)
+        if cache is not None and cache.get("minute") == stamp:
+            return cache["rows"]
+        rows = []
+        try:
+            log = getattr(self, "_decisions", None)
+            if log is not None and hasattr(log, "refused_symbols"):
+                rows = log.refused_symbols(limit=60) or []
+        except Exception:                                  # noqa: BLE001
+            rows = []
+        self._refused_cache = {"minute": stamp, "rows": rows}
+        return rows
 
     def _safe_channel_report(self):
         """One row per Telegram channel. Never raises, never blocks.
