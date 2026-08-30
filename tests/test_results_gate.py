@@ -30,20 +30,41 @@ class FakeAnnouncements:
 
 
 class FakeQuarterly:
+    """---- THE DOUBLE DID NOT MATCH THE REAL THING. 30 Aug 2026. ----
+
+    This returned a 2-TUPLE, and the real QuarterlyResults.compare()
+    returns a dict of eight keys. ResultsGate.grade_for() unpacked two
+    names from it -- correct against this fake, ValueError against the
+    live store on every single call, swallowed by its own except, and
+    the gate answered None for months.
+
+    So the suite proved a behaviour that never once happened in
+    production. A test double that is easier to satisfy than the real
+    object is not a test.
+
+    It now returns what the real one returns, grade included, computed
+    by the real grade() so the two cannot drift apart again.
+    """
+
     def __init__(self, grades=None):
         self._grades = grades or {}
 
     def compare(self, symbol):
+        from core.quarterly_results import grade as _grade
+
         g = self._grades.get(symbol)
         if g is None:
-            return None, None
+            return None
         # grade() reads sales/pat out of the QoQ block
         strong = {"sales": 30.0, "pat": 60.0}
         good = {"sales": 8.0, "pat": 9.0}
         weak = {"sales": -12.0, "pat": -20.0}
         mixed = {"sales": 12.0, "pat": -15.0}
-        return {"STRONG": strong, "GOOD": good,
-                "WEAK": weak, "MIXED": mixed}[g], None
+        qoq = {"STRONG": strong, "GOOD": good,
+               "WEAK": weak, "MIXED": mixed}[g]
+        return {"symbol": symbol, "period": "Jun-26", "latest": {},
+                "qoq": qoq, "yoy": None, "grade": _grade(qoq, None),
+                "summary": "", "unreliable": None}
 
 
 def _gate(filed=(), grades=None):

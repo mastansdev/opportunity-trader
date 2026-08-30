@@ -331,16 +331,48 @@ class QuarterlyResults:
         if len(rows) < 2:
             return None
         latest = rows[0]
-        prev = rows[1]
+
+        # ---- LIKE WITH LIKE. 30 August 2026. ----
+        #
+        #     "never pool all stocks , never average the stocks data"
+        #                                     -- the operator
+        #
+        # This took rows[0] and rows[1] whatever they were. The store
+        # holds the same company from three sources that do not report
+        # on the same basis:
+        #
+        #     NAZARA   Jun-26  428.77   filing_pdf   (consolidated)
+        #              Mar-26   18.44   bse          (standalone)
+        #
+        # +2,225% QoQ, arithmetic done perfectly on two numbers that
+        # were never comparable, and the stock went ungraded for it.
+        #
+        # So the previous quarter is taken from the SAME SOURCE where
+        # one exists. Falling back to the next row otherwise keeps the
+        # old behaviour for the single-source case, which is most of
+        # them -- and _implausible_change() still guards what is left.
+        prev = next((r for r in rows[1:]
+                     if r.get("source") and r.get("source") == latest.get("source")),
+                    rows[1])
 
         # Same quarter a year ago: the row closest to 365 days back,
         # matched by date rather than by counting four rows back -- a
         # missing quarter would silently make "YoY" mean five quarters.
         year_ago = None
         target = latest["period_end"].toordinal() - 365
-        for r in rows[2:]:
-            if abs(r["period_end"].toordinal() - target) <= 45:
-                year_ago = r
+        # Same source first, for the same reason as prev above: AVL
+        # read +1,454% YoY off a filing_pdf quarter against a
+        # pulse_grid one.
+        for same_source in (True, False):
+            for r in rows[1:]:
+                if r is prev:
+                    continue
+                if same_source and r.get("source") != latest.get("source"):
+                    continue
+                if abs(r["period_end"].toordinal() - target) <= 45:
+                    year_ago = r
+                    break
+            if year_ago is not None:
                 break
 
         def block(base):
@@ -434,6 +466,12 @@ class QuarterlyResults:
 # and _pct() already refuses a negative base, so a loss-to-profit swing
 # never produces a number here at all.
 MAX_BELIEVABLE_SALES_CHANGE_PCT = 400.0
+
+# A quarter bigger than this multiple of the full-year column beside
+# it is not the same company on the same basis. Loose on purpose: the
+# newest quarter belongs to the NEXT financial year, so exceeding the
+# previous year's total is growth, not a fault. COROMANDEL's was 25x.
+QUARTER_OVER_YEAR = 1.5
 
 
 def _implausible_change(qoq, yoy):
@@ -572,6 +610,68 @@ def parse_results_snapshot(payload):
         return []
 
     scale = 0.1 if payload.get("results_in_crores") is None else 1.0
+
+    # ==========================================================
+    # THREE COLUMNS, NOT ONE SERIES.  30 August 2026.
+    # ==========================================================
+    #
+    #     "fix those 8 stocks parsed sales figures"
+    #                                     -- the operator
+    #
+    # COROMANDEL, fetched live from BSE on 30 August:
+    #
+    #     Revenue      Jun-26 7,743.55   Mar-26 56.61   FY25-26 305.31
+    #     Net Profit          376.96             1.54            20.09
+    #     NPM %                  4.87             2.73             6.58
+    #
+    # Every column is internally consistent -- 376.96/7743.55 = 4.87%
+    # and 1.54/56.61 = 2.72%, both matching the NPM row BSE printed
+    # beside them. So no single column is corrupt.
+    #
+    # But ONE QUARTER IS TWENTY-FIVE TIMES THE WHOLE FINANCIAL YEAR
+    # next to it. Those three columns cannot be the same company on
+    # the same basis; BSE is serving standalone and consolidated in
+    # adjacent columns, and this parser stored them as one series. The
+    # +13,579% QoQ that left COROMANDEL ungraded was arithmetic done
+    # correctly on two figures that were never comparable.
+    #
+    # THE FULL-YEAR COLUMN IS THE CHECK, and it costs nothing: it is
+    # already in the payload and was being dropped. A quarter may
+    # exceed the PREVIOUS year's total -- it belongs to the next one
+    # and companies grow -- so the test is deliberately loose. Half as
+    # much again is growth; twenty-five times is a different entity.
+    #
+    # Nothing is kept from a payload that fails. Storing the columns
+    # that happen to agree would leave the store holding a mixture and
+    # no way to tell afterwards which basis each row came from.
+    year_sales = None
+    for row in rows:
+        if not isinstance(row, (list, tuple)) or len(row) < 2:
+            continue
+        if _TITLE_MAP.get(str(row[0]).strip().lower()) != "sales":
+            continue
+        for col, label in enumerate(fields[1:], start=1):
+            if str(label).strip().upper().startswith("FY") and len(row) > col:
+                year_sales = _num(row[col])
+        break
+    if year_sales and year_sales > 0:
+        for row in rows:
+            if not isinstance(row, (list, tuple)) or len(row) < 2:
+                continue
+            if _TITLE_MAP.get(str(row[0]).strip().lower()) != "sales":
+                continue
+            for col, label in enumerate(fields[1:], start=1):
+                if str(label).strip().upper().startswith("FY"):
+                    continue
+                got = _num(row[col]) if len(row) > col else None
+                if got is not None and got > year_sales * QUARTER_OVER_YEAR:
+                    from core.logger import warn
+                    warn(f"[RESULTS] Dropping a snapshot whose own columns "
+                         f"disagree: {label} sales {got:,.2f} against a full "
+                         f"year of {year_sales:,.2f}. BSE is serving more "
+                         f"than one reporting basis; none of it is stored.")
+                    return []
+            break
 
     out = []
     for col, label in enumerate(fields[1:], start=1):

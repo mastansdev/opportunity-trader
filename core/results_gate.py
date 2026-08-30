@@ -140,9 +140,34 @@ class ResultsGate:
         if self.quarterly is None:
             return None
         try:
-            from core.quarterly_results import grade as grade_fn
-            qoq, yoy = self.quarterly.compare(symbol)
-            return grade_fn(qoq, yoy)
+            # ---- IT NEVER ONCE RETURNED A GRADE. 30 Aug 2026. ----
+            #
+            # compare() returns a dict of EIGHT keys -- symbol, period,
+            # latest, qoq, yoy, grade, summary, unreliable. Unpacking a
+            # dict yields its KEYS, so `qoq, yoy = compare(symbol)`
+            # raised ValueError on every call, the except below
+            # swallowed it, and this returned None every single time.
+            #
+            # Proved on the live store: compare("TCS") carries
+            # grade="WEAK" and this function answered None.
+            #
+            # WHAT IT COST. block_reason() asks the published chip
+            # first, so a stock with an EXCELLENT / GREAT / GOOD card
+            # was unaffected. Everything else fell through to
+            # REASON_NO_GRADE -- "numbers not read yet" -- on its
+            # results day, with the numbers sitting in the store and a
+            # grade already computed from them.
+            #
+            # Which is the same fault as 5 August, one layer along:
+            # "the weaker source silently vetoed the stronger one, and
+            # the refusal read like a data problem rather than a
+            # decision". This time the weaker source was an exception.
+            #
+            # compare() already sets grade=None when the figures are
+            # not believable, so reading its own answer is both correct
+            # and less code than recomputing it.
+            got = self.quarterly.compare(symbol)
+            return got.get("grade") if isinstance(got, dict) else None
         except Exception:                                  # noqa: BLE001
             return None
 
