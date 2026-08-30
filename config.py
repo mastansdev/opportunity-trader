@@ -2604,6 +2604,53 @@ ENABLE_FULL_DEPTH_FEED = True
 ENABLE_ORDER_FLOW_RECORDER = True
 ORDER_FLOW_FLUSH_SECONDS = 30
 
+# ==========================================================
+# WHEN THE BUYING STOPS PAYING FOR THE RISE.  30 August 2026.
+# ==========================================================
+#
+#     "nice points to build confidence in user for trading &
+#      holding as long as data suggested"     -- the operator
+#
+# NinjaTrader, Bookmap and GoCharting all describe the same read,
+# and it is the one the operator arrived at himself on 29 August:
+# "at some point the momentum fades out, we can book the profits".
+# Cumulative delta starts each day at zero. While it climbs WITH
+# price, the rise is being paid for. When price keeps making new
+# highs and cumulative delta does not follow, the last buyers have
+# stopped lifting offers and the price is coasting.
+#
+# Read off data/order_flow.db, which core/order_flow.py already
+# writes every ORDER_FLOW_FLUSH_SECONDS and indexes on
+# (date, symbol). Nothing new is held on the websocket thread: a
+# per-minute series for 1,300 symbols would have added roughly
+# 60 MB to the live process for the sake of the twenty rows on
+# the board.
+
+# Two new price highs after the delta peak, not one. A single high
+# is noise on any tick; two is a pattern, and it is what the card
+# says out loud ("2 higher highs, delta did not follow").
+FLOW_DIVERGENCE_HIGHS = 2
+
+# ...and they must be recent. A stock that diverged at 10:00 and
+# has since traded sideways for four hours is not an exit today.
+FLOW_DIVERGENCE_RECENT_MINUTES = 45
+
+# Nothing is said at all before this much of the session is in.
+# Cumulative delta at 09:20 is five minutes of noise.
+FLOW_MIN_MINUTES = 20
+
+# ---- AND THE ONE THAT MATTERS MOST ----
+#
+# The tick rule is roughly 75-80% right, and worst in exactly the
+# fast markets this would be used in. A divergence computed from
+# inferred sides is a guess wearing the clothes of a measurement,
+# and it would tell him to SELL a winner on the strength of it.
+#
+# So the verdict is only given when most prints were classified
+# against a REAL bid and ask. Below this the card still shows the
+# reading and says plainly that it is estimated.
+FLOW_MIN_BOOK_PCT = 60.0
+
 # ---- THE CYCLE COULD NOT FINISH IN A SECOND. 29 August 2026. ----
 #
 # Measured on the real stores: dashboard_state.refresh() is asked to

@@ -66,6 +66,23 @@ def leg(prev, cur):
     """Classify one day against the day before it."""
     hh = cur["high"] > prev["high"]
     hl = cur["low"] > prev["low"]
+    # ---- AN UNCHANGED BAR IS NOT A DOWN BAR. 30 August 2026. ----
+    #
+    # "not a higher high AND not a higher low" also catches the bar
+    # that is EXACTLY the one before it, and called it DOWN. On daily
+    # bars that is 771 of 1,137,680 consecutive pairs -- 0.068%, rare
+    # enough to have never been noticed and wrong in every one.
+    #
+    # It surfaced on core/intraday_shape.py, which runs this same test
+    # over fifteen-minute blocks: a quiet stock repeats its high and
+    # low all morning, and the board would have printed "drifting
+    # down" for a share that had not moved at all.
+    #
+    # Surgical on purpose. Only the exactly-unchanged bar changes, and
+    # it becomes INSIDE -- no expansion either way, which is what it
+    # is. Every other combination classifies as it always has.
+    if cur["high"] == prev["high"] and cur["low"] == prev["low"]:
+        return INSIDE
     if hh and hl:
         return UP_LEG
     if not hh and not hl:

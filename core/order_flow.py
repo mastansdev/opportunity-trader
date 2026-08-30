@@ -474,3 +474,155 @@ class Recorder:
         diagnostic(f"[FLOW] Recorder stopped. {got['written']} minutes "
                    f"written ({wrote} on the way out), "
                    f"{got['observed']} ticks seen, {got['dropped']} dropped.")
+
+
+# ==========================================================
+# READING IT BACK: WHEN DID THE BUYING STOP PAYING?
+# ==========================================================
+#
+#     "nice points to build confidence in user for trading &
+#      holding as long as data suggested"
+#                                 -- operator, 30 August 2026
+#
+# Everything above RECORDS. This READS, for the screen only. It
+# still votes on nothing.
+#
+# The store is the source, not a new in-memory series. flow_minutes
+# already holds every minute and is indexed on (date, symbol);
+# keeping a per-minute series for 1,300 subscribed symbols would
+# have cost the live process roughly 60 MB to serve the twenty rows
+# on the board.
+
+def session_series(symbol, date=None, db_path=None):
+    """Today's minutes for one stock, oldest first.
+
+        [{"minute": "09:15", "delta": 4210.0, "cum": 4210.0,
+          "ltp": 598.1, "ticks": 44, "book_ticks": 42}, ...]
+
+    Empty list on any failure, and on a machine that has never
+    recorded a session. The running total is built here rather than
+    stored, so a gap in the middle cannot corrupt the earlier part.
+    """
+    name = str(symbol or "").upper()
+    if not name:
+        return []
+    day = date or datetime.now().strftime("%Y-%m-%d")
+    path = db_path or DB_PATH
+    if not os.path.exists(path):
+        return []
+    try:
+        conn = sqlite3.connect("file:" + path + "?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT minute, delta, ltp, ticks, book_ticks "
+                "FROM flow_minutes WHERE date = ? AND symbol = ? "
+                "ORDER BY minute", (day, name)).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return []
+
+    out, running = [], 0.0
+    for minute, delta, ltp, ticks, book_ticks in rows:
+        running += float(delta or 0.0)
+        out.append({"minute": minute, "delta": float(delta or 0.0),
+                    "cum": running, "ltp": ltp,
+                    "ticks": int(ticks or 0),
+                    "book_ticks": int(book_ticks or 0)})
+    return out
+
+
+def _minute_gap(older, newer):
+    """Whole minutes between two "HH:MM" strings, or None."""
+    try:
+        a = datetime.strptime(older, "%H:%M")
+        b = datetime.strptime(newer, "%H:%M")
+    except (TypeError, ValueError):
+        return None
+    return int((b - a).total_seconds() // 60)
+
+
+def divergence(symbol, date=None, db_path=None, series=None):
+    """Has price kept making highs after the buying stopped?
+
+    Returns None when there is nothing to say -- too little of the
+    session, no new highs, or the sides were mostly INFERRED rather
+    than read off a real bid and ask. Saying nothing is the honest
+    answer; a guess here would tell him to sell a winner.
+
+        {"diverged": True,
+         "since": "14:05",          when the buying peaked
+         "new_highs": 2,            price highs made after that
+         "book_pct": 94.1,          how much of it was measured
+         "why": "price made 2 new highs after 14:05 and buying did
+                 not follow"}
+
+    HOW IT DECIDES, in the order the questions are asked:
+
+        1. at least FLOW_MIN_MINUTES of the session are recorded
+        2. find the minute cumulative delta peaked
+        3. count the minutes AFTER that where price set a new high
+           for the day
+        4. that must be at least FLOW_DIVERGENCE_HIGHS, and the last
+           of them within FLOW_DIVERGENCE_RECENT_MINUTES -- a stock
+           that diverged at 10:00 and has gone sideways since is not
+           an exit at 15:00
+        5. and FLOW_MIN_BOOK_PCT of prints must have been classified
+           against a REAL bid and ask
+
+    Step 5 is the one that matters. The tick rule is 75-80% right,
+    and worst in exactly the fast markets this would be used in.
+    """
+    try:
+        from config import (FLOW_DIVERGENCE_HIGHS,
+                            FLOW_DIVERGENCE_RECENT_MINUTES,
+                            FLOW_MIN_MINUTES, FLOW_MIN_BOOK_PCT)
+    except Exception:                                      # noqa: BLE001
+        FLOW_DIVERGENCE_HIGHS, FLOW_DIVERGENCE_RECENT_MINUTES = 2, 45
+        FLOW_MIN_MINUTES, FLOW_MIN_BOOK_PCT = 20, 60.0
+
+    rows = series if series is not None else session_series(
+        symbol, date=date, db_path=db_path)
+    priced = [r for r in rows if r.get("ltp")]
+    if len(priced) < FLOW_MIN_MINUTES:
+        return None
+
+    ticks = sum(r["ticks"] for r in priced)
+    book = sum(r["book_ticks"] for r in priced)
+    book_pct = (book / ticks * 100.0) if ticks else 0.0
+
+    peak_at, peak = None, None
+    for row in priced:
+        if peak is None or row["cum"] > peak:
+            peak, peak_at = row["cum"], row["minute"]
+
+    # New highs for the day, counted only AFTER the buying peaked.
+    # The running max starts from the whole session so that a high
+    # made in the morning is not counted again in the afternoon.
+    high = None
+    new_highs, last_high_at = 0, None
+    for row in priced:
+        price = row["ltp"]
+        if high is None or price > high:
+            high = price
+            if peak_at is not None and row["minute"] > peak_at:
+                new_highs += 1
+                last_high_at = row["minute"]
+
+    if new_highs < FLOW_DIVERGENCE_HIGHS or last_high_at is None:
+        return None
+
+    gap = _minute_gap(last_high_at, priced[-1]["minute"])
+    if gap is not None and gap > FLOW_DIVERGENCE_RECENT_MINUTES:
+        return None
+
+    measured = book_pct >= FLOW_MIN_BOOK_PCT
+    return {
+        "diverged": True,
+        "measured": measured,
+        "since": peak_at,
+        "new_highs": new_highs,
+        "book_pct": round(book_pct, 1),
+        "why": (f"price made {new_highs} new highs after {peak_at} "
+                f"and buying did not follow"),
+    }
