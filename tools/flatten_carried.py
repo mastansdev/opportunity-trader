@@ -50,15 +50,48 @@ TRADES_DB = os.path.join("data", "trade_memory.db")
 SNAPSHOT = "http://127.0.0.1:8000/api/snapshot"
 
 
-def last_prices():
-    """{symbol: last_price} from the running dashboard, or {}."""
+CANDLES_DB = os.path.join("data", "backtest_candles.db")
+
+
+def last_prices(symbols=()):
+    """{symbol: last_price}.
+
+    ---- IT NEEDED A RUNNING DASHBOARD. 31 August 2026. ----
+
+    This read the live snapshot and returned {} if the snapshot was not
+    there. He ran it after main.py had exited, so every position printed
+    "no last price available, cannot close" and nothing closed -- a
+    maintenance tool that only works while the thing it is maintaining
+    is running.
+
+    The dashboard is still tried first: it is the freshest price and, if
+    the process is up, the one he is looking at. The candle store is the
+    fallback, and it is on disk whether anything is running or not.
+    """
+    out = {}
     try:
         snap = json.load(urllib.request.urlopen(SNAPSHOT, timeout=5))
+        out = {p["symbol"]: p.get("last_price") or p.get("cmp")
+               for p in snap.get("open_positions", [])
+               if p.get("last_price") or p.get("cmp")}
     except Exception:                                      # noqa: BLE001
-        return {}
-    return {p["symbol"]: p.get("last_price") or p.get("cmp")
-            for p in snap.get("open_positions", [])
-            if p.get("last_price") or p.get("cmp")}
+        pass
+
+    missing = [s for s in symbols if s not in out]
+    if not missing or not os.path.exists(CANDLES_DB):
+        return out
+    try:
+        conn = sqlite3.connect(f"file:{CANDLES_DB}?mode=ro", uri=True)
+        for symbol in missing:
+            row = conn.execute(
+                "SELECT c FROM candles WHERE symbol = ? "
+                "ORDER BY date DESC, minute DESC LIMIT 1", (symbol,)).fetchone()
+            if row and row[0]:
+                out[symbol] = row[0]
+        conn.close()
+    except sqlite3.Error:
+        pass
+    return out
 
 
 def carried(state, today):
@@ -89,7 +122,7 @@ def main():
               "opened today.")
         return 0
 
-    prices = last_prices()
+    prices = last_prices([symbol for symbol, _, _ in rows])
     print(f"  {len(rows)} position(s) carried from an earlier session:")
     plan = []
     for symbol, pos, opened in rows:
