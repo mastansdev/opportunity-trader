@@ -1695,6 +1695,14 @@ start of day limit: Rs ${bf.sod}` : "");
 
 // ---- THE STOCKS IT SAID NO TO. 30 August 2026. ----
 //
+// ---- ONE LINE PER STOCK, WITH ITS OWN NUMBER. 31 August 2026. ----
+//
+// The ditto mark under the first row was there because every stock in
+// a group shared one sentence. They do not: the sentence now ends in
+// that stock's own reading -- "down 7.3%", "up only 1.1%" -- and the
+// ditto was hiding exactly the number worth seeing. Grouping still
+// sorts them together; each row says its own figure.
+//
 // Grouped by reason, because "which gate is doing the refusing" is
 // the question behind his -- 40 names under "no volume behind it" is
 // a gate to argue with; the same 40 in symbol order is a list.
@@ -1718,8 +1726,7 @@ function drawRefused(s){
     const group = byReason[reason];
     return group.map((r, i) => `<tr>
       <td>${r.symbol}</td>
-      <td class="why">${i === 0 ? reason
-        : `<span style="color:var(--muted)">&ldquo;</span>`}</td>
+      <td class="why">${r.detail || reason}</td>
       <td class="num" style="font-size:12px">${
         String(r.first_at || "").slice(11, 16) || "\u2014"}</td>
       <td class="num">${r.cycles || 1}</td>

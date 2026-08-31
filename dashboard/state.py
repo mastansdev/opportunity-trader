@@ -1918,13 +1918,33 @@ class DashboardState:
         except Exception:                                  # noqa: BLE001
             found = None
         if found:
+            # ---- SAY WHICH KIND OF SOURCE. 31 August 2026. ----
+            #
+            # Two channels carry this figure and they are not equally
+            # reliable. News Pulse types it; Day Trader Telugu posts a
+            # picture of it, which has to be OCR'd, and OCR has already
+            # been caught inserting a digit -- one stored card reads
+            # -50,359.8 where the image plainly shows -5,039.8.
+            #
+            # A figure read off a picture is still worth showing; it is
+            # usually the first one to arrive. But the screen must not
+            # present it as if someone had typed it.
+            via = found.get("via")
+            note = "quoted by a Telegram channel, not read from NSE directly"
+            if via == "image":
+                note = ("read off a picture posted by a Telegram channel. "
+                        "Not typed, not from NSE -- treat as indicative "
+                        "until a typed figure confirms it")
+            elif found.get("disagrees_with_image"):
+                note = (note + ". A picture on another channel gave a "
+                        "different number; the typed one is shown")
             return {"available": True,
                     "fii_cr": found.get("fii_cr"),
                     "dii_cr": found.get("dii_cr"),
                     "as_of": found.get("as_of"),
                     "source": found.get("source"),
-                    "note": "quoted by a Telegram channel, not read from "
-                            "NSE directly"}
+                    "via": via,
+                    "note": note}
         return {"available": FII_NET_CR is not None or DII_NET_CR is not None,
                 "fii_cr": FII_NET_CR, "dii_cr": DII_NET_CR,
                 "source": "config",

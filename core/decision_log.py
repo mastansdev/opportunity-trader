@@ -42,11 +42,50 @@ Author : H&M Opportunity Trader
 
 import json
 import os
+import re
 import sqlite3
 import threading
 from datetime import datetime
 
 DB_PATH = os.path.join("data", "decisions.db")
+
+
+# ---- THE NUMBER MUST NOT BE PART OF THE KEY. 31 August 2026. ----
+#
+#     "Duplicates of data is not acceptable at all"   -- the operator
+#
+# refused_symbols is keyed UNIQUE (date, symbol, reason) so that a
+# stock refused all day is ONE row with n counting the cycles. That
+# only works if the reason is stable. It is not: the producers write
+# the live percentage into the sentence.
+#
+#     up only -7.2% -- not moving
+#     up only -7.3% -- not moving
+#     up only -7.4% -- not moving
+#
+# Three rows, one stock, one decision. On 31 August the table held 92
+# rows for a handful of names, and the "refused longest" list -- the
+# whole point of first_at -- was really "refused at this exact price
+# longest", which means nothing.
+#
+# So the number is lifted out of the key and kept beside it. `reason`
+# becomes the stable decision and `detail` carries the most recent
+# reading, which is the one worth showing anyway: what the stock is
+# doing NOW, not what it was doing when it was first turned away.
+_NUMBER_IN_A_REASON = re.compile(r"[-+]?\d[\d,]*\.?\d*\s*[%x]?")
+
+
+def stable_reason(why):
+    """The decision, with the live reading taken out of it."""
+    text = " ".join(str(why or "").split())
+    if not text:
+        return "", ""
+    stripped = " ".join(_NUMBER_IN_A_REASON.sub("", text).split())
+    stripped = " ".join(stripped.replace(" --", " --").split())
+    # A reason that was ONLY a number would normalise to nothing, and a
+    # blank key would merge unrelated refusals into one row. Keep the
+    # original in that case -- duplicates are better than a lie.
+    return (stripped or text), text
 
 
 class DecisionLog:
@@ -133,6 +172,11 @@ class DecisionLog:
                     n INTEGER NOT NULL DEFAULT 1,
                     UNIQUE (date, symbol, reason)
                 )""")
+            try:
+                conn.execute("ALTER TABLE refused_symbols "
+                             "ADD COLUMN detail TEXT")
+            except sqlite3.OperationalError:
+                pass                       # already there
             conn.execute("CREATE INDEX IF NOT EXISTS ix_refused_day "
                          "ON refused_symbols (date, symbol)")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_picks_date "
@@ -282,11 +326,13 @@ class DecisionLog:
                     # not the timestamp of the most recent cycle.
                     conn.executemany(
                         "INSERT INTO refused_symbols "
-                        "(date, symbol, reason, first_at, last_at, n) "
-                        "VALUES (?,?,?,?,?,1) "
+                        "(date, symbol, reason, detail, first_at, "
+                        " last_at, n) "
+                        "VALUES (?,?,?,?,?,?,1) "
                         "ON CONFLICT (date, symbol, reason) DO UPDATE SET "
-                        "last_at = excluded.last_at, n = n + 1",
-                        [(day, sym, why, at, at)
+                        "last_at = excluded.last_at, "
+                        "detail = excluded.detail, n = n + 1",
+                        [(day, sym) + stable_reason(why) + (at, at)
                          for sym, why in named.items()])
                 conn.commit()
                 conn.close()
@@ -314,15 +360,18 @@ class DecisionLog:
             with self._lock:
                 conn = self._connect()
                 rows = conn.execute(
-                    "SELECT symbol, reason, first_at, last_at, n "
+                    "SELECT symbol, reason, first_at, last_at, n, detail "
                     "FROM refused_symbols WHERE date = ? "
                     "ORDER BY n DESC, symbol LIMIT ?",
                     (day, int(limit))).fetchall()
                 conn.close()
         except sqlite3.Error:
             return []
+        # `detail` is the newest reading; `reason` is the decision. The
+        # screen wants the first and the grouping wants the second.
         return [{"symbol": r[0], "reason": r[1], "first_at": r[2],
-                 "last_at": r[3], "cycles": r[4]} for r in rows]
+                 "last_at": r[3], "cycles": r[4],
+                 "detail": r[5] or r[1]} for r in rows]
 
     # ---- read side, for tools/verify_picks.py -------------------
 

@@ -197,12 +197,38 @@ def test_the_ranking_reaches_the_order_path_and_starts_disarmed():
     auto = open("core/auto_entry.py", encoding="utf-8").read()
     assert "alert_only" in auto
     from config import ALERT_ONLY_MODE, TRADING_MODE
-    assert ALERT_ONLY_MODE is True, (
-        "ALERT_ONLY_MODE is False -- main.py will come up ARMED and the "
-        "dashboard ON switch will have nothing to turn on. He asked for "
-        "the opposite on 12 August: start observing, arm by hand. If "
-        "this was changed on purpose, flip this assertion and say why.")
+    # ---- FLIPPED ON PURPOSE, AND HERE IS WHY. 31 August 2026. ----
+    #
+    #     "keep simple ON = REAL TRADES . OFF = PAPER TRADES . all same
+    #      entry, exits, capital allotted & everything same."
+    #                                              -- the operator
+    #
+    # ALERT_ONLY_MODE was the third state: not trading at all. The
+    # assertion above defended it, and it was right to while three
+    # states existed. There are two now, and neither of them is
+    # "watch". OFF is a full paper day; ON sends the same decisions to
+    # Dhan.
+    #
+    # What that third state actually cost: on 31 August the bot
+    # produced 65 alerts and 0 trades, capping ten sessions with no
+    # completed trade of its own. It was never the gates refusing --
+    # it was this flag, which he had not asked for.
+    #
+    # The safety that assertion was protecting has not gone anywhere;
+    # it moved to where it can be checked. ALERT_ONLY_MODE could only
+    # say "do not trade". execution.live says "whose money", and
+    # LIVE_ALLOW_BOT_ENTRIES below is the one that has to be true
+    # before a bot decision can reach a real order.
+    assert ALERT_ONLY_MODE is False, (
+        "ALERT_ONLY_MODE is True -- the bot is back to watching, which "
+        "is the state he did not ask for and which produced ten "
+        "sessions without a trade. OFF must mean a full paper day.")
     assert TRADING_MODE == "PAPER", (
         "TRADING_MODE is not PAPER. Real automated orders need their "
         "own explicit decision (config.LIVE_ALLOW_BOT_ENTRIES), never a "
         "side effect of the alert-only flag.")
+    from config import LIVE_ALLOW_BOT_ENTRIES
+    assert LIVE_ALLOW_BOT_ENTRIES is False, (
+        "LIVE_ALLOW_BOT_ENTRIES is True. This is the flag the switch "
+        "actually consults before a bot-decided order may reach Dhan. "
+        "It stays False until he says otherwise -- his hand only.")

@@ -176,8 +176,17 @@ def movement(tape):
     move = (ltp - day_open) / day_open * 100.0
 
     if move < MIN_MOVE_PCT:
+        # ---- "UP ONLY -7.3%" WAS NONSENSE. 31 August 2026. ----
+        #
+        # ZEEL sat on the blocked list all day reading "up only -7.3%
+        # -- not moving". It was DOWN 7.3%, and it was moving plenty.
+        # The gate was right -- the bot only takes stocks moving up --
+        # but the sentence describing it was wrong in both directions
+        # at once, and it is the sentence he reads.
+        which = (f"down {abs(move):.1f}%" if move < 0
+                 else f"up only {move:.1f}%")
         return {"ok": False, "score": 0.0, "move_pct": round(move, 2),
-                "why": f"up only {move:.1f}% -- not moving"}
+                "why": f"{which} -- not moving up enough"}
     if ratio < MIN_VOLUME_RATIO:
         return {"ok": False, "score": 0.0, "move_pct": round(move, 2),
                 "why": f"{ratio:.1f}x volume -- the move has no "

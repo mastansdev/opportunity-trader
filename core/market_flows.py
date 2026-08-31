@@ -179,6 +179,68 @@ def _side_of(chunk):
     return 0
 
 
+# ---- THE CARD THE TELUGU CHANNEL POSTS. 31 August 2026. ----
+#
+#     "FII /DII data we will get from day trader telugu (img) & news
+#      pulse."                                        -- the operator
+#
+# It posts a PICTURE, not a sentence, and the prose parser below could
+# never read it -- it needs the words "buyers"/"sellers" and the card
+# has none. So Day Trader Telugu had contributed exactly nothing to
+# this figure, ever, while being named as one of the two sources.
+#
+# What the OCR of that card actually looks like, from his own store:
+#
+#     FIl & DIT CASH MARKET ACTIVITY
+#     FIl cash market DIl cash market
+#     ~ -298.26 a 4977.17
+#
+# Three things that took reading real rows to learn:
+#
+#   * OCR renders "FII" as "FIl", "Fll", "FII", "F11" -- capital I and
+#     lowercase l are the same shape in that font. Matching "FII"
+#     literally matches nothing.
+#   * The coloured arrows come out as junk: ~ a A y > « 4 ¥. They are
+#     the sign in the image and they are USELESS here. Every negative
+#     number in every stored card also carries a real minus sign, and
+#     that is the only thing the sign is read from. Guessing a sign off
+#     an arrow glyph would turn a heavy selling day into a heavy buying
+#     one, which is the one error this whole module exists to avoid.
+#   * FII comes first, DII second, always, because that is the order
+#     the two boxes are drawn in.
+_CARD_HEADER = re.compile(
+    r"f\s*[il1]{2}\s*cash\s*market.{0,40}?d\s*[il1]{2}\s*cash\s*market",
+    re.I | re.S)
+_CARD_NUMBER = re.compile(r"(-?\d[\d,]*\.?\d*)")
+
+
+def parse_flow_card(text):
+    """{"fii_cr": ..., "dii_cr": ...} from the image card, or None."""
+    body = str(text or "")
+    header = _CARD_HEADER.search(body)
+    if not header:
+        return None
+    # The two figures sit on the line under the header. Read a short
+    # way past it and stop at the derivatives block -- those are FII
+    # futures and options, not cash, and must never be mistaken for it.
+    tail = body[header.end():header.end() + 120]
+    cut = re.search(r"derivativ|future|option", tail, re.I)
+    if cut:
+        tail = tail[:cut.start()]
+    found = []
+    for match in _CARD_NUMBER.finditer(tail):
+        raw = match.group(1).rstrip(".").replace(",", "")
+        try:
+            found.append(float(raw))
+        except ValueError:
+            continue
+        if len(found) == 2:
+            break
+    if len(found) != 2:
+        return None
+    return {"fii_cr": round(found[0], 2), "dii_cr": round(found[1], 2)}
+
+
 def parse_flow_message(text):
     """{"fii_cr": ..., "dii_cr": ...} from one News Pulse line.
 
@@ -196,7 +258,7 @@ def parse_flow_message(text):
 
     hits = list(_PARTY.finditer(body))
     if not hits:
-        return None
+        return parse_flow_card(body)
 
     out = {}
     for index, hit in enumerate(hits):
@@ -228,7 +290,15 @@ def parse_flow_message(text):
         # be commentary restating a rounded version of the same figure.
         out.setdefault(key, round(value * side, 2))
 
-    return out or None
+    # Prose first, because it is typed and therefore exact. The card is
+    # the fallback for the mornings when only the picture has arrived.
+    #
+    # This must be checked HERE and not only up top: the OCR of the card
+    # contains the strings "FIl" and "DIl", so _PARTY finds hits and the
+    # early return never fires. Every hit then fails the buyers/sellers
+    # test -- the card has no such word -- and the whole thing returned
+    # None while looking like it had tried.
+    return out or parse_flow_card(body)
 
 
 def from_telegram(telegram, hours=FLOW_LOOKBACK_HOURS, limit=FLOW_SCAN_ROWS):
@@ -259,14 +329,69 @@ def from_telegram(telegram, hours=FLOW_LOOKBACK_HOURS, limit=FLOW_SCAN_ROWS):
         rows = telegram.recent(limit=limit, hours=hours) or []
     except Exception:                                      # noqa: BLE001
         return None
+    # ---- TYPED BEATS PHOTOGRAPHED. 31 August 2026. ----
+    #
+    #     "FII /DII data we will get from day trader telugu (img) &
+    #      news pulse."                              -- the operator
+    #
+    # Both post the same figure daily, and they are the only two that
+    # do. But one of them posts a PICTURE, and the OCR of that picture
+    # is not always right. From the operator's own store, both about
+    # the same session:
+    #
+    #   Day Trader Telugu (image, OCR)   FII  -50,359.8   <-- wrong
+    #   News Pulse        (typed text)   FIIs   5,040     <-- right
+    #   the image itself                        -5,039.8
+    #
+    # OCR inserted a digit. A ten-times-wrong FII figure is worse than
+    # no figure at all, and nothing downstream could have caught it,
+    # because -50,359.8 is a perfectly well-formed number.
+    #
+    # So the rows are read in two passes rather than one. Typed text
+    # wins outright. A photographed figure is used only when no typed
+    # one exists in the window, and it is marked as such so the panel
+    # can say where it came from. Neither source is dropped -- the
+    # image is what arrives first most mornings.
+    typed = None
+    photo = None
     for row in rows:                       # recent() is newest-first
-        body = (row.get("text") or "") + "\n" + (row.get("ocr_text") or "")
-        parsed = parse_flow_message(body)
-        if parsed:
-            parsed["as_of"] = row.get("at")
-            parsed["source"] = row.get("channel") or "Telegram"
-            return parsed
-    return None
+        if typed is None:
+            typed = _flow_from(row, row.get("text"), "text")
+        if photo is None:
+            photo = _flow_from(row, row.get("ocr_text"), "image")
+        if typed is not None and photo is not None:
+            break
+
+    if typed is None:
+        return photo
+    if photo is not None:
+        # Both are here. Say so when they disagree; do NOT try to pick
+        # a winner on size, which would be inventing a bound nobody
+        # measured. The typed one is already the one being returned.
+        for field in ("fii_cr", "dii_cr"):
+            a, b = typed.get(field), photo.get(field)
+            if a is None or b is None:
+                continue
+            if abs(a - b) > 1.0:
+                typed["disagrees_with_image"] = True
+                warn(f"[FLOWS] {field} differs between the two sources: "
+                     f"{typed['source']} says {a:,.2f}, "
+                     f"{photo['source']} (read off an image) says "
+                     f"{b:,.2f}. Using the typed one.")
+    return typed
+
+
+def _flow_from(row, body, via):
+    """One row, one field. Returns None when that field says nothing."""
+    if not body:
+        return None
+    parsed = parse_flow_message(body)
+    if not parsed:
+        return None
+    parsed["as_of"] = row.get("at")
+    parsed["source"] = row.get("channel") or "Telegram"
+    parsed["via"] = via
+    return parsed
 
 
 class MarketFlows:
@@ -343,8 +468,27 @@ class MarketFlows:
             parsed = parse_rows(self._fetcher())
         except Exception as exc:                           # noqa: BLE001
             self._error = str(exc)[:140]
-            warn(f"[FLOWS] FII/DII fetch failed ({self._error}). "
-                 f"Showing the last figure held.")
+            # ---- THE PACKAGE NEVER HAD THIS. 31 August 2026. ----
+            #
+            # This warned on every refresh, all session, and read like
+            # a broken feed. It is not: the `nse` package has 52
+            # callables and NONE of them is FII/DII -- checked. There
+            # is nothing to fix and nothing to wait for.
+            #
+            # The figure comes from Telegram instead, which the flow
+            # panel has always fallen back to: News Pulse posts it
+            # daily and from_telegram() reads it. On the day this was
+            # traced it returned FII -5,039.8 cr and DII +5,183.9 cr.
+            #
+            # So this is said ONCE per run, and as a diagnostic rather
+            # than a warning. A warning that fires every minute for a
+            # thing that is working is how the real ones get ignored.
+            if not getattr(self, "_said_no_nse", False):
+                self._said_no_nse = True
+                diagnostic(
+                    f"[FLOWS] The nse package has no FII/DII method "
+                    f"({self._error}). Reading it from Telegram instead "
+                    f"-- News Pulse posts it daily.")
             return None
         if parsed["fii_cr"] is None and parsed["dii_cr"] is None:
             self._error = "feed returned no FII/DII rows"

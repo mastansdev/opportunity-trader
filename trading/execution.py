@@ -145,7 +145,7 @@ class Execution:
         real order at all."""
         return getattr(self, "_live", None)
 
-    def _route(self, reason, selling=False):
+    def _route(self, reason, selling=False, symbol=None):
         """Which executor takes this order.
 
         ---- THE GUARD THAT WAS ONLY EVER A COMMENT. 31 Aug 2026. ----
@@ -183,6 +183,32 @@ class Execution:
                            "Trading on PAPER.")
             return self.executor
         if selling:
+            # ---- AN EXIT FOLLOWS ITS OWN ENTRY. 31 August 2026. ----
+            #
+            # This was `return live` with the comment "a real position,
+            # a real exit". That comment states something the code had
+            # not established, and on 31 August it stopped being true.
+            #
+            # With the switch ON and LIVE_ALLOW_BOT_ENTRIES off -- which
+            # is the configuration he will actually run first -- the
+            # bot's own entries fill on PAPER while this line sent
+            # their exits LIVE. The stop on a paper position would have
+            # placed a real SELL for stock he never bought: in NSE cash
+            # intraday that is not a no-op, it opens a real short. The
+            # bot would then believe it was flat while holding a live
+            # short position it had no plan for.
+            #
+            # So the exit goes wherever the entry went. Every fill is
+            # already stamped PAPER or LIVE in data/fills.db, and this
+            # process remembers its own besides, so this is a lookup
+            # rather than a guess.
+            #
+            # The original concern still stands and still wins: a real
+            # position must get a real stop. When nothing is known
+            # about the entry, this returns live exactly as before.
+            opened = self._who_opened(symbol)
+            if opened == "paper":
+                return self.executor
             return live                      # a real position, a real exit
         if _is_the_operators_click(reason) or LIVE_ALLOW_BOT_ENTRIES:
             return live
@@ -203,9 +229,55 @@ class Execution:
         warn("[EXECUTION] " + message)
 
     def buy(self, security_id, symbol, price, qty, reason="", at_time=None):
-        return self._route(reason).buy(security_id, symbol, price, qty,
-                                       reason, at_time)
+        chosen = self._route(reason, symbol=symbol)
+        # Remembered here, at the moment of the decision, so the exit
+        # never has to re-derive it from settings that may have moved.
+        opened = getattr(self, "_opened_by", None)
+        if opened is None:
+            opened = self._opened_by = {}
+        opened[str(symbol).upper()] = ("live" if chosen is self._live
+                                       else "paper")
+        return chosen.buy(security_id, symbol, price, qty, reason, at_time)
 
     def sell(self, security_id, symbol, price, qty, reason="", at_time=None):
-        return self._route(reason, selling=True).sell(
+        return self._route(reason, selling=True, symbol=symbol).sell(
             security_id, symbol, price, qty, reason, at_time)
+
+    # ------------------------------------------------------------
+
+    def _who_opened(self, symbol):
+        """"paper", "live", or None when nothing is on record.
+
+        In-process memory first -- it is exact and cannot be stale. The
+        fills log second, for the case that matters most: a restart in
+        the middle of a session, when the dictionary is empty and there
+        are still open positions to look after.
+        """
+        key = str(symbol or "").upper()
+        if not key:
+            return None
+        remembered = getattr(self, "_opened_by", None) or {}
+        if key in remembered:
+            return remembered[key]
+        import sqlite3
+        # Read from the module at CALL time, not bound at import. The
+        # fill log makes the same point about itself in its own
+        # comments: a path captured at import is the production one
+        # forever, which is how a test ends up writing to data/.
+        try:
+            import core.fill_log as _log
+            _fills = _log.DB_PATH
+        except Exception:                                  # noqa: BLE001
+            _fills = "data/fills.db"
+        try:
+            conn = sqlite3.connect(f"file:{_fills}?mode=ro", uri=True)
+            row = conn.execute(
+                "SELECT mode FROM fills WHERE upper(symbol) = ? "
+                "AND upper(side) = 'BUY' ORDER BY id DESC LIMIT 1",
+                (key,)).fetchone()
+            conn.close()
+        except Exception:                                  # noqa: BLE001
+            return None
+        if not row:
+            return None
+        return "paper" if str(row[0]).upper() == "PAPER" else "live"
