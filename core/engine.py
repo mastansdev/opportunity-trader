@@ -252,6 +252,7 @@ EXIT_REASON_SQUARE_OFF = "SQUARE_OFF"
 # TOP_N_MOMENTUM_MODE only (config.py) -- fixed bracket exits,
 # never the ratcheting trailing stop. See _check_fixed_bracket().
 EXIT_REASON_FIXED_TARGET = "FIXED_TARGET"
+EXIT_REASON_MOMENTUM_GONE = "MOMENTUM_EXHAUSTED"
 EXIT_REASON_FIXED_STOP = "FIXED_STOP_LOSS"
 # core/circuit_monitor.py -- proactive, direction-agnostic close
 # ahead of either circuit limit (see config.py's
@@ -4954,6 +4955,35 @@ class Engine:
         if self._check_missed_stop(symbol, price, tick_time):
             return
 
+        # ---- BOOK IT WHEN THE BUYING STOPS. 31 August 2026. ----
+        #
+        #     "book when momentum exhausted"           -- the operator
+        #
+        # The bot had three ways out: the stop, the target, and the
+        # trailing stop. None of them says "the move is over". A stock
+        # that runs, stalls, and drifts back sits between its stop and
+        # its target indefinitely.
+        #
+        # Which is what happened. NCC and CDSL were bought on 21 August
+        # and were still open on the 31st. Ten days. CDSL was up 3.84%
+        # on the 26th, came within Rs 8 of its target, and finished the
+        # period at +1.18%. Neither level was ever touched; the
+        # machinery worked perfectly and there was simply no rule for
+        # this.
+        #
+        # The bot has always been able to see it. core/order_flow.py's
+        # still_buying() reads whether buyers are still winning the
+        # stock, and it was wired to ENTRIES only. On ASHOKA, live, on
+        # 31 August it turned false at 12:10 while the price was still
+        # near +12%; the stock finished the observation window at
+        # +7.45%.
+        #
+        # This runs BEFORE the target and trailing checks, because a
+        # position whose buying has stopped should not wait for a level
+        # it is now drifting away from.
+        if self._momentum_is_gone(symbol, position, price, tick_time):
+            return
+
         # Old fixed-bracket trades (any position opened before the
         # 2026-07-24 ATR redesign, restored from state across a
         # restart) never use the ratcheting trailing stop -- routed
@@ -5299,6 +5329,82 @@ class Engine:
                      f"be resized ({exc}). CHECK DHAN -- it may still be "
                      f"sized for the OLD quantity.")
         return exit_price
+
+    def _momentum_is_gone(self, symbol, position, price, tick_time):
+        """True when this position has been exited because the buying
+        behind it stopped.
+
+        FOUR THINGS IT WILL NOT DO, each one deliberate:
+
+        1. It will not close a LOSING trade. Flow that has turned
+           against a position already under water tells us nothing the
+           stop does not, and the stop is the rule that owns that
+           decision. Booking a loss because the flow looks tired is how
+           a stop loss gets replaced by a feeling.
+
+        2. It will not act on a reading it does not have. still_buying()
+           returns None when the order book coverage is too thin to
+           classify -- a guess must never overrule a gate. No reading,
+           no exit, and the target and trailing checks run as normal.
+
+        3. It will not fire before the flow has enough history to mean
+           anything. The reading compares now against fifteen minutes
+           ago, so a position younger than that is being judged against
+           its own entry noise. Fifteen is the lookback, not a number
+           anybody picked.
+
+        4. It will not run at all when the operator turns it off.
+        """
+        from config import (EXIT_ON_MOMENTUM_EXHAUSTED,
+                            MOMENTUM_EXIT_MIN_MINUTES)
+        if not EXIT_ON_MOMENTUM_EXHAUSTED:
+            return False
+
+        entry = position.get("entry_price")
+        if entry is None or price is None or price <= entry:
+            return False                      # (1) winners only
+
+        held = position.get("held_minutes")
+        if held is None:
+            held = self._held_minutes(position, tick_time)
+        if held is not None and held < MOMENTUM_EXIT_MIN_MINUTES:
+            return False                      # (3) too young to judge
+
+        try:
+            from core.order_flow import still_buying
+            flow = still_buying(symbol)
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[FLOW-EXIT] {symbol}: could not read the flow ({exc}). "
+                 f"Leaving the stop and target to it.")
+            return False
+        if not flow or flow.get("still_buying") is not False:
+            return False                      # (2) no reading, no exit
+
+        gain = (price - entry) * (position.get("qty") or 0)
+        decision(
+            f"[MOMENTUM GONE] {symbol} at {price:.2f} -- buyers have "
+            f"stopped winning it (order flow {flow.get('cum')} now against "
+            f"{flow.get('then')} fifteen minutes ago). Booking "
+            f"Rs {gain:+,.0f} rather than waiting for a level it is "
+            f"drifting away from.")
+        self._exit(symbol, price, EXIT_REASON_MOMENTUM_GONE, tick_time)
+        return True
+
+    @staticmethod
+    def _held_minutes(position, tick_time):
+        """Minutes since the entry, or None when it cannot be worked
+        out. None means "do not judge", never "zero"."""
+        entered = position.get("entry_time")
+        if not entered or not tick_time:
+            return None
+        try:
+            start = datetime.fromisoformat(str(entered).replace("T", " ")[:19])
+            now = (tick_time if isinstance(tick_time, datetime)
+                   else datetime.fromisoformat(
+                       str(tick_time).replace("T", " ")[:19]))
+        except (ValueError, TypeError):
+            return None
+        return (now - start).total_seconds() / 60.0
 
     def _check_fixed_bracket(self, symbol, position, price, tick_time):
         """

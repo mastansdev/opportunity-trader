@@ -1,4 +1,4 @@
-<!-- generated: 2026-08-31 18:08 by tools/bot_doc.py -- do not edit by hand -->
+<!-- generated: 2026-08-31 18:15 by tools/bot_doc.py -- do not edit by hand -->
 # Opportunity Trader — what the bot is, and what it does
 
 **This file is generated.** Every number below is read out of `config.py` and `core/rules.py` when it is written, so it cannot drift away from the running bot. To change a rule, change the code and run `py tools/bot_doc.py --write`.
