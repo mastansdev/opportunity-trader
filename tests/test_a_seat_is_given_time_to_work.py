@@ -73,11 +73,20 @@ def test_a_position_gets_time_to_work():
     assert config.ROTATION_MIN_HOLD_MINUTES >= 30
 
 
-def test_rotation_is_ON():
-    """Leaving it off was shipping a fix that never runs. The seat
-    timing problem is exactly the one rotation exists to solve: with
-    it off, SOLARA's seat could never have been handed over."""
-    assert config.ENABLE_SLOT_ROTATION is True
+def test_rotation_is_OFF():
+    """---- HE STOPPED IT. 31 August 2026. ----
+
+        "we stopped rotation trading"              -- the operator
+
+    This asserted ON, with the reasoning that leaving it off was
+    shipping a fix that never runs. The fix ran. What it did on 21
+    August, its last trading day: NCC out after 23 minutes, URBANCO
+    after 13, JSFB after 4, CDSL after ELEVEN SECONDS -- four of the
+    five trades that day, and three of the four then ran without us.
+
+    His call, and he had already made it. The setting simply never
+    followed."""
+    assert config.ENABLE_SLOT_ROTATION is False
 
 
 def test_the_daily_swap_cap_survives():

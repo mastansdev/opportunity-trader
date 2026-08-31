@@ -348,9 +348,29 @@ SQUARE_OFF_TIME = "15:15"
 #   - MTF interest from T+1 (~0.0342%/day on the funded amount).
 #   - Dhan's own RMS can still square off if coverage falls below 20%.
 #
-# Set True to restore the old MIS behaviour on any day you want to be
-# flat by the close.
-FORCE_SQUARE_OFF_AT_CLOSE = False
+# ---- TEN DAYS IS NOT AN INTRADAY POSITION. 31 August 2026. ----
+#
+#     "trades without booking profit & keep on holding until close or
+#      in falling stocks is not what i expect bot to do"
+#                                        -- the operator, 30 August
+#
+# This read False since 28 July, and the note above describes it as a
+# deliberate MTF choice: carry overnight, let the trailing stop manage
+# it, the sweep reports rather than liquidates.
+#
+# What it did in practice: the bot bought NCC and CDSL on 21 August at
+# 12:41 and 12:49, and was STILL holding both on 31 August. Ten days.
+# The stops never fired, so nothing ever closed them and nothing ever
+# complained. He found it before I did, twice.
+#
+# That is not the MTF plan working, it is the MTF plan with no exit.
+# The bot scans 09:15-15:30 and books "when momentum exhausted" -- a
+# position that outlives the momentum by nine sessions is the exact
+# behaviour he described not wanting.
+#
+# Set False again only alongside a rule that actually closes a carried
+# position, rather than one that waits for a stop that may never come.
+FORCE_SQUARE_OFF_AT_CLOSE = True
 MARKET_CLOSE = "15:30"
 
 # ---------------------------------------------------------------------
@@ -2391,7 +2411,22 @@ TREND_RANK_REFRESH_SECONDS = 5   # recompute the leaderboard at most this often
 # numbers are set so that the SOLARA hand-over passes and the CDSL
 # twitch does not. Leaving the switch off would have been shipping a
 # fix that never runs.
-ENABLE_SLOT_ROTATION = True
+# ---- HE SAYS THIS WAS STOPPED. 31 August 2026. ----
+#
+#     "we stopped rotation trading"                   -- the operator
+#
+# It was not. This has read True all along, and on 21 August it took
+# four of the five trades that day: NCC out after 23 minutes, URBANCO
+# after 13, JSFB after 4, and CDSL after ELEVEN SECONDS. Three of those
+# four then ran without us.
+#
+# I reported those trades back to him today as if the rule were live,
+# which is the thing he has told me not to do three times now -- judging
+# current behaviour on trades taken under rules that no longer apply.
+# They were not old data. The rule really was still on.
+#
+# Off. If it goes back on it is a decision he makes, not a default.
+ENABLE_SLOT_ROTATION = False
 
 # At most this many swaps a day.
 #
