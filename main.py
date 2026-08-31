@@ -33,8 +33,7 @@ from config import (
     SQUARE_OFF_TIME, FORCE_SQUARE_OFF_AT_CLOSE,
     MARKET_CLOSE,
     KEEP_DASHBOARD_AFTER_CLOSE, DASHBOARD_AFTER_CLOSE_EXIT_AT,
-    ORB_WINDOW_END,
-    TOP_N_MOMENTUM_MODE, ENABLE_MOMENTUM_LOCK,
+    ORB_WINDOW_END, ENABLE_MOMENTUM_LOCK,
     HEARTBEAT_INTERVAL_SECONDS,
     DASHBOARD_REFRESH_INTERVAL_SECONDS,
 )
@@ -60,17 +59,13 @@ from core import corporate_actions
 from config import ENABLE_INDEX_FEED, INDEX_INSTRUMENTS, ENABLE_CANDLE_RECORDING
 from config import MAX_OPEN_POSITIONS
 from config import (
-    ENABLE_ANNOUNCEMENT_WATCHER, ANNOUNCEMENT_POLL_SECONDS,
-    ANNOUNCEMENT_LOOKBACK_HOURS, ENABLE_FILING_PDF_READING,
-    ENABLE_NEWS_WATCHER, NEWS_POLL_SECONDS,
+    ENABLE_ANNOUNCEMENT_WATCHER,
+    ENABLE_NEWS_WATCHER,
 )
 from config import (ENABLE_ORDER_FLOW_RECORDER,
                     ORDER_FLOW_FLUSH_SECONDS,
                     ENABLE_FULL_DEPTH_FEED)
 from core import order_flow
-from core.announcement_watcher import AnnouncementWatcher
-from core.results_ingest import ResultsIngestor, requests_downloader
-from core.news_watcher import NewsWatcher
 from core.market_flows import MarketFlows
 from config import ENABLE_STOCK_MEMORY, ENABLE_TRADE_MEMORY
 from config import EARNINGS_CALENDAR
@@ -1037,7 +1032,6 @@ def main():
     # block a trade -- a failed fetch means an empty panel.
     from core.premarket import PreMarket
     from core.preopen import PreOpen
-    from core.nse_quotes import requests_fetcher as nse_fetcher
     try:
         premarket = PreMarket(fetcher=None)      # reads what the 08:45 run stored
     except Exception as exc:                                   # noqa: BLE001

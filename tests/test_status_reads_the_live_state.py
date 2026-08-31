@@ -67,9 +67,10 @@ def test_it_answers_in_words_not_setting_names():
 
     Plain words on the left now, and only values something reads."""
     out = _run().stdout
-    for phrase in ("Risk on each trade",
+    for phrase in ("Money it puts in each trade",
                    "Books profit at",
-                   "Sells everything at",
+                   "How a position ends",
+                   "Holds overnight",
                    "Buys only between"):
         assert phrase in out, phrase
 
@@ -178,3 +179,83 @@ def test_it_survives_a_missing_state_file(tmp_path, monkeypatch):
                         printed.append(" ".join(str(x) for x in a)))
     status.show_holdings("2026-08-31")
     assert printed  # it said something rather than raising
+
+
+# ---- IT DESCRIBED BEHAVIOUR THAT HAD CHANGED. 31 August 2026. ----
+#
+# He ran this screen after the evening's work and three rows were false:
+#
+#   "Sells everything at 15:15 -- nothing is carried overnight"
+#       Square-off had been turned OFF at his instruction. Nothing is
+#       sold at 15:15 and positions ARE carried.
+#   "Risk on each trade ... position is sized so a stop-out costs this"
+#       Sizing moved to the MTF margin on 29 July.
+#   "holds until a stop or 15:15"
+#       It books when the buying dries up as well.
+#
+# The screen exists so he does not have to trust a summary, and it had
+# quietly become one. The rows that were wrong were the ones stating
+# behaviour from memory; the fix is that they read the settings.
+
+def test_the_overnight_row_follows_the_square_off_setting():
+    """This said "nothing is carried overnight" while carrying two
+    positions for ten days."""
+    from tools import status
+    import config
+
+    row = dict((label, fn) for label, fn, _ in status.RULES
+               if callable(fn)).get("Holds overnight")
+    assert row is not None, "the overnight row is gone"
+
+    class _Off:
+        FORCE_SQUARE_OFF_AT_CLOSE = False
+        SQUARE_OFF_TIME = "15:15"
+
+    class _On(_Off):
+        FORCE_SQUARE_OFF_AT_CLOSE = True
+
+    assert "YES" in row(_Off())
+    assert "no" in row(_On()).lower() and "15:15" in row(_On())
+    # and it agrees with the real config right now
+    expected = ("YES" if not config.FORCE_SQUARE_OFF_AT_CLOSE else "no")
+    assert row(config).lower().startswith(expected.lower())
+
+
+def test_the_exit_row_lists_every_live_exit():
+    """It said "a stop or 15:15" after the buying-dried-up exit went in,
+    and after square-off came out. Both wrong in one line."""
+    from tools import status
+
+    row = dict((label, fn) for label, fn, _ in status.RULES
+               if callable(fn)).get("How a position ends")
+    assert row is not None
+
+    class _Cfg:
+        ENABLE_BOT_TRAILING_STOP = True
+        FORCE_SQUARE_OFF_AT_CLOSE = False
+        SQUARE_OFF_TIME = "15:15"
+
+    got = row(_Cfg())
+    assert "buying dries up" in got
+    assert "stop" in got
+    assert "15:15" not in got, "it claims a square-off that is switched off"
+
+    _Cfg.FORCE_SQUARE_OFF_AT_CLOSE = True
+    assert "15:15" in row(_Cfg())
+
+
+def test_no_row_states_behaviour_the_settings_do_not_support():
+    """The general rule. A row about what the bot DOES must read a
+    setting -- a hardcoded sentence is a summary, and this file exists
+    so he never has to trust one."""
+    from tools import status
+
+    out = _run().stdout
+    import config
+
+    if not config.FORCE_SQUARE_OFF_AT_CLOSE:
+        assert "nothing is carried overnight" not in out
+        assert "Sells everything at" not in out
+    if config.MTF_MARGIN_PER_POSITION_RS:
+        assert "sized so a stop-out costs this" not in out, (
+            "the sizing row describes the pre-29-July rule")

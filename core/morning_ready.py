@@ -53,7 +53,7 @@ Author : H&M Opportunity Trader
 """
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 
 TELEGRAM_DB = "data/telegram.db"
 RESULTS_DB = "data/results_calendar.db"
@@ -398,8 +398,30 @@ class LiveGuard:
             if self.strikes and self.say is not None:
                 self.say(f"[GUARD] Feed recovered -- {state['why']}. "
                          f"Strike count reset.")
+            # ---- "RECOVERED" WAS NOT THE WHOLE TRUTH. 31 Aug 2026. ----
+            #
+            # `self.disarmed` is set once and never cleared, on purpose:
+            # this guard is deliberately slow to panic, and a feed that
+            # flaps would otherwise toggle trading on and off all day.
+            #
+            # But the message above says "Feed recovered" and stops
+            # there, while engine.alert_only is still True. The bot is
+            # not trading, the log reads like it is, and nothing else
+            # ever mentions it again. That is the same silent freeze
+            # that cost ten sessions in August, arriving by a different
+            # door.
+            #
+            # Re-arming stays HIS decision -- the dashboard switch sets
+            # alert_only False in either position. This only makes sure
+            # he is told there is a decision to make.
+            if self.disarmed and self.say is not None:
+                self.say("[GUARD] ...but the bot is STILL NOT TRADING. "
+                         "The guard turned it off earlier and does not "
+                         "turn it back on by itself. Click the switch on "
+                         "the dashboard to resume.")
             self.strikes = 0
-            return {"acted": False, "strikes": 0, "ok": True}
+            return {"acted": False, "strikes": 0, "ok": True,
+                    "still_disarmed": self.disarmed}
 
         self.strikes += 1
         if self.strikes < self.strikes_needed:

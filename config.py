@@ -168,9 +168,7 @@ I_UNDERSTAND_THIS_PLACES_REAL_ORDERS = True
 # Kept only so preflight and tools/bot_doc.py can report that it is
 # inert. Deleting the name would break their imports and tell him
 # nothing.
-LIVE_ALLOW_BOT_ENTRIES = False
-
-# ---------------------------------------------------------------
+LIVE_ALLOW_BOT_ENTRIES = False  # DECIDES NOTHING -- the order path stopped reading it on 31 Aug; the switch decides
 # A STOP THAT SURVIVES THIS PROCESS DYING, 2026-08-02
 # ---------------------------------------------------------------
 #     "yeah pick that one. - pick the broker-side stop"
@@ -305,9 +303,9 @@ EXCHANGE_SEGMENT = "NSE_EQ"
 # actual exchange behaviour, not assumed)
 # ----------------------------------------------------------
 
-PRE_OPEN_START = "09:00"   # order collection -- NOT live
-PRE_OPEN_MATCH = "09:08"   # order matching -- NOT live
-PRE_OPEN_BUFFER = "09:12"  # buffer -- NOT live
+PRE_OPEN_START = "09:00"  # DECIDES NOTHING -- the pre-open reader uses its own clock
+PRE_OPEN_MATCH = "09:08"  # DECIDES NOTHING -- the pre-open reader uses its own clock
+PRE_OPEN_BUFFER = "09:12"  # DECIDES NOTHING -- the pre-open reader uses its own clock
 
 MARKET_OPEN = "09:15"      # real continuous trading starts
 ORB_WINDOW_END = "09:30"   # opening range closes
@@ -1173,10 +1171,8 @@ TOP_N_MOMENTUM_LIST_SIZE = 25
 # actually moves. Left here, unused by the current entry path,
 # purely as a record of what the very first test day actually ran
 # with -- do not delete, do not repurpose these two names.
-FIXED_TARGET_RS = 2500.0
-FIXED_STOP_LOSS_RS = 1000.0
-
-# ----------------------------------------------------------
+FIXED_TARGET_RS = 2500.0  # DECIDES NOTHING -- superseded 29 Jul -- the bot's entries get no target
+FIXED_STOP_LOSS_RS = 1000.0  # DECIDES NOTHING -- superseded 29 Jul -- the stop is ATR-based
 # ATR-based sizing, stop, and trail (TOP_N_MOMENTUM_MODE only)
 # -- 2026-07-24, replaces the flat qty / fixed rupee bracket
 # above (see its comment for why).
@@ -2246,13 +2242,9 @@ AI_BUDGET_WARN_AT_PCT = 0.75
 # Haiku classifies and extracts -- high volume, low judgement.
 # Sonnet decides -- low volume, high judgement.
 AI_MODEL_CHEAP = "claude-haiku-4-5-20251001"
-AI_MODEL_SMART = "claude-sonnet-5"
-
-# How many stocks reach the expensive model per day. The shortlist is
+AI_MODEL_SMART = "claude-sonnet-5"  # DECIDES NOTHING -- no AI code reads it
 # already ranked; this is the top slice of it.
-AI_DECISION_CANDIDATES_PER_DAY = 30
-
-# ---------------------------------------------------------------------
+AI_DECISION_CANDIDATES_PER_DAY = 30  # DECIDES NOTHING -- no AI code reads it
 # WHAT THE MODEL MAY AND MAY NOT DECIDE
 # ---------------------------------------------------------------------
 # The operator's goal is "trade by using the AI". These flags are the
@@ -2292,34 +2284,29 @@ AI_DECISION_CANDIDATES_PER_DAY = 30
 #
 # STEP 1  the model reads news and says what it means. Recorded, shown,
 #         and worth nothing to the score. This is where it starts.
-AI_NEWS_DIRECTION = False
-#
+AI_NEWS_DIRECTION = False  # DECIDES NOTHING -- no AI code reads it
 # STEP 2  the model's view becomes a why-chip on the shortlist. Visible
 #         to the operator, still not scored.
-AI_SHOW_IN_SHORTLIST = False
-#
+AI_SHOW_IN_SHORTLIST = False  # DECIDES NOTHING -- no AI code reads it
 # STEP 3  the model's view MOVES THE SCORE. Only after enough recorded
 #         calls have been checked against what the stock actually did.
 #         There is no honest way to skip this: on 30 July the bot's own
 #         arithmetic reported +Rs 9,498 on a day it really lost
 #         Rs 11,239, and an unchecked model on top of an unchecked
 #         scorer is two things nobody can audit.
-AI_MAY_AFFECT_SCORE = False
-#
+AI_MAY_AFFECT_SCORE = False  # DECIDES NOTHING -- no AI code reads it; the AI scoring path is not built
 # STEP 4  the model chooses WHICH of several simultaneous breakouts to
 #         take. This is the real prize -- it replaces first-come-first-
 #         served, which on 30 July took THYROCARE at 0.03x volume and
 #         refused KSB at 715x.
-AI_MAY_RANK_ENTRIES = False
-
-# NEVER. Not a staircase step -- a boundary.
+AI_MAY_RANK_ENTRIES = False  # DECIDES NOTHING -- no AI code reads it; the ranker is arithmetic only
 #
 # The model does not size a position and does not move a stop. Those are
 # arithmetic on money at risk, they are exact, and a language model is
 # strictly worse at them than the code already is. A wrong direction
 # costs one trade; a wrong size costs the account.
-AI_MAY_SIZE_POSITIONS = False   # leave False permanently
-AI_MAY_MOVE_STOPS = False       # leave False permanently
+AI_MAY_SIZE_POSITIONS = False  # DECIDES NOTHING -- no AI code reads it; sizing is MTF margin only
+AI_MAY_MOVE_STOPS = False  # DECIDES NOTHING -- no AI code reads it; nothing lets an AI touch a stop
 
 # ---------------------------------------------------------------------
 # THE FRIDAY TEST -- one share, by hand, from the dashboard
@@ -2914,9 +2901,7 @@ REASON_CACHE_SECONDS = 30
 # Runs on its own thread -- the filings are large (MOLD-TEK's was 7 MB)
 # and downloading one inside the news poll would stall the feed exactly
 # when news is arriving.
-ENABLE_FILING_PDF_READING = True
-
-# --- High-conviction news (core/news_watcher.py) ----------
+ENABLE_FILING_PDF_READING = True  # DECIDES NOTHING -- ResultsIngestor is never constructed -- nothing reads a filing live
 # The previous news subsystem (~3,200 lines) was deleted 2026-07-26 --
 # it ran a thread through every session and nothing read the output.
 # This is the operator's tighter brief from the same day: news, but ONLY
@@ -3462,13 +3447,9 @@ MIS_MARGIN_OVERRIDES = {}
 # NOT the leveraged notional). Kept equal to PAPER_STARTING_CAPITAL.
 # Buying power in NOTIONAL terms is then capital / margin% -- e.g.
 # Rs 10L / 0.20 = Rs 50L of deployable notional at the default rate.
-MIS_CAPITAL_RS = PAPER_STARTING_CAPITAL
-
-# Back-compat alias -- some older code/tests referenced a single
+MIS_CAPITAL_RS = PAPER_STARTING_CAPITAL  # read by backtest/monday_replay.py only
 # leverage multiplier. Derived from the default margin % (1/0.20 = 5).
-MIS_LEVERAGE_MULTIPLIER = round(1.0 / MIS_DEFAULT_MARGIN_PCT, 4)
-
-# ----------------------------------------------------------
+MIS_LEVERAGE_MULTIPLIER = round(1.0 / MIS_DEFAULT_MARGIN_PCT, 4)  # DECIDES NOTHING -- superseded -- the bot is MTF, not MIS
 # Transaction cost model (POST_MARKET item 11), 2026-07-24 (evening).
 # Intraday equity (MIS) charges, Dhan/discount-broker rates. Used to
 # show real NET-of-cost P&L on the dashboard (Closed Trades + the
@@ -3751,9 +3732,7 @@ SLIPPAGE_CALM_AFTER = "09:45"     # the open is the expensive part
 # industry buckets than the OEM majors (MARUTI, TVSMOTOR, ... in
 # "AUTOMOBILES - OEM") -- this is the data being genuinely more
 # specific, not a bug to route around.
-INDUSTRY_HEATMAP_MIN_SYMBOLS = 3
-
-# ----------------------------------------------------------
+INDUSTRY_HEATMAP_MIN_SYMBOLS = 3  # DECIDES NOTHING -- the industry heatmap does not read it
 # Dashboard
 # ----------------------------------------------------------
 

@@ -124,18 +124,52 @@ def show_holdings(today):
 # So: plain words on the left, and every row below is a value some line
 # of the bot actually reads. Anything that stops being read comes off
 # this screen, and there is a test that fails if a dead one returns.
+# ---- IT DESCRIBED BEHAVIOUR THAT HAD CHANGED. 31 Aug 2026. ----
+#
+# He ran this screen after the evening's changes and three rows were
+# false:
+#
+#   "Sells everything at 15:15 -- nothing is carried overnight"
+#       Square-off was turned OFF at his instruction. Nothing is sold
+#       at 15:15 and positions ARE carried.
+#   "Risk on each trade ... position is sized so a stop-out costs this"
+#       Sizing moved to the MTF margin on 29 July. RISK_PER_TRADE_RS
+#       does not decide the share count on the path the bot uses.
+#   "holds until a stop or 15:15"
+#       It books when the buying dries up as well, since tonight.
+#
+# The screen exists so he does not have to trust a summary, and it had
+# become a summary. So every row below states what the code does, and
+# rows that depend on a setting read the setting rather than describing
+# it from memory.
+def _exits(config):
+    """The ways out, read from the settings rather than remembered."""
+    out = ["buying dries up", "stop"]
+    if getattr(config, "ENABLE_BOT_TRAILING_STOP", False):
+        out.append("trailing stop")
+    if getattr(config, "FORCE_SQUARE_OFF_AT_CLOSE", False):
+        out.append(f"square-off at {config.SQUARE_OFF_TIME}")
+    return " / ".join(out)
+
+
+def _overnight(config):
+    if getattr(config, "FORCE_SQUARE_OFF_AT_CLOSE", False):
+        return f"no -- everything is sold at {config.SQUARE_OFF_TIME}"
+    return "YES -- nothing is force-sold; MTF, deliberately"
+
+
 RULES = [
-    ("Risk on each trade", "RISK_PER_TRADE_RS",
-     "position is sized so a stop-out costs this"),
+    ("Money it puts in each trade", "MTF_MARGIN_PER_POSITION_RS",
+     "your own cash; Dhan is asked how many shares that buys"),
     ("Books profit at (bot's own trades)", None,
-     "nothing -- it holds until a stop or 15:15"),
+     "no target -- it exits on the rules below"),
     ("Books profit at (your BUY click)", "MANUAL_BUY_TARGET_RS", ""),
-    ("Trailing stop", "ENABLE_BOT_TRAILING_STOP", ""),
-    ("Sells everything at", "SQUARE_OFF_TIME",
-     "nothing is carried overnight"),
+    ("How a position ends", _exits, ""),
+    ("Holds overnight", _overnight, ""),
     ("Swaps a holding for a better one", "ENABLE_SLOT_ROTATION", ""),
     ("Short selling", "ENABLE_SHORT_TRADES", "long only"),
-    ("Seats sized from capital", "ENABLE_CASH_SIZED_BOOK", ""),
+    ("Seats sized from capital", "ENABLE_CASH_SIZED_BOOK",
+     "no money, no new trades"),
     ("Buys only between", "MARKET_OPEN", "and 15:15"),
 ]
 
@@ -160,6 +194,11 @@ def show_rules():
     for label, name, note in RULES:
         if name is None:
             value = "none"
+        elif callable(name):
+            # A row that has to READ several settings to be true. The
+            # rows that were wrong were the ones stating behaviour from
+            # memory instead.
+            value = name(config)
         else:
             value = _pretty(getattr(config, name, "<absent>"))
         tail = f"   {note}" if note else ""

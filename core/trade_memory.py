@@ -43,7 +43,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 
 from core.db import resolve_database_url
-from core.logger import diagnostic
+from core.logger import warn, diagnostic
 
 
 def _utcnow():
@@ -284,7 +284,19 @@ class TradeMemory:
                 except IntegrityError:
                     return False
             return True
-        except Exception:
+        except Exception as exc:                           # noqa: BLE001
+            # ---- A LOST TRADE IS A LOST P&L. 31 August 2026. ----
+            #
+            # This returned False and said nothing. His entire record of
+            # what the bot did comes out of this store -- day_report,
+            # the scorecard, every "how much did it make" answer -- so a
+            # write that fails here is a trade that happened and cannot
+            # be seen. The books would simply be short by one, with
+            # nothing anywhere to say which one.
+            warn(f"[TRADE MEMORY] Could not record a completed trade "
+                 f"({exc}). The trade HAPPENED; it is missing from "
+                 f"data/trade_memory.db and from every report built on "
+                 f"it.")
             return False
 
     # ----------------------------------------------------------

@@ -66,13 +66,30 @@ from config import (
     VOLATILITY_SCALED_STOP, DAILY_ATR_STOP_MULT,
     VOLUME_REQUIRED_FOR_ENTRY, ROTATION_MAX_PER_DAY,
     CIRCUIT_RULE_DIRECTION_AWARE,
-    TOP_N_MOMENTUM_MODE, FIXED_TARGET_RS, FIXED_STOP_LOSS_RS,
+    TOP_N_MOMENTUM_MODE,
     SQUARE_OFF_TIME, FROZEN_PRICE_STREAK_CANDLES,
     ATR_PERIOD, MIN_ATR_CANDLES,
     ENABLE_MARKET_REGIME_GATE,
     MTF_MARGIN_PER_POSITION_RS,
     ATR_STOP_MULTIPLIER, ATR_TRAIL_MULTIPLIER, ATR_TRAIL_ACTIVATION_MULT,
-    MIN_STOP_DISTANCE_PCT, MAX_NOTIONAL_PER_TRADE_RS, FIXED_STOP_PCT,
+    MIN_STOP_DISTANCE_PCT, FIXED_STOP_PCT,
+    # ---- LOOKS UNUSED. IS NOT. 31 August 2026. ----
+    #
+    # Nothing in this file reads MAX_NOTIONAL_PER_TRADE_RS -- sizing
+    # moved to the MTF margin on 29 July. A sweep for unused imports
+    # removed it, and the suite caught it in one run.
+    #
+    # It is a deliberate anchor. test_engine's
+    # test_atr_entry_sizing_notional_cap_binds_independently_of_the_stop_floor
+    # monkeypatches it HERE, to an absurd value, to prove the share
+    # count does not move when it changes. Until 29 July size came from
+    # min(RISK / stop, MAX_NOTIONAL / price), which at the 1% stop floor
+    # is the same number -- so the ceiling bound every trade and ATR did
+    # nothing. All 29 structural entries that day came out between
+    # Rs 197,041 and Rs 200,382, double the size he had specified.
+    #
+    # Remove this line and that regression stops being watched.
+    MAX_NOTIONAL_PER_TRADE_RS,
     STOP_FROM_RISK_AND_SIZE,
     MIN_TRADABLE_PRICE_RS, EARNINGS_CALENDAR,
     ENABLE_PARTIAL_EXIT, PARTIAL_EXIT_ATR_MULTIPLE, PARTIAL_EXIT_FRACTION,
@@ -2658,11 +2675,58 @@ class Engine:
         """
         if not ENABLE_CASH_SIZED_BOOK:
             return MAX_OPEN_POSITIONS
-        capital = None
-        if self.portfolio is not None:
-            capital = getattr(self.portfolio, "starting_capital", None)
-        if not capital:
+        # NO PORTFOLIO AT ALL is not a money question -- cash sizing is
+        # simply not wired in that configuration, and this falls back to
+        # the count exactly as it did before cash sizing existed. In
+        # production main.py always passes one; tests often do not, and
+        # a test harness with no portfolio must not be read as an empty
+        # account.
+        if self.portfolio is None:
             return MAX_OPEN_POSITIONS
+        capital = getattr(self.portfolio, "starting_capital", None)
+
+        # ---- NO MONEY, NO TRADES. 31 August 2026. ----
+        #
+        #     "no capital (money) = no trades in real mode right. thats
+        #      as simple as that whats so complex in that?"
+        #
+        # It is that simple, and the code was not. It read
+        #
+        #     if not capital: return MAX_OPEN_POSITIONS
+        #
+        # so a balance of zero, a balance of None and a broker timeout
+        # all came back as THREE SEATS -- opening the book on money the
+        # bot could not confirm exists, silently.
+        #
+        # I then replaced it with three branches: zero means no seats,
+        # unreadable falls back to three, unparseable falls back to
+        # three. He read that and said it is one rule.
+        #
+        # He is right. If the bot cannot see the money, it does not
+        # know it has any, and "I could not read the balance" is not a
+        # reason to trade. One rule: a positive, readable number or no
+        # new positions.
+        #
+        # OPEN POSITIONS ARE UNTOUCHED. This decides new entries only.
+        # Abandoning live positions because a balance read failed would
+        # be a far worse failure than not opening another.
+        try:
+            cash = float(capital)
+        except (TypeError, ValueError):
+            cash = 0.0
+        if cash <= 0:
+            held_now = len(getattr(self, "open_positions", {}) or {})
+            if getattr(self, "_no_cash_said", False) is not True:
+                self._no_cash_said = True
+                warn(f"[SLOTS] No new positions: the account reads "
+                     f"{capital!r}. Holding {held_now}; those are "
+                     f"unaffected.")
+            return held_now
+        if getattr(self, "_no_cash_said", False):
+            self._no_cash_said = False
+            decision(f"[SLOTS] The account reads Rs {cash:,.0f} again. "
+                     f"Sizing from cash resumes.")
+
         try:
             from core import capital as capital_rules
             allowed = capital_rules.slots(
@@ -2672,7 +2736,38 @@ class Engine:
                  f"falling back to MAX_OPEN_POSITIONS={MAX_OPEN_POSITIONS}")
             return MAX_OPEN_POSITIONS
         held = len(getattr(self, "open_positions", {}) or {})
-        return max(allowed.get("slots", 0) + held, 0)
+
+        # ---- THE REASON WAS WRITTEN AND THROWN AWAY. 31 Aug 2026. ----
+        #
+        # capital.slots() returns a "why" on purpose. Its own docstring
+        # says it: "never a bare number, because a refusal he cannot
+        # read is a refusal he cannot act on."
+        #
+        # This line read .get("slots") and discarded it. So when cash
+        # closes the book -- the balance dipped, or came back
+        # unparseable and became 0.0 in slots() -- the bot quietly stops
+        # opening positions and nothing anywhere says why. He sees a day
+        # with no trades and no reason, which is the single most
+        # frustrating thing this bot has done to him.
+        #
+        # Edge-triggered: said once when the book closes and once when
+        # it reopens, never every cycle.
+        seats = max(allowed.get("slots", 0) + held, 0)
+        shut = seats <= held
+        # Defaults to False, not None: a fresh engine with an open book
+        # has nothing to announce. Starting at None made the very first
+        # cycle of a normal session log "Room again", which is noise on
+        # the one message that has to be worth reading.
+        if shut != getattr(self, "_book_shut_by_cash", False):
+            self._book_shut_by_cash = shut
+            if shut:
+                warn(f"[SLOTS] No room for a NEW position: "
+                     f"{allowed.get('why') or 'cash sizing returned none'}. "
+                     f"Holding {held}. Open positions are unaffected.")
+            else:
+                decision(f"[SLOTS] Room again -- "
+                         f"{allowed.get('why') or f'{seats - held} free'}.")
+        return seats
 
     def _staged_position_cap(self, effective_time):
         """
@@ -3997,12 +4092,26 @@ class Engine:
         quiet candle window). The stop distance actually used is
         max(ATR_STOP_MULTIPLIER * ATR, MIN_STOP_DISTANCE_PCT * price)
         -- never tighter than that percentage of price, regardless
-        of how small ATR reads. qty is derived from THAT distance,
-        then separately capped so notional (qty * entry_price) never
+        of how small ATR reads.
+
+        ---- THIS PARAGRAPH WAS DESCRIBING OLD CODE. 31 Aug 2026. ----
+
+        It used to say qty was "separately capped so notional never
         exceeds MAX_NOTIONAL_PER_TRADE_RS -- a second, independent
-        backstop in case a cheap stock still sizes up large even
-        with the floored distance. See config.py's own comment block
-        for the full incident writeup.
+        backstop". That stopped being true on 29 July, when sizing
+        moved to the MTF margin (see _risk_sized_qty and the long note
+        further down this method). MAX_NOTIONAL_PER_TRADE_RS is
+        imported by this file and read by no line of it.
+
+        A comment promising a safety that no longer exists is worse
+        than no comment: it sent me looking for a bug that was not
+        there, and it would send anyone else the same way.
+
+        WHAT ACTUALLY BOUNDS THE SIZE NOW: a fixed
+        MTF_MARGIN_PER_POSITION_RS (Rs 30,000) of his own cash per
+        position, with the share count asked of Dhan rather than
+        estimated. The stop distance above governs the EXIT; it has
+        not governed the SIZE since 29 July.
         """
         candles = self.candle_engine.last_n_closed(symbol, ATR_PERIOD + 1)
         if len(candles) < MIN_ATR_CANDLES:
