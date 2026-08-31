@@ -365,6 +365,53 @@ EXIT_REASON_MANUAL_PARTIAL = "MANUAL_PARTIAL"
 EXIT_REASON_MISSED_STOP = "MISSED_STOP_RECONCILED"
 
 
+# ---- A REFUSED EXIT IS NOT AN EXIT. 31 August 2026. ----
+#
+# _enter() has checked this since it was written:
+#
+#     if not result.get("success"):
+#         return
+#
+# _exit() never did. It took the fill price out of the result and
+# carried on -- telling the portfolio, removing the position from the
+# book, writing a closed trade -- whether or not the order had actually
+# been placed.
+#
+# In PAPER this cannot bite; the paper executor always succeeds. In
+# LIVE it is the worst outcome this bot can produce. Dhan refuses
+# orders for real reasons: margin, a frozen scrip, a price band, or a
+# market that has moved to the closing auction -- which every F&O stock
+# does at 15:15. The bot would then believe it was flat while still
+# holding the shares, with no stop watching it, no exit rule watching
+# it, and no row anywhere saying it exists.
+#
+# The same fault this repository forbids in three other places --
+# "claim a stop is resting when the API call failed", "report success
+# when the broker never answered" -- arriving on the one path nobody
+# had checked.
+#
+# THE CHECK GOES BEFORE THE PORTFOLIO, not after. Booking the P&L and
+# then returning would leave the trade counted and the position open,
+# which is worse than either.
+
+
+def _order_went_through(result):
+    """A missing "success" key means the executor does not report one,
+    and the order stands. Only an explicit False is a refusal -- this
+    must never invent a failure out of a shape it does not recognise."""
+    if not isinstance(result, dict):
+        return True
+    return result.get("success", True) is not False
+
+
+def _refused_exit(symbol, result):
+    reason = (result or {}).get("error") if isinstance(result, dict) else None
+    warn(f"[EXIT] {symbol} NOT closed -- the broker refused the order "
+         f"({reason or 'no reason given'}). The position is STILL OPEN "
+         f"and still managed; the next tick will try again. Nothing has "
+         f"been booked.")
+
+
 class Engine:
 
     def __init__(self, portfolio=None, sector_monitor=None,
@@ -5593,6 +5640,9 @@ class Engine:
                 position["security_id"], symbol, price, position["qty"],
                 reason=reason,
             )
+            if not _order_went_through(result):
+                _refused_exit(symbol, result)
+                return
             # Rebound to the FILL before anything else uses it -- the
             # P&L, the closed_positions row, and the exit log all read
             # `price` below.
@@ -5606,6 +5656,9 @@ class Engine:
                 position["security_id"], symbol, price, position["qty"],
                 reason=reason,
             )
+            if not _order_went_through(result):
+                _refused_exit(symbol, result)
+                return
             price = self._filled_at(result, price)
             if self.portfolio is not None:
                 pnl = self.portfolio.on_cover(
