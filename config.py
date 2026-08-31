@@ -1195,8 +1195,67 @@ ATR_TRAIL_MULTIPLIER = 1.2
 # to follow it up (locking in profit), trailing this same distance
 # behind the best price seen. 1.0 = "prove one full stop-distance of
 # profit first, THEN start protecting it."
-ATR_TRAIL_ACTIVATION_MULT = 1.0
-
+# ==========================================================
+# THE TRAIL NEVER ARMED.  31 August 2026.
+# ==========================================================
+#
+#     "trades without booking profit & keep on holding until close or
+#      in falling stocks is not what i expect bot to do"
+#                                         -- the operator
+#
+# CDSL, held since 27 August, peaked at +Rs 23.90 a share against a
+# daily ATR of Rs 29.16. The trail arms at 1.0 x ATR, so it was
+# Rs 5.26 short -- four days, four crossings of zero, and the trail
+# never switched on once.
+#
+# That looked like bad luck. COUNTED across every completed winning
+# trade, each one against ITS OWN stock's ATR -- nothing pooled, no
+# average of returns, one question asked of each trade separately:
+# did this stock travel that much of its own daily range while we
+# held it?
+#
+#     reached 0.25 x its own ATR    18 of 51 trades
+#     reached 0.50 x its own ATR     6 of 51
+#     reached 1.00 x its own ATR     1 of 51   <- the old setting
+#     reached 2.00 x its own ATR     0 of 51
+#
+# ONE out of fifty-one -- ASIANPAINT on 29 July, 2.49% against a
+# 1.99% ATR. It was not a protection with a threshold; it was a
+# protection that was off.
+#
+# The ATR is taken AS OF EACH TRADE'S OWN DATE. A first pass used
+# today's ATR for trades going back to July and reported 2 of 52;
+# dating it properly gives 1 of 51. One trade had no ATR on file and
+# was skipped rather than guessed at, and one is a short, where the
+# sign of the move inverts.
+#
+# 0.25 is where the count changes from 1 trade to 18.
+#
+# ---- AND THE POPULATION IS THE WRONG ONE. SAID PLAINLY. ----
+#
+#     "these stocks u told on atr is utter flopped trades which were
+#      traded purely on orb trades ... do not mix or confuse things"
+#                                         -- the operator, same day
+#
+# He is right. Of those 51 winners:
+#
+#     STRUCTURAL_LONG_BREAKOUT (ORB)   28
+#     MANUAL_BUY_DASHBOARD             20
+#     ADOPTED_FROM_BROKER               2
+#     RANKED_SETUP -- the lane we now trade    1
+#     MANUAL_SHORT                      1
+#
+# Fifty of fifty-one came from lanes the bot has moved off. The
+# opportunity lane has five trades in its entire history, all on
+# 21 August, one of them a winner at +Rs 32.90 on a 0.05% move.
+#
+# So the only thing this table actually establishes is that 1.0
+# NEVER ARMS -- true across every lane, so true here too. 0.25 is
+# PROVISIONAL: a number chosen because the old one is provably dead,
+# not because it has been measured on the trades we now take.
+#
+# IT IS OWED A MEASUREMENT once the opportunity lane has run.
+ATR_TRAIL_ACTIVATION_MULT        = 0.25
 # ----------------------------------------------------------
 # ATR sizing safety floor/ceiling, 2026-07-24 -- operator's live
 # report: SWIGGY entered SHORT 11:37:07 with qty=2522 and a 46-paise
@@ -1700,7 +1759,36 @@ DAILY_ATR_STOP_MULT = 2.0
 #
 # None of them fires because you are losing money. With this flag
 # on, none of them may touch a position you opened by hand.
-MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE = True
+#
+# ==========================================================
+# TURNED OFF: HALF-MANAGEMENT WAS THE WORST OF BOTH.
+#                                        31 August 2026
+# ==========================================================
+#
+#     "manage fully. yes even if manual opened positions"
+#                                         -- the operator
+#
+# Traced that afternoon, and the asymmetry was invisible until it was
+# listed out. On a position he opened:
+#
+#     hard stop                    CLOSES it        -- a loss
+#     trailing stop                alerts only      -- never closes
+#     move finished, book it       FORBIDDEN (here)
+#     no progress, free the slot   FORBIDDEN (here)
+#     circuit proximity            FORBIDDEN (here)
+#
+# The only exit that could close one of his positions was the hard
+# stop. Every profit-taking exit was blocked; the loss exit ran free.
+#
+# That is not a coincidence with the record, it IS the record:
+#
+#     ADOPTED_FROM_BROKER   19 trades   11% won   -Rs 69,766
+#
+# The bot was permitted to take his losses and forbidden to take his
+# gains. The instinct behind the flag was right -- do not let a
+# tidy-up routine overrule a deliberate decision -- but one-sided
+# management produced the single largest loss in the book.
+MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE = False
 
 # The trailing stop on a MANUAL position warns instead of selling.
 #
@@ -1716,7 +1804,25 @@ MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE = True
 # of WINNERS; the fixed stop only fires on a real loss. It is the one
 # thing standing between a position and a bad afternoon away from the
 # desk. Alert-only on both was offered and refused.
-MANUAL_POSITIONS_TRAIL_ALERTS_ONLY = True
+#
+# ---- TURNED OFF WITH THE FLAG ABOVE. 31 August 2026. ----
+#
+#     "manage fully. yes even if manual opened positions"
+#
+# THE 29 JULY MEASUREMENT ABOVE IS NOT WITHDRAWN and he was shown it
+# again before deciding. What has changed is that it does not
+# describe this trail any more:
+#
+#   * ATR_TRAIL_ACTIVATION_MULT was 1.0 that day, and counted against
+#     each trade's own dated ATR it armed on 1 of 51 winners. Whatever
+#     closed those 17 trades was PEAK_TRAIL_PCT, not the ATR trail.
+#   * It is 0.25 from today, which is a different mechanism with a
+#     different failure mode, and unmeasured.
+#
+# So this is a decision taken on the -Rs 69,766 rather than on the
+# -Rs 14,909, with both numbers in front of him. If the trail starts
+# selling his winners again, this flag is one edit back.
+MANUAL_POSITIONS_TRAIL_ALERTS_ONLY = False
 
 # How many manual-position alerts to keep for the dashboard.
 # RAISED from 50, 30 July 2026. In ALERT_ONLY_MODE the alerts ARE the

@@ -73,7 +73,29 @@ def _engine_with_position(entry_reason, side="LOWER", **position_extra):
 # The three housekeeping exits
 # ---------------------------------------------------------------
 
-def test_circuit_proximity_does_not_touch_a_position_you_opened():
+@pytest.fixture
+def protection_on(monkeypatch):
+    """---- THESE TESTS OWN THEIR OWN SETTING. 31 August 2026. ----
+
+    They used to inherit config.MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE and
+    MANUAL_POSITIONS_TRAIL_ALERTS_ONLY, which were both True. He turned
+    them off that afternoon -- "manage fully. yes even if manual opened
+    positions" -- and six tests broke on a policy change rather than a
+    fault.
+
+    A test that describes protective behaviour should switch the
+    protection on itself. The tests further down that describe the
+    OTHER setting already do exactly that.
+    """
+    import core.engine as engine_module
+
+    monkeypatch.setattr(engine_module,
+                        "MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE", True)
+    monkeypatch.setattr(engine_module,
+                        "MANUAL_POSITIONS_TRAIL_ALERTS_ONLY", True)
+
+
+def test_circuit_proximity_does_not_touch_a_position_you_opened(protection_on):
     """SMLMAH itself. Bought by hand at the upper circuit, and the
     bot wanted it gone within seconds."""
     engine = _engine_with_position(ENTRY_REASON_MANUAL_DASHBOARD)
@@ -89,7 +111,7 @@ def test_circuit_proximity_still_closes_the_bots_own_position():
     assert "SMLMAH" not in engine.open_positions
 
 
-def test_the_refusal_is_reported_in_plain_english():
+def test_the_refusal_is_reported_in_plain_english(protection_on):
     """The operator's standing rule: he must be able to read what the
     bot is doing. A silent skip would satisfy the code and fail him."""
     engine = _engine_with_position(ENTRY_REASON_MANUAL_DASHBOARD)
@@ -101,7 +123,7 @@ def test_the_refusal_is_reported_in_plain_english():
     assert alerts[0]["symbol"] == "SMLMAH"
 
 
-def test_the_same_refusal_is_not_repeated_on_every_tick():
+def test_the_same_refusal_is_not_repeated_on_every_tick(protection_on):
     """A circuit flag stays true for hours. One sentence, not four
     hundred."""
     engine = _engine_with_position(ENTRY_REASON_MANUAL_DASHBOARD)
@@ -114,7 +136,7 @@ def test_the_same_refusal_is_not_repeated_on_every_tick():
 # The trailing stop REPORTS
 # ---------------------------------------------------------------
 
-def test_the_trail_warns_instead_of_selling_your_position():
+def test_the_trail_warns_instead_of_selling_your_position(protection_on):
     """KAYNES, 29 July: in profit, dipped 2.5% off its high, sold by
     the trail, then ran to 3,685."""
     engine = _engine_with_position(ENTRY_REASON_MANUAL_DASHBOARD)
@@ -219,7 +241,7 @@ def _book(engine, entries):
     return engine
 
 
-def test_rotation_skips_your_position_and_keeps_looking():
+def test_rotation_skips_your_position_and_keeps_looking(protection_on):
     """TODAY'S BOOK AT 10:19, exactly.
 
         CUB        YOU   -2.26%   <- weakest, and his
@@ -243,7 +265,7 @@ def test_rotation_skips_your_position_and_keeps_looking():
     assert weakest[0] == "MOBIKWIK"
 
 
-def test_a_book_of_only_your_positions_rotates_nothing():
+def test_a_book_of_only_your_positions_rotates_nothing(protection_on):
     """Correct, and not the same bug: there is genuinely nothing the
     bot may give away."""
     engine = _book(Engine(), [

@@ -135,6 +135,22 @@ _stats = {"observed": 0, "written": 0, "dropped": 0}
 STALE_MINUTES = 2
 
 
+def _in_session(when):
+    """Is this moment inside continuous trading?
+
+    config.MARKET_OPEN / MARKET_CLOSE own the times so this cannot
+    drift from the rest of the bot. Fails OPEN -- an unreadable clock
+    must not silently stop the recorder for a whole session; a missing
+    filter costs some pre-open rows, a broken one costs the day.
+    """
+    try:
+        from config import MARKET_OPEN, MARKET_CLOSE
+        hhmm = when.strftime("%H:%M")
+        return str(MARKET_OPEN) <= hhmm <= str(MARKET_CLOSE)
+    except Exception:                                      # noqa: BLE001
+        return True
+
+
 def _num(value):
     try:
         got = float(value)
@@ -184,6 +200,42 @@ def observe(symbol, message, now=None):
         now = now or datetime.now()
         date = now.strftime("%Y-%m-%d")
         minute = now.strftime("%H:%M")
+
+        # ==========================================================
+        # THE SESSION, AND NOTHING OUTSIDE IT.  31 August 2026.
+        # ==========================================================
+        #
+        #     "something is issue with time. today: going up since
+        #      08:30 (still settling)"          -- the operator
+        #
+        # He caught it on the board: a shape reading anchored at 08:30,
+        # forty-five minutes before the market opens.
+        #
+        # core/market_data.py drops pre-market ticks and says so in the
+        # log. This recorder never did -- it rejected a zero price and
+        # nothing else -- so it wrote a row for every quote that
+        # arrived, whenever it arrived. Measured on 31 August, before
+        # the fix:
+        #
+        #     07:58   1,288 symbols   1 tick each   delta 0
+        #     08:30   1,288 symbols   1 tick each   delta 0
+        #     09:00   1,288 symbols  54.7 each      delta +49,45,294
+        #     09:15   1,288 symbols  50.0 each      delta  +7,32,969
+        #
+        # 12,829 rows before the open. The 07:58 and 08:30 rows are
+        # startup snapshots -- one quote per symbol, delta zero,
+        # harmless to the arithmetic but they become BLOCKS in
+        # core/intraday_shape.py, which is what put "since 08:30" on
+        # his screen.
+        #
+        # 09:00-09:14 is worse and invisible: that is the PRE-OPEN
+        # AUCTION, not trading, and its delta was SEVEN TIMES the whole
+        # of 09:15. Every cumulative-delta figure on the board carried
+        # it, and the divergence read would have been computed off it.
+        #
+        # A tick outside the session is not a trade. It is not recorded.
+        if not _in_session(now):
+            return None
 
         ltp = _num(message.get("LTP"))
         ltq = _num(message.get("LTQ"))
@@ -530,6 +582,81 @@ def session_series(symbol, date=None, db_path=None):
                     "ticks": int(ticks or 0),
                     "book_ticks": int(book_ticks or 0)})
     return out
+
+
+# How far back "still growing" looks. Not a new number: it is
+# core/intraday_shape.BLOCK_MINUTES, the unit the shape reading
+# already uses, so the two speak the same clock.
+STILL_BUYING_LOOKBACK = 15
+
+
+def still_buying(symbol, date=None, db_path=None, series=None,
+                 lookback=STILL_BUYING_LOOKBACK):
+    """Are buyers STILL winning this stock, or have they stopped?
+
+    ---- PRECWIRE, 31 August 2026. ----
+
+        "some stocks will rally sudden volume surges & later we/bot
+         will know the reason ... volume can't hide"
+                                            -- the operator
+
+    The entry gate calls a stock "fading" on where its PRICE sits in
+    the day's range. PRECWIRE sat at 0.22 of its range and was refused
+    518 times, while buyers took 63% of every share traded and
+    cumulative delta made new highs all session, measured at 100%
+    against a real bid and ask. The price pulled back; the pressure
+    never did.
+
+    Two conditions, and deliberately no invented percentage:
+
+        positive   cumulative delta above zero -- buyers ahead today
+        growing    higher than it was `lookback` minutes ago
+
+    Measured on the live session that afternoon:
+
+        PRECWIRE     66,243  vs  65,930  ->  growing,  99% of peak
+        ASHOKA      3,04,021 vs 3,28,122 ->  falling,  67% of peak
+        ATHERENERG    34,988 vs   40,031 ->  falling,  83% of peak
+        VIMTALABS    -33,897 vs  -14,861 ->  falling, negative
+
+    An earlier draft asked how LONG ago the peak was. That is the
+    wrong question: PRECWIRE's peak was 17 minutes old and it was
+    sitting 1.1% below it. A stock can hold its high for an hour and
+    it has not stopped buying.
+
+    None means NO READING -- too little session, or the sides were
+    inferred rather than read off a real book. A caller must treat
+    that as "do not act", never as "no buying".
+    """
+    rows = series if series is not None else session_series(
+        symbol, date=date, db_path=db_path)
+    live = [r for r in rows if r.get("minute", "") >= "09:15"]
+    if len(live) < lookback + 2:
+        return None
+
+    ticks = sum(r["ticks"] for r in live)
+    book = sum(r["book_ticks"] for r in live)
+    book_pct = (book / ticks * 100.0) if ticks else 0.0
+    try:
+        from config import FLOW_MIN_BOOK_PCT
+    except Exception:                                      # noqa: BLE001
+        FLOW_MIN_BOOK_PCT = 60.0
+    if book_pct < FLOW_MIN_BOOK_PCT:
+        return None                # a guess must not overrule a gate
+
+    now, then = live[-1], live[-1 - lookback]
+    peak = max(r["cum"] for r in live)
+    return {
+        "symbol": str(symbol or "").upper(),
+        "delta": now["cum"],
+        "was": then["cum"],
+        "growing": now["cum"] > then["cum"],
+        "positive": now["cum"] > 0,
+        "still_buying": bool(now["cum"] > 0 and now["cum"] > then["cum"]),
+        "of_peak": round(now["cum"] / peak * 100.0, 1) if peak > 0 else None,
+        "book_pct": round(book_pct, 1),
+        "minutes": lookback,
+    }
 
 
 def _minute_gap(older, newer):

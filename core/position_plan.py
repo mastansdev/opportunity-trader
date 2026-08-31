@@ -213,8 +213,63 @@ def plan(entry, side, day_low=None, day_high=None, atr=None,
         distance = entry * stop_pct / 100.0
         stop = round(entry - distance if side == "BUY"
                      else entry + distance, 2)
+    # ---- AND THE SAME FAULT IN MIRROR. 31 August 2026. ----
+    #
+    # The note above fixed TOO CLOSE and left TOO FAR refusing, on the
+    # grounds that it "is a real statement about the trade: the loss
+    # would not be small". Watched live, it is the same fault wearing
+    # the other face.
+    #
+    # ASHOKA, 31 August: +13% on a Rs 602 crore RVNL order, 231x its
+    # own normal volume, delta +2.9 lakh with 100% of it measured
+    # against a real book. Refused 847 times. Its day low sat 10.5%
+    # below the price -- because the stock had RUN, which is the whole
+    # reason it was interesting.
+    #
+    #     the harder a stock runs, the further its low,
+    #     the more certain the refusal
+    #
+    # So this filter, like the last one, was strongest against exactly
+    # the setups it should have been weakest against. And it refused on
+    # a number that was about to be thrown away: with a margin figure
+    # present the stop is RE-DERIVED below from risk and size, and for
+    # ASHOKA that gives 2.78% -- well inside the ceiling. The trade
+    # died on a stop it was never going to use.
+    #
+    # Same answer as too-close, same tool, same bounds: a stop that
+    # fits the stock. core/atr.scaled_stop_pct() is what core/engine.py
+    # and core/trailing_stop.py already trade on. ASHOKA's is 4.19%.
+    #
+    # It still refuses when there is no daily range to size against.
+    # "The loss would not be small" remains true when nothing can be
+    # said about the stock's own volatility -- it is only untrue when
+    # the day's low happened to be far away.
     if stop_pct > MAX_STOP_DISTANCE_PCT:
-        return {"ok": False, "why": "stop too far -- the loss would not be small"}
+        tightened = None
+        if symbol:
+            try:
+                from core.atr import scaled_stop_pct
+                from config import DAILY_ATR_STOP_MULT
+                # fallback_pct is None ON PURPOSE, and this is the
+                # one place it differs from the widen path above.
+                # There, an unmeasurable stock falls back to the floor
+                # and that is benign -- the stop was too tight and the
+                # floor loosens it. Here the floor would hand a 0.75%
+                # stop to a stock whose volatility nobody has measured,
+                # which is the tightest possible stop on the least
+                # known name. No measurement, no tightening, refuse.
+                tightened = scaled_stop_pct(
+                    symbol, DAILY_ATR_STOP_MULT, MIN_STOP_DISTANCE_PCT,
+                    MAX_STOP_DISTANCE_PCT, None)
+            except Exception:                              # noqa: BLE001
+                tightened = None
+        if not tightened or tightened > MAX_STOP_DISTANCE_PCT:
+            return {"ok": False,
+                    "why": "stop too far -- the loss would not be small"}
+        stop_pct = tightened
+        distance = entry * stop_pct / 100.0
+        stop = round(entry - distance if side == "BUY"
+                     else entry + distance, 2)
 
     # ---- THE CARD SAID 21 AND THE BOT BOUGHT 40. 29 Aug 2026. ----
     #

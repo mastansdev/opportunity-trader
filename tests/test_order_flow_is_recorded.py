@@ -235,8 +235,31 @@ def test_it_never_reaches_a_decision():
     is younger and less proven than that one: the surge-size version
     of the idea measured -Rs 30,664 over 1,049 stock-days. It gets
     wired in after it is measured, or not at all.
+
+    ---- NARROWED, NOT LIFTED. 31 August 2026. ----
+
+        "start the work . complete all tasks which we planned"
+
+    He instructed the flow into the entry decision after watching
+    PRECWIRE refused 518 times as "fading" while 63% of every share
+    traded was bought and cumulative delta rose all session, 100%
+    measured against a real bid and ask.
+
+    So core/auto_entry.py is allowed ONE use of it, and the SHAPE of
+    that use is the protection: still_buying() may only RESCUE a row
+    the price test already condemned. It can never condemn one, never
+    open an entry by itself, and a missing or inferred reading leaves
+    the old verdict exactly as it was.
+
+    THE ORIGINAL WARNING STANDS AND IS NOT SETTLED. The surge-size
+    version of this idea measured -Rs 30,664 over 1,049 stock-days.
+    This variant is different and UNMEASURED; it is in because he
+    decided it is in, on one session's evidence, and the measurement
+    is owed.
+
+    Everywhere else the ban holds.
     """
-    for name in ("core/engine.py", "core/auto_entry.py", "core/ranker.py",
+    for name in ("core/engine.py", "core/ranker.py",
                  "core/position_plan.py", "core/select.py",
                  "core/why_moving.py"):
         path = ROOT / name
@@ -344,3 +367,29 @@ def test_a_new_day_does_not_inherit_yesterdays_pressure():
     order_flow.observe("TESTCO", _full(100.5, 10, 100.0, 100.5),
                        now=datetime(2026, 9, 1, 10, 5))
     assert order_flow.pressure("TESTCO")["buy"] == 10.0
+
+
+def test_auto_entry_uses_the_flow_only_to_rescue():
+    """The one place it is allowed, and the shape that makes it safe.
+
+    still_buying() may overrule a row the PRICE test already called
+    faded. It may never call one faded, never open an entry on its
+    own, and never act on a missing or inferred reading.
+    """
+    text = (ROOT / "core/auto_entry.py").read_text(encoding="utf-8",
+                                                   errors="ignore")
+    # Code only. The comment above the rescue explains it at length,
+    # and scanning raw text would count its own explanation.
+    code = "\n".join(line for line in text.splitlines()
+                     if not line.strip().startswith("#"))
+    # Three is the minimum a single rescue costs: the import, the
+    # call, and reading the key off the result. A fourth means it has
+    # been used somewhere else.
+    assert code.count("still_buying") <= 3, (
+        "order_flow has spread beyond the single rescue in _faded()")
+    body = text.split("def _faded")[1].split("\ndef ")[0]
+    assert "still_buying" in body, "the rescue is not in _faded()"
+    # The rescue returns False (not faded). Nothing in this block may
+    # return True on the strength of the flow.
+    after = body.split("still_buying")[-1]
+    assert "return False" in after

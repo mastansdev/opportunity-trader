@@ -288,7 +288,42 @@ def _faded(mover):
     ltp = _num(mover.get("ltp"))
     if high is None or low is None or ltp is None or high <= low:
         return False
-    return ((ltp - low) / (high - low)) < FADED_FROM_HIGH
+    if ((ltp - low) / (high - low)) >= FADED_FROM_HIGH:
+        return False                      # not faded on price either
+
+    # ==========================================================
+    # PRICE SAYS FADED. ASK THE BUYING.  31 August 2026.
+    # ==========================================================
+    #
+    #     "buying pressure making highs confirm even before news land
+    #      into bot"                          -- the operator
+    #
+    # The test above is where the PRICE sits in the day's range and
+    # nothing else. PRECWIRE sat at 0.22 of its range and was refused
+    # 518 times that morning, while buyers took 63% of every share
+    # traded and cumulative delta made new highs all session -- 100%
+    # of it classified against a real bid and ask, not inferred.
+    #
+    # A pullback on rising buying is not the same animal as a
+    # roll-over on selling, and until today the bot could not tell
+    # them apart. core/order_flow.still_buying() asks the second
+    # question: is the delta positive, and higher than it was fifteen
+    # minutes ago.
+    #
+    # THE FLOW CAN ONLY RESCUE, NEVER CONDEMN. If it says the buying
+    # is still growing, the price verdict is overruled. If it says
+    # anything else -- or says nothing, which is what a missing or
+    # inferred reading returns -- the price verdict stands exactly as
+    # it did before. A gate that could be turned ON by a guess would
+    # be worse than the gate we have.
+    try:
+        from core.order_flow import still_buying
+        flow = still_buying(mover.get("symbol"))
+    except Exception:                                      # noqa: BLE001
+        flow = None
+    if flow and flow.get("still_buying"):
+        return False
+    return True
 
 
 def _volume_supports(mover, now=None):

@@ -120,10 +120,41 @@ def test_a_wild_stock_gets_a_wider_stop_than_a_calm_one(monkeypatch):
     assert wild["stop_pct"] > calm["stop_pct"]
 
 
-def test_a_stop_that_is_TOO_FAR_still_refuses(monkeypatch):
-    """That refusal is a real statement about the trade -- the loss
-    would not be small -- and must survive this change."""
+def test_a_stop_that_is_TOO_FAR_is_tightened_not_refused(monkeypatch):
+    """---- REVERSED ON EVIDENCE. 31 August 2026. ----
+
+    This asserted the opposite: "that refusal is a real statement
+    about the trade -- the loss would not be small -- and must survive
+    this change". Watched live, it was a statement about where the
+    day's low happened to be.
+
+    ASHOKA, 31 August: +13% on a Rs 602 crore RVNL order, 231x its own
+    normal volume, delta +2.9 lakh at 100% measured. Refused 847 times
+    because its day low sat 10.5% below the price -- and it sat there
+    BECAUSE THE STOCK HAD RUN, which is why it was worth buying.
+
+    The harder a stock runs, the further its low, the more certain the
+    refusal. Which is the same sentence this file already carries
+    about the too-CLOSE case: "the filter was strongest against the
+    setups it should have been weakest against."
+
+    So too-far now tightens to the stock's own ATR stop, exactly as
+    too-close widens to it. With ATR 2.0% and DAILY_ATR_STOP_MULT 2.0
+    that is 4.0%, inside the ceiling.
+    """
     monkeypatch.setattr("core.atr.daily_atr_pct", lambda s, **kw: 2.0)
+    got = plan(100.0, "BUY", day_low=80.0, symbol="X")
+    assert got["ok"] is True, got.get("why")
+    assert got["stop_pct"] <= MAX_STOP_DISTANCE_PCT
+    assert got["stop"] > 80.0, "it still obeys the far day low"
+
+
+def test_a_stop_too_far_with_no_measurable_range_still_refuses(monkeypatch):
+    """The half of the old rule that survives. "The loss would not be
+    small" is still true when nothing can be said about the stock's
+    own volatility -- and falling back to the FLOOR there would hand
+    the tightest possible stop to the least known name."""
+    monkeypatch.setattr("core.atr.daily_atr_pct", lambda s, **kw: None)
     got = plan(100.0, "BUY", day_low=80.0, symbol="X")
     assert got["ok"] is False
     assert "too far" in got["why"]
