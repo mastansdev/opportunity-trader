@@ -111,6 +111,7 @@ import zlib
 import time
 from datetime import datetime
 
+from core.rules import SURGE_IS_A_REASON, SURGE_REASON_MIN_RATIO
 from config import (
     REASON_CACHE_SECONDS,
     GAINERS_LOSERS_REFRESH_SECONDS, GAINERS_LOSERS_COUNT,
@@ -2834,6 +2835,20 @@ class DashboardState:
                 enriched.append(row)
             movers = enriched
 
+        # _mechanism_for() is handed a symbol and nothing else, and the
+        # volume ratio lives on the mover row. Stashing it here is what
+        # lets a surge count as a reason without that function having to
+        # go and re-derive a number the caller is already holding.
+        self._volume_now = {}
+        for row in movers or []:
+            key = str(row.get("symbol") or "").upper()
+            ratio = row.get("volume_ratio") or row.get("volume_x")
+            if key and ratio:
+                try:
+                    self._volume_now[key] = float(ratio)
+                except (TypeError, ValueError):
+                    pass
+
         try:
             got = rank(movers,
                        gainers_losers=gainers_losers,
@@ -3135,7 +3150,33 @@ class DashboardState:
             # say which. It is also the direct test of the ten-a-day
             # plan -- if the bot clears three setups on an average
             # session, ten positions means taking seven it refused.
-            self._decisions.record_refusals(got.get("refusals") or {})
+            # ---- THE SYMBOLS WERE THROWN AWAY HERE. 31 August 2026. ----
+            #
+            #     "fix that refusals table so i can see why. i didn't
+            #      understand why bot can't see the stocks"
+            #
+            # He asked why the bot took none of 31 August's twelve best
+            # stocks -- DIFFNKG +18.3%, MANALIPETC +10.9%, PRUDENT
+            # +10.7% and nine more. The answer was in the store and
+            # unreadable: 20,962 refusal rows for the day, every one of
+            # them anonymous, the largest being "no event -- not
+            # evaluated" 99 stocks at a time.
+            #
+            # The ranker DOES keep the symbols. ranker.py line 696
+            # writes refused_by_symbol[name] for every stock it skips
+            # for want of a reason, and returns it. The dashboard reads
+            # it to paint the Live tab. And this line, the only route
+            # into the store, passed the anonymous census instead --
+            # so "which stocks, and why" was computed every cycle,
+            # displayed for as long as the page was open, and never
+            # written down.
+            #
+            # record_refusals already understands both shapes: a count
+            # goes to the census, a {symbol: reason} entry goes to the
+            # census AND to refused_symbols. So both are handed over.
+            refusals = dict(got.get("refusals") or {})
+            refusals.update(got.get("refused_by_symbol") or {})
+            self._decisions.record_refusals(refusals)
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[RANK] Could not record: {exc}")
 
@@ -3953,6 +3994,28 @@ class DashboardState:
                 filing = None
         got = why(events=events, news_hits=hits, symbol=symbol,
                   filing=filing, on_date=today)
+
+        # ---- AND THE VOLUME ITSELF. 31 August 2026. ----
+        #
+        #     "opportunity = news , govt order, volume surge, events"
+        #
+        # Volume surge was on his list and this function asked four
+        # stores, none of them volume. On 31 August the bot took none
+        # of the day's twelve best stocks -- it did not refuse them, it
+        # never evaluated them. DIFFNKG went up 16.9% on 81x its normal
+        # volume with no published sentence anywhere.
+        #
+        # LAST, deliberately. A real filing or a news item is a better
+        # answer than "a lot of shares changed hands", so this only
+        # speaks when the other four have nothing. When it does speak
+        # it says the ratio, so the Live tab shows him the number the
+        # decision was made on rather than the word "volume".
+        if got is None and SURGE_IS_A_REASON:
+            ratio = (getattr(self, "_volume_now", None) or {}).get(name)
+            if ratio and ratio >= SURGE_REASON_MIN_RATIO:
+                got = {"text": f"{ratio:.0f}x its normal volume -- "
+                               f"something moved before the news did",
+                       "weight": 0.5, "kind": "VOLUME_SURGE"}
         # None is cached too. "This stock has no reason" is an answer
         # that costs the same 15 ms to reach as any other, and it is
         # the answer for most of the list.

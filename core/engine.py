@@ -252,6 +252,13 @@ EXIT_REASON_SQUARE_OFF = "SQUARE_OFF"
 # TOP_N_MOMENTUM_MODE only (config.py) -- fixed bracket exits,
 # never the ratcheting trailing stop. See _check_fixed_bracket().
 EXIT_REASON_FIXED_TARGET = "FIXED_TARGET"
+EXIT_REASON_BUYING_DRIED_UP = "BUYING_DRIED_UP"
+
+# The reading compares now against fifteen minutes ago, so a position
+# younger than that is being judged against the noise around its own
+# entry. It matches STILL_BUYING_LOOKBACK in the flow module, and is
+# not a number anybody chose.
+BUYING_CHECK_MIN_MINUTES = 15
 EXIT_REASON_FIXED_STOP = "FIXED_STOP_LOSS"
 # core/circuit_monitor.py -- proactive, direction-agnostic close
 # ahead of either circuit limit (see config.py's
@@ -4954,6 +4961,25 @@ class Engine:
         if self._check_missed_stop(symbol, price, tick_time):
             return
 
+        # ---- BOOK IT WHEN THE BUYING DRIES UP. 31 August 2026. ----
+        #
+        #     "when the buying dries up, book it. no one can book all
+        #      the run stock did. its never gonna happen . we are here
+        #      to trade as long as stock is in momentum thats it"
+        #
+        # This is the rule. It is not a target and it is not a trailing
+        # stop -- both of those ask the PRICE where to get out, and the
+        # price is the last thing to know. The buying stops first.
+        #
+        # self.buying_check is a function handed in by main.py, never
+        # imported here. That keeps this engine free of the flow store
+        # (which records; it does not decide) and, more practically,
+        # stops a unit test reading the real store and closing a live
+        # position, which is what happened the first time this was
+        # written.
+        if self._buying_dried_up(symbol, price, tick_time):
+            return
+
         # Old fixed-bracket trades (any position opened before the
         # 2026-07-24 ATR redesign, restored from state across a
         # restart) never use the ratcheting trailing stop -- routed
@@ -5299,6 +5325,70 @@ class Engine:
                      f"be resized ({exc}). CHECK DHAN -- it may still be "
                      f"sized for the OLD quantity.")
         return exit_price
+
+    def _buying_dried_up(self, symbol, price, tick_time):
+        """Close a winner whose buyers have stopped. True if it did.
+
+        Three refusals, and each one is there for a reason he has
+        already lived through:
+
+        WINNERS ONLY. A losing trade belongs to the stop. Selling a
+        loser because the flow looks tired is a stop loss replaced by a
+        feeling, which is the thing this bot exists to remove.
+
+        NO READING, NO ACTION. The check returns None when the order
+        book is too thin to classify. None means nothing, not "sell".
+
+        NOT IN THE FIRST FIFTEEN MINUTES. The reading compares now with
+        fifteen minutes ago; below that it is reading the noise around
+        its own entry. CDSL was once bought and closed eleven seconds
+        later. Never again.
+        """
+        check = getattr(self, "buying_check", None)
+        if check is None:
+            return False
+        position = self.open_positions.get(symbol)
+        if position is None:
+            return False
+        entry = position.get("entry_price")
+        if entry is None or price is None or price <= entry:
+            return False
+
+        held = self._held_minutes(position, tick_time)
+        if held is not None and held < BUYING_CHECK_MIN_MINUTES:
+            return False
+
+        try:
+            reading = check(symbol)
+        except Exception:                                  # noqa: BLE001
+            return False
+        if not reading or reading.get("still_buying") is not False:
+            return False
+
+        gain = (price - entry) * (position.get("qty") or 0)
+        decision(
+            f"[BUYING DRIED UP] {symbol} at {price:.2f} -- the buyers have "
+            f"stopped (delta {reading.get('delta')} against "
+            f"{reading.get('was')} fifteen minutes ago). Booking "
+            f"Rs {gain:+,.0f}.")
+        self._exit(symbol, price, EXIT_REASON_BUYING_DRIED_UP, tick_time)
+        return True
+
+    @staticmethod
+    def _held_minutes(position, tick_time):
+        """Minutes since entry, or None when it cannot be worked out.
+        None means "do not judge" -- never "zero"."""
+        entered = position.get("entry_time")
+        if not entered or not tick_time:
+            return None
+        try:
+            start = datetime.fromisoformat(str(entered).replace("T", " ")[:19])
+            now = (tick_time if isinstance(tick_time, datetime)
+                   else datetime.fromisoformat(
+                       str(tick_time).replace("T", " ")[:19]))
+        except (ValueError, TypeError):
+            return None
+        return (now - start).total_seconds() / 60.0
 
     def _check_fixed_bracket(self, symbol, position, price, tick_time):
         """

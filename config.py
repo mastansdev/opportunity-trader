@@ -317,6 +317,24 @@ ORB_WINDOW_END = "09:30"   # opening range closes
 # at 15:15, meaningless once it stopped. The block now follows
 # FORCE_SQUARE_OFF_AT_CLOSE automatically. See
 # core/engine._entry_cutoff_reason().
+# ---- WHAT 15:15 ACTUALLY IS. 31 August 2026. ----
+#
+#     "FnO stocks will be traded CAS mechanism"      -- the operator
+#
+# Measurable in his own store. On 31 August, of 1,288 stocks with
+# minute data, 209 have no bar after 15:14 -- and all 209 are F&O. Of
+# the 1,079 that traded to the close, exactly one is. F&O leaves
+# continuous trading at 15:15 and finishes in the closing auction.
+#
+# With FORCE_SQUARE_OFF_AT_CLOSE off -- which is his deliberate choice,
+# see above -- nothing fires AT this time, so it is no longer a
+# deadline. It is when the carry-forward report runs and says what is
+# being held overnight.
+#
+# THE F&O BOUNDARY STILL MATTERS FOR EXITS. A stop or a buying-dried-up
+# exit that fires at 15:20 in an F&O stock has no continuous market to
+# fill into. That is a live-order concern, not a paper one, and it is
+# not solved here.
 SQUARE_OFF_TIME = "15:15"
 
 # ----------------------------------------------------------
@@ -370,7 +388,28 @@ SQUARE_OFF_TIME = "15:15"
 #
 # Set False again only alongside a rule that actually closes a carried
 # position, rather than one that waits for a stop that may never come.
-FORCE_SQUARE_OFF_AT_CLOSE = True
+# ---- BACK OFF. HIS CALL, AND IT ALWAYS WAS. 31 August 2026. ----
+#
+#     "no square off at all & thats deliberately avoided."
+#
+# I turned this on earlier the same evening because NCC and CDSL had
+# been held for ten days. That was the right problem and the wrong fix.
+#
+# They were not carried because nothing forced them out at 15:15. They
+# were carried because NOTHING COULD CLOSE THEM AT ALL: the bot's own
+# entries get no profit target, their stops never came within reach,
+# and there was no third way out. A square-off would have hidden that
+# behind a daily liquidation instead of fixing it.
+#
+# What closes a position now is the rule he asked for -- "when the
+# buying dries up, book it". On 21 August that would have booked both
+# on the day they were opened, and on 31 August it books ASHOKA at
+# 11:09 for +Rs 2,747 in a stock that finished the day below the entry.
+#
+# MTF is deliberate. He moved to it to hold when holding is right, and
+# the carry-forward report below says what is being held and what it is
+# worth. That is the design, not an oversight.
+FORCE_SQUARE_OFF_AT_CLOSE = False
 MARKET_CLOSE = "15:30"
 
 # ---------------------------------------------------------------------

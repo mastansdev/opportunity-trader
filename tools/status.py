@@ -104,19 +104,66 @@ def show_holdings(today):
         print("    py tools/flatten_carried.py --close  to close it")
 
 
+# ---- ONLY WHAT IS ACTUALLY READ. 31 August 2026. ----
+#
+# This screen printed ten setting NAMES and their values. Four of them
+# were about money and he asked, reasonably, which one was the risk:
+#
+#     RISK_PER_TRADE_RS     2500
+#     FIXED_STOP_LOSS_RS    1000
+#     FIXED_TARGET_RS       2500
+#
+# The answer is that two of those are DEAD. FIXED_STOP_LOSS_RS and
+# FIXED_TARGET_RS are imported by core/engine.py on line 69 and read by
+# no line of it. They decide nothing and they have not for some time.
+#
+# A screen built so he would not have to trust a summary was printing
+# dead settings beside live ones, in identical formatting, with no way
+# to tell them apart. That is the same failure in a different costume.
+#
+# So: plain words on the left, and every row below is a value some line
+# of the bot actually reads. Anything that stops being read comes off
+# this screen, and there is a test that fails if a dead one returns.
+RULES = [
+    ("Risk on each trade", "RISK_PER_TRADE_RS",
+     "position is sized so a stop-out costs this"),
+    ("Books profit at (bot's own trades)", None,
+     "nothing -- it holds until a stop or 15:15"),
+    ("Books profit at (your BUY click)", "MANUAL_BUY_TARGET_RS", ""),
+    ("Trailing stop", "ENABLE_BOT_TRAILING_STOP", ""),
+    ("Sells everything at", "SQUARE_OFF_TIME",
+     "nothing is carried overnight"),
+    ("Swaps a holding for a better one", "ENABLE_SLOT_ROTATION", ""),
+    ("Short selling", "ENABLE_SHORT_TRADES", "long only"),
+    ("Seats sized from capital", "ENABLE_CASH_SIZED_BOOK", ""),
+    ("Buys only between", "MARKET_OPEN", "and 15:15"),
+]
+
+
+def _pretty(value):
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    if isinstance(value, float) and value >= 1000:
+        return f"Rs {value:,.0f}"
+    return str(value)
+
+
 def show_rules():
-    _rule("THE SETTINGS THAT DECIDE WHAT IT DOES")
+    _rule("THE RULES IT TRADES BY")
     try:
         import config
     except Exception as exc:                               # noqa: BLE001
         print(f"    could not read config: {exc}")
         return
-    for name in ("FORCE_SQUARE_OFF_AT_CLOSE", "SQUARE_OFF_TIME",
-                 "ENABLE_SLOT_ROTATION", "EXIT_ON_MOMENTUM_EXHAUSTED",
-                 "MOMENTUM_EXIT_MIN_MINUTES", "ENABLE_BOT_TRAILING_STOP",
-                 "ENABLE_SHORT_TRADES", "RISK_PER_TRADE_RS",
-                 "FIXED_STOP_LOSS_RS", "FIXED_TARGET_RS"):
-        print(f"    {name:30s} {getattr(config, name, '<absent>')}")
+    for label, name, note in RULES:
+        if name is None:
+            value = "none"
+        else:
+            value = _pretty(getattr(config, name, "<absent>"))
+        tail = f"   {note}" if note else ""
+        print(f"    {label:36s} {value:<10s}{tail}")
 
 
 def show_last_trade():

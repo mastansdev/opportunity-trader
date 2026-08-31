@@ -138,19 +138,25 @@ def test_the_entry_window_is_not_the_square_off_clock():
     # INDOBORAX at 14:42 on a DEAL filing and 35x its own volume.
     import config
     from core import rules
-    # ---- SQUARE-OFF IS BACK ON. 31 August 2026. ----
+    # ---- AND BACK OFF AGAIN, SAME EVENING. 31 August 2026. ----
     #
-    # The point of this test is that the ENTRY window and the SQUARE-OFF
-    # clock are separate things, and that is still what it checks -- the
-    # entry cutoff below is asserted on its own, whatever square-off is
-    # doing.
+    #     "no square off at all & thats deliberately avoided."
     #
-    # What changed is square-off itself. It was False so the bot could
-    # carry MTF overnight and let the trailing stop manage it. The stop
-    # never fired: NCC and CDSL were bought on 21 August and were still
-    # open on the 31st. Ten days, in a bot that books when momentum is
-    # exhausted.
-    assert config.FORCE_SQUARE_OFF_AT_CLOSE is True
+    # I turned it ON earlier that evening because NCC and CDSL had been
+    # carried for ten days. Right problem, wrong fix: they were not
+    # carried for want of a daily liquidation, they were carried
+    # because NOTHING COULD CLOSE THEM -- the bot's own entries get no
+    # profit target and their stops never came within reach.
+    #
+    # What closes a position now is "book when the buying dries up",
+    # which on 31 August books ASHOKA at 11:09 for +Rs 2,747 in a stock
+    # that finished the day below the entry.
+    #
+    # The point of this test is unchanged and is the reason it survives
+    # both flips: the ENTRY window and the SQUARE-OFF clock are
+    # separate things, and the entry cutoff below is asserted on its
+    # own whatever square-off is doing.
+    assert config.FORCE_SQUARE_OFF_AT_CLOSE is False
     # CAS put the entry cutoff on the old square-off clock, for its own
     # reason, and that is unaffected either way.
     assert rules.LAST_NEW_ENTRY == "15:15"

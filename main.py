@@ -614,6 +614,31 @@ def main():
         dhan_client=dhan_order_client,
     )
 
+    # ---- BOOK IT WHEN THE BUYING DRIES UP. 31 August 2026. ----
+    #
+    #     "when the buying dries up, book it. no one can book all the
+    #      run stock did. its never gonna happen . we are here to trade
+    #      as long as stock is in momentum thats it"
+    #
+    # The exit rule, in his words. Not a target and not a trailing
+    # stop: both of those ask the PRICE where to get out, and the price
+    # is the last thing to know. The buying stops first.
+    #
+    # WHY IT IS WIRED HERE AND NOT IMPORTED IN THE ENGINE. The flow
+    # store records; it does not decide. core/engine.py must stay clear
+    # of it -- when it did import it directly, a unit test read the
+    # real data/order_flow.db and closed a working position. So the
+    # engine is HANDED a function and never goes looking for one; an
+    # engine built anywhere else simply has no buying check and every
+    # other exit works exactly as before.
+    #
+    # The reading is INTRADAY, which is the point. It is computed from
+    # this session's own ticks and resets every morning -- the same
+    # shape as the bot, which is flat by 15:15 and never carries.
+    from core.order_flow import still_buying
+
+    engine.buying_check = still_buying
+
     (
         saved_orb_ranges,
         saved_positions,

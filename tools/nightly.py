@@ -191,6 +191,31 @@ STEPS = [
      "on 31 July this found six wrong ids. One would have bought a "
      "different company."),
 
+    # ---- IT KNEW IT WAS STALE AND NOBODY ASKED. 31 August 2026. ----
+    #
+    # core/index_members.py has MAX_AGE_DAYS = 7 and an is_stale() that
+    # returns True past it. On 31 August the F&O list was 32 days old,
+    # is_stale() said True, and the only caller of refresh() in the
+    # whole repository was tools/index_members.py -- run by hand.
+    #
+    # WHAT IT COST. F&O stocks stop CONTINUOUS trading at 15:15 and go
+    # to the closing auction; 209 stocks on 31 August have no bar after
+    # 15:14 for exactly that reason. Three of them -- ATHERENERG,
+    # MAHABANK, SAGILITY -- had joined F&O since 30 July, so the bot
+    # still had them down as ordinary cash stocks that trade to 15:29.
+    #
+    # A position the bot believes it can sell at 15:20, in a stock with
+    # no continuous market after 15:15, is a position it thinks it has
+    # closed and has not.
+    #
+    # BEFORE "universe", which reads the membership when it decides
+    # what is tradeable tomorrow.
+    ("membership", "Refresh the NIFTY 50 and F&O lists",
+     ["tools/index_members.py"],
+     "F&O membership decides which stocks stop trading at 15:15 for the "
+     "closing auction. A stale list means the bot plans an exit into a "
+     "market that is not open."),
+
     ("universe", "Decide which stocks are tradeable tomorrow",
      ["tools/morning_universe.py"],
      "LAST, because it reads everything above. Run after 16:00 it "

@@ -45,20 +45,49 @@ def test_it_runs_and_every_section_reports():
         "a section failed silently:\n" + out.stdout)
     for section in ("WHOSE MONEY",
                     "WHAT IT IS HOLDING RIGHT NOW",
-                    "THE SETTINGS THAT DECIDE WHAT IT DOES",
+                    "THE RULES IT TRADES BY",
                     "WHEN IT LAST CLOSED A TRADE"):
         assert section in out.stdout, section
 
 
-def test_it_names_the_settings_that_decide_behaviour():
-    """These are the ones that were wrong, or silently not what he
-    thought, on 31 August. Each has to be visible without asking me."""
+def test_it_answers_in_words_not_setting_names():
+    """---- HE ASKED WHICH NUMBER WAS THE RISK. 31 August 2026. ----
+
+    This screen used to print setting NAMES and values:
+
+        RISK_PER_TRADE_RS     2500
+        FIXED_STOP_LOSS_RS    1000
+        FIXED_TARGET_RS       2500
+
+    Four money numbers, no way to tell which decided anything -- and
+    two of those three are DEAD, imported by core/engine.py and read by
+    no line of it. A screen built so he would not have to trust a
+    summary was printing dead settings beside live ones in identical
+    formatting.
+
+    Plain words on the left now, and only values something reads."""
     out = _run().stdout
-    for setting in ("FORCE_SQUARE_OFF_AT_CLOSE",   # was off, carried 10 days
-                    "ENABLE_SLOT_ROTATION",        # he stopped it; it was on
-                    "ALERT_ONLY_MODE",             # froze the bot for 10 days
-                    "EXIT_ON_MOMENTUM_EXHAUSTED"):
-        assert setting in out, setting
+    for phrase in ("Risk on each trade",
+                   "Books profit at",
+                   "Sells everything at",
+                   "Buys only between"):
+        assert phrase in out, phrase
+
+
+def test_no_dead_setting_appears_on_the_screen():
+    """FIXED_STOP_LOSS_RS and FIXED_TARGET_RS are imported once by
+    core/engine.py and never read. If a value cannot change what the
+    bot does, showing it can only mislead."""
+    out = _run().stdout
+    for dead in ("FIXED_STOP_LOSS_RS", "FIXED_TARGET_RS"):
+        assert dead not in out, f"{dead} is dead and back on the screen"
+
+
+def test_it_shows_no_setting_that_does_not_exist():
+    """It printed EXIT_ON_MOMENTUM_EXHAUSTED <absent> after that setting
+    was removed. A row saying "<absent>" is noise pretending to be a
+    fact."""
+    assert "<absent>" not in _run().stdout
 
 
 def test_a_carried_position_is_called_out_not_just_listed(tmp_path,

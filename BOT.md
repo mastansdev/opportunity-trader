@@ -1,4 +1,4 @@
-<!-- generated: 2026-08-31 18:35 by tools/bot_doc.py -- do not edit by hand -->
+<!-- generated: 2026-08-31 21:53 by tools/bot_doc.py -- do not edit by hand -->
 # Opportunity Trader — what the bot is, and what it does
 
 **This file is generated.** Every number below is read out of `config.py` and `core/rules.py` when it is written, so it cannot drift away from the running bot. To change a rule, change the code and run `py tools/bot_doc.py --write`.
@@ -40,7 +40,7 @@ An evidence panel with a BUY button. It reads Telegram pro channels, NSE/BSE fil
 
 ## 3 · Overnight
 
-- Force square-off at close: **ON** (`FORCE_SQUARE_OFF_AT_CLOSE`)
+- Force square-off at close: **OFF** (`FORCE_SQUARE_OFF_AT_CLOSE`)
 - Resting stop at Dhan: **ON** (`BROKER_STOP_ENABLED`)
 
 A position carried overnight has a **Forever Order (GTT) resting at Dhan** at the hard stop. It fires whether or not this process — or the machine — is running.
@@ -122,7 +122,7 @@ Row counts and freshness are deliberately **not** printed here — they change h
 ## 7 · Exits
 
 - Bot trailing stop: **ON** (`ENABLE_BOT_TRAILING_STOP`)
-- Force square-off: **ON** at 15:15
+- Force square-off: **OFF** at 15:15
 
 ## 8 · What the bot must never do
 

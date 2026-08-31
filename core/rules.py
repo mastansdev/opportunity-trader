@@ -330,6 +330,56 @@ MIN_VOLUME_RATIO = 2.5
 REQUIRE_A_REASON_ALWAYS = True
 
 UNEXPLAINED_MIN_VOLUME_RATIO = 5.0
+
+# ---------------------------------------------------------------------
+# A VOLUME SURGE IS A REASON, AT A BAR THAT CANNOT BE MISTAKEN
+# ---------------------------------------------------------------------
+# 31 August 2026.
+#
+#     "opportunity = news , govt order, volume surge, events"
+#                                                  -- the operator
+#
+# Volume surge is on his list and the bot was not counting it. The
+# reason lookup asked four stores -- stock events, the newswire, NSE
+# filings, the pre-open gapper card -- and none of them is volume. So
+# with REQUIRE_A_REASON_ALWAYS on, a stock with no published sentence
+# was refused however much money went through it.
+#
+# WHAT THAT COST ON 31 AUGUST. The bot took none of the day's twelve
+# best stocks. It did not refuse them; it never evaluated them:
+#
+#     DIFFNKG      81x its normal volume    +16.9%
+#     MANALIPETC   65x                       +9.9%
+#     VENKEYS      26x                       +6.7%
+#
+# WHY THIS IS NOT THE 5x LANE ABOVE. That lane let NCC be bought twice
+# on 8.5x with nothing behind it, and the objection to it stands: 5x is
+# an ordinary busy day, and volume alone is not evidence of WHY.
+#
+# 81x is not an ordinary busy day. Counted across all 1,288 stocks with
+# enough history on 31 August:
+#
+#        5x or more :  74 stocks      <- the old lane. far too many.
+#       10x or more :  28
+#       20x or more :  10 stocks      <- this bar
+#       30x or more :   5
+#       50x or more :   4
+#
+# Ten names out of 1,288 is the top 0.8% of the board. At that level
+# the volume IS the event -- something happened that the newswire has
+# not printed yet, which on 21 August was true of seven gainers whose
+# NSE filings were sitting unread in data/feeds.db.
+#
+# ONE DAY OF COUNTING. 20.0 is where the board separates on 31 August
+# and nowhere else yet. It is a starting bar, and the honest way to
+# settle it is tools/day_report.py over a few sessions.
+#
+# EVERY OTHER GATE STILL APPLIES. This decides only whether a stock is
+# worth EVALUATING. It must still be moving up, still clear the volume
+# ratio, still size to a real plan, still pass the circuit and
+# liquidity checks. It buys nothing on its own.
+SURGE_IS_A_REASON = True
+SURGE_REASON_MIN_RATIO = 20.0
 UNEXPLAINED_WEIGHT = 0.35
 
 
