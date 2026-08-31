@@ -727,6 +727,24 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None):
 
     clock = _clock(now)
     if clock is not None:
+        # ---- THE GATE WAS ONLY ON ONE SIDE. 31 August 2026. ----
+        #
+        #     "so basically bot can trade at its own time not within
+        #      NSE timings"                            -- the operator
+        #
+        # He read a would-be entry stamped 07:58 and asked the obvious
+        # question. There was a check for TOO LATE and none at all for
+        # TOO EARLY. On 31 August the ranker produced four picks at
+        # 07:58:40 -- PRECWIRE, ATHERENERG, ELGIEQUIP, RAMRAT -- an
+        # hour and seventeen minutes before the exchange opened.
+        #
+        # Nothing was placed, because ALERT_ONLY_MODE was on all day.
+        # That is luck, not a guard. With the bot trading, a pre-open
+        # price is a stale price from a market that is not running, and
+        # any order built on one is priced against nothing.
+        if clock < EARLY_ENTRY_FROM:
+            return (f"before {EARLY_ENTRY_FROM:%H:%M} -- the market is "
+                    f"not open yet")
         if clock >= LAST_NEW_ENTRY:
             return (f"after {LAST_NEW_ENTRY:%H:%M} -- too late to give a "
                     f"new position room to work")
