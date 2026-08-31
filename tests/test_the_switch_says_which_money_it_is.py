@@ -43,9 +43,39 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class _State:
-    def __init__(self, alert_only, positions=0):
+    """---- THE SWITCH MOVED. 31 August 2026. ----
+
+    It used to be engine.alert_only, which answered "is it trading at
+    all". The bot always trades now -- "keep simple ON = REAL TRADES .
+    OFF = PAPER TRADES" -- so that flag is False in both positions and
+    can no longer be the switch. The one source is execution.live.
+
+    `alert_only` is kept as the argument name so the cases below still
+    read as they were written: alert_only=False was ARMED, which is now
+    the switch ON.
+
+    `can_go_live` is what config.TRADING_MODE used to stand in for: can
+    THIS PROCESS place a real order at all. It is a property of the
+    process -- client present, acknowledgement given -- not of a
+    setting, which is the whole reason the 21 August fault was
+    possible.
+    """
+
+    def __init__(self, alert_only, positions=0, can_go_live=None):
+        if can_go_live is None:
+            try:
+                import config
+                can_go_live = str(config.TRADING_MODE).upper() == "LIVE"
+            except Exception:                              # noqa: BLE001
+                can_go_live = False
+        execution = type("X", (), {
+            "live": not alert_only,
+            "_live": object() if can_go_live else None,
+            "_live_refused": None if can_go_live else "no live path",
+        })()
         self.engine = type("E", (), {
             "alert_only": alert_only,
+            "execution": execution,
             "open_positions": {str(i): 1 for i in range(positions)},
         })()
 
@@ -81,14 +111,24 @@ def test_every_non_live_mode_is_reported_as_simulated(monkeypatch):
         assert "REAL" not in got["note"], mode
 
 
-def test_watching_is_still_watching(monkeypatch):
-    """Disarmed says nothing is being placed, in any mode."""
+def test_off_is_paper_trading_not_watching(monkeypatch):
+    """---- THE THIRD STATE IS GONE. 31 August 2026. ----
+
+    This asserted that OFF "places nothing". That was the state he
+    never asked for, and on 31 August it produced 65 alerts and 0
+    trades, after ten days with no completed trade at all.
+
+    OFF now means PAPER: the bot trades fully and nothing reaches the
+    broker. What must still be true, in any mode, is that OFF never
+    spends his money.
+    """
     for mode in ("PAPER", "LIVE"):
         monkeypatch.setattr("config.TRADING_MODE", mode)
         got = _bot_trading_now(_State(alert_only=True))
         assert got["on"] is False
-        assert "places nothing" in got["note"]
         assert got["placing_real_orders"] is False
+        assert "PAPER" in got["note"]
+        assert "REAL" not in got["note"]
 
 
 # ---------------------------------------------------------------
@@ -98,11 +138,22 @@ def test_watching_is_still_watching(monkeypatch):
 def test_the_mode_is_read_at_call_time_not_import(monkeypatch):
     """He edits the mode between sessions. A value captured at import
     describes the last run, not this one -- the same lesson the broker
-    stop learned on 19 August."""
+    stop learned on 19 August.
+
+    31 August: the reading is now taken from the PROCESS -- is there a
+    live path, and is the switch on -- rather than from the setting. A
+    setting cannot tell you whether a Dhan client exists, which is how
+    a PAPER session came to be labelled REAL.
+    """
     monkeypatch.setattr("config.TRADING_MODE", "PAPER")
     assert _bot_trading_now(_State(False))["mode"] == "PAPER"
     monkeypatch.setattr("config.TRADING_MODE", "LIVE")
     assert _bot_trading_now(_State(False))["mode"] == "LIVE"
+    # ...and a switch turned ON in a process that cannot place a real
+    # order still reads PAPER. This is the case a setting could never
+    # answer.
+    assert _bot_trading_now(
+        _State(False, can_go_live=False))["mode"] == "PAPER"
 
 
 def test_an_unreadable_mode_never_claims_real(monkeypatch):
@@ -118,9 +169,12 @@ def test_an_unreadable_mode_never_claims_real(monkeypatch):
         return real_import(name, *a, **k)
 
     monkeypatch.setattr(builtins, "__import__", _boom)
-    got = _bot_trading_now(_State(alert_only=False))
-    assert got["mode"] == "UNKNOWN"
+    # 31 August: the answer no longer depends on config being readable
+    # -- it depends on whether this process HAS a live path. With none,
+    # it reports PAPER and, most importantly, never claims REAL.
+    got = _bot_trading_now(_State(alert_only=False, can_go_live=False))
     assert got["placing_real_orders"] is False
+    assert "REAL" not in got["note"]
 
 
 # ---------------------------------------------------------------

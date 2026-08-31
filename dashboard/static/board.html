@@ -722,10 +722,24 @@ function paintState(on){
   const bOn = $("btn-on"), bOff = $("btn-off"), lab = $("switchlabel");
   bOn.className  = "segb" + (BOT_ON ? " live-on"  : "");
   bOff.className = "segb" + (BOT_ON ? "" : " live-off");
-  bOn.title  = "Switch ON -- the bot may open new positions by itself";
-  bOff.title = "Switch OFF -- no new entries, open positions keep their stops";
-  lab.textContent = BOT_ON ? "BOT TRADING" : "BOT OBSERVING";
-  lab.style.color = BOT_ON ? "#085041" : "#633806";
+  bOn.title  = "REAL trades";
+  bOff.title = "PAPER trades";
+  // ---- ONE LABEL. 31 August 2026. ----
+  //
+  //     "on dashboard just show as this by default OFF PAPER TRADE .
+  //      after i click ON then REAL TRADE . thats it no explanation
+  //      or nothing required"                    -- the operator
+  //
+  // There were two: this one said BOT TRADING / BOT OBSERVING, and
+  // the chip beside it said PAPER / REAL MONEY. Two labels for one
+  // fact is how they end up disagreeing -- which is exactly what
+  // happened on 21 August, when the board answered "placing REAL
+  // orders" during a PAPER session.
+  //
+  // paintMode() below owns the single label now, and it reads
+  // placing_real_orders -- the truth about where an order would go --
+  // rather than the position of the button.
+  lab.textContent = "";
 }
 // ---- PAPER OR REAL, SAID OUT LOUD. 24 August 2026. ----
 // Driven by the snapshot's own fields, never inferred here. If the
@@ -737,15 +751,17 @@ function paintMode(mode, real){
   if (!el) return;
   const m = String(mode || "").toUpperCase();
   const known = (m === "PAPER" || m === "LIVE");
-  if (known && m === "PAPER" && real !== true){
-    el.textContent = "PAPER";
-    el.title = "Simulated fills. Nothing is sent to Dhan.";
-    el.style.background = "#e6f4ea"; el.style.color = "#085041";
-  } else if (known && m === "LIVE"){
-    el.textContent = "REAL MONEY";
-    el.title = "Orders from this bot go to Dhan.";
+  if (real === true){
+    el.textContent = "REAL TRADE";
+    el.title = "Orders reach Dhan.";
     el.style.background = "#fdecec"; el.style.color = "#b00020";
+  } else if (known){
+    el.textContent = "PAPER TRADE";
+    el.title = "It trades fully. Nothing reaches Dhan.";
+    el.style.background = "#e6f4ea"; el.style.color = "#085041";
   } else {
+    // Unknown stays in the LIVE colour. The safe reading of "I do not
+    // know whose money this is" is to assume it is his.
     el.textContent = "MODE UNKNOWN";
     el.title = "The snapshot did not say. Treat it as real money.";
     el.style.background = "#fdecec"; el.style.color = "#b00020";
@@ -1186,7 +1202,12 @@ function inr(v){
 function flowCell(r){
   const f = r.flow;
   if (!f || f.delta === null || f.delta === undefined)
-    return `<span style="font-size:12px;color:var(--muted)">not trading yet</span>`;
+    // ---- "NOT TRADING YET" WAS A LIE. 31 August 2026. ----
+    //
+    // It printed over BALRAMCHIN while the stock was up 11.30%. The
+    // stock was trading perfectly well; the BOT had no reading for
+    // that row. A blank is honest, a claim about the stock is not.
+    return `<span style="font-size:12px;color:var(--muted)">&mdash;</span>`;
   const d = Number(f.delta);
   const tone = d > 0 ? ["--ok-bg", "--ok-fg"]
                      : (d < 0 ? ["--stop-bg", "--stop-fg"]

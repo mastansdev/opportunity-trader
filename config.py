@@ -2103,7 +2103,21 @@ MAX_OPEN_POSITIONS = 3
 # than a decision once, which is the right shape for a switch that
 # spends money -- and today it spends paper money, which is the whole
 # point of the experiment.
-ALERT_ONLY_MODE = True
+# ---- THE BOT ALWAYS TRADES NOW. 31 August 2026. ----
+#
+#     "keep simple ON = REAL TRADES . OFF = PAPER TRADES"
+#     "by default OFF PAPER TRADE"            -- the operator
+#
+# This flag WAS the switch, and OFF meant the bot placed nothing at
+# all -- not even a simulated fill. That third state produced 65
+# alerts and 0 trades on 31 August, and ten days before it with no
+# record of whether a single signal was right.
+#
+# It is off for good. The board's switch chooses PAPER or REAL now
+# (trading/execution.py), and it starts on PAPER at every restart --
+# so a process that comes back while he is away comes back simulated,
+# which is the same protection this flag was giving.
+ALERT_ONLY_MODE = False
 
 
 # =====================================================================

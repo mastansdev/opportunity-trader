@@ -83,8 +83,16 @@ MAIN_CODE = _code_only(MAIN)
 # 1. THE GUARD IN execution.py IS UNTOUCHED
 # ---------------------------------------------------------------
 def test_live_still_refuses_to_start_without_a_broker():
-    """The line the operator saw. It must keep existing."""
-    assert "no Dhan client was provided" in EXECUTION
+    """The line the operator saw. It must keep existing.
+
+    ---- REWORDED, NOT WEAKENED. 31 August 2026. ----
+    LIVE is no longer chosen at startup -- both executors are built and
+    the switch picks per order. But the refusal survives: if the config
+    says LIVE and this process cannot do it, that is still a refusal to
+    start rather than a quiet fallback to paper. "A bot you believe is
+    live and which is only pretending is the worse failure."
+    """
+    assert "no Dhan client in this process" in EXECUTION
     assert "Refusing to start" in EXECUTION
 
 
@@ -93,10 +101,17 @@ def test_live_still_requires_the_second_switch():
 
 
 def test_paper_is_the_only_fallback():
-    """If the LIVE branch is not taken, the executor is PaperExecution
-    and nothing else. A third branch is where a "sort of live" mode
-    would be born."""
-    assert EXECUTION.count("self.executor = ") == 2
+    """There is exactly ONE thing self.executor is ever set to, and it
+    is PaperExecution.
+
+    ---- STRONGER THAN IT WAS. 31 August 2026. ----
+    This used to allow TWO assignments, one per branch. There is no
+    branch now: paper is built unconditionally and live is held
+    separately in self._live, chosen per order by the switch. So the
+    count is one, and a second assignment would be the "sort of live"
+    mode this test exists to prevent.
+    """
+    assert EXECUTION.count("self.executor = ") == 1
     assert "self.executor = PaperExecution" in EXECUTION
 
 

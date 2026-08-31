@@ -98,7 +98,12 @@ def test_engine_in_live_mode_starts_when_given_a_client(monkeypatch):
     """The reproduction. Without the fix this raises RuntimeError."""
     _live(monkeypatch)
     engine = Engine(dhan_client=FakeDhan())
-    assert engine.execution.mode == "LIVE"
+    # ---- LIVE IS BUILT, NOT SELECTED. 31 August 2026. ----
+    # The switch chooses per order now and starts OFF, so `mode` reads
+    # PAPER at construction in every process. What this test is about
+    # is that the live path EXISTS and was wired -- which is _live.
+    assert engine.execution._live is not None
+    assert engine.execution.live is False, "it must start on paper"
 
 
 def test_engine_in_live_mode_still_refuses_without_a_client(monkeypatch):
@@ -165,8 +170,8 @@ def test_live_execution_is_given_a_price_lookup(monkeypatch):
     like a broken broker."""
     _live(monkeypatch)
     engine = Engine(dhan_client=FakeDhan())
-    assert engine.execution.executor._price_lookup is not None
-    assert engine.execution.executor._open_count is not None
+    assert engine.execution._live._price_lookup is not None
+    assert engine.execution._live._open_count is not None
 
 
 def test_price_lookup_prefers_the_tick_feed():
@@ -225,7 +230,7 @@ def test_open_position_count_reads_the_current_book(monkeypatch):
     would then never bind."""
     _live(monkeypatch)
     engine = Engine(dhan_client=FakeDhan())
-    count = engine.execution.executor._open_count
+    count = engine.execution._live._open_count
     assert count() == 0
     engine.open_positions["REDINGTON"] = {"qty": 1}
     assert count() == 1, (

@@ -42,9 +42,22 @@ class _Engine:
 
     def __init__(self, alert_only=True):
         self.alert_only = alert_only
+        # ---- THE SWITCH ACTS ON THIS NOW. 31 August 2026. ----
+        # "keep simple ON = REAL TRADES . OFF = PAPER TRADES". The bot
+        # always trades; execution.live decides whose money, and the
+        # endpoint refuses outright if there is no execution path --
+        # a switch with nothing behind it must not report success.
+        self.execution = _Execution()
         self.open_positions = {"CGPOWER": {"entry_price": 871.7,
                                            "direction": "LONG", "qty": 100}}
         self.broker_stop = _BrokerStop()
+
+
+class _Execution:
+    def __init__(self):
+        self.live = False
+        self._live = object()          # a live path exists in this rig
+        self._live_refused = None
 
 
 class _BrokerStop:
@@ -129,23 +142,23 @@ def press(client, path):
 # ---------------------------------------------------------------
 def test_pressing_ON_actually_arms_the_engine(rig):
     client, engine, _ = rig
-    assert engine.alert_only is True                 # watching
+    assert engine.execution.live is False            # paper
 
     response = press(client, "/api/bot_trading/on")
 
     assert response.status_code == 200, response.text
     assert response.json()["success"] is True
     assert response.json()["trading"] is True
-    assert engine.alert_only is False, (
+    assert engine.execution.live is True, (
         "the endpoint returned success and the engine did not change")
 
 
 def test_pressing_OFF_actually_disarms_it(rig):
     client, engine, _ = rig
-    engine.alert_only = False                        # trading
+    engine.execution.live = True                     # real
     response = press(client, "/api/bot_trading/off")
     assert response.json()["trading"] is False
-    assert engine.alert_only is True
+    assert engine.execution.live is False
 
 
 def test_it_survives_being_pressed_repeatedly(rig):
@@ -156,7 +169,7 @@ def test_it_survives_being_pressed_repeatedly(rig):
     assert engine.alert_only is False
     for _ in range(3):
         press(client, "/api/bot_trading/off")
-    assert engine.alert_only is True
+    assert engine.execution.live is False
 
 
 def test_open_positions_are_untouched_by_the_switch(rig):
@@ -178,13 +191,13 @@ def test_a_visitor_without_the_token_cannot_arm_it(rig):
     client, engine, _ = rig
     response = client.post("/api/bot_trading/on")
     assert response.status_code in (401, 403), response.status_code
-    assert engine.alert_only is True, "it armed without the token"
+    assert engine.execution.live is False, "it armed without the token"
 
 
 def test_a_wrong_token_cannot_arm_it(rig):
     client, engine, _ = rig
     client.post("/api/bot_trading/on?token=not-the-token")
-    assert engine.alert_only is True
+    assert engine.execution.live is False
 
 
 def test_the_snapshot_reports_the_new_state_immediately(rig):
@@ -331,7 +344,7 @@ def test_it_refuses_to_arm_when_the_morning_is_not_ready(rig, monkeypatch):
         "it armed on inputs that had not arrived")
     assert got.get("not_ready"), "it refused without saying what is missing"
     assert "not ready to trade" in str(got.get("error", ""))
-    assert engine.alert_only is True, "it armed anyway"
+    assert engine.execution.live is False, "it armed anyway"
 
 
 def test_the_refusal_names_what_is_missing(rig, monkeypatch):

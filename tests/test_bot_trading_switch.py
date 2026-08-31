@@ -130,10 +130,20 @@ def test_turning_it_on_needs_the_operator_token():
     assert "_require_operator(request)" in _endpoint()
 
 
-def test_it_sets_alert_only_on_the_engine():
+def test_it_sets_the_live_switch_not_alert_only():
+    """---- THE SWITCH MOVED. 31 August 2026. ----
+
+    It used to set engine.alert_only = not want_trading, so OFF meant
+    the bot placed nothing at all. That third state produced 65 alerts
+    and 0 trades on 31 August.
+
+    "keep simple ON = REAL TRADES . OFF = PAPER TRADES". The bot always
+    trades now; the endpoint sets execution.live and leaves alert_only
+    off in both positions.
+    """
     body = _endpoint()
-    assert "engine.alert_only" in body
-    assert "not want_trading" in body
+    assert "execution.live = bool(want_trading)" in body
+    assert "engine.alert_only = False" in body
 
 
 def test_it_does_not_write_the_config_file():

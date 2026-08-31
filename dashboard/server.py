@@ -149,9 +149,21 @@ def _bot_trading_now(state):
     be read would tell him he is safe at the one moment we cannot say
     so, and he would stand down while the engine kept trading.
     """
+    # ---- THE SWITCH MOVED. 31 August 2026. ----
+    #
+    #     "keep simple ON = REAL TRADES . OFF = PAPER TRADES"
+    #
+    # It used to be engine.alert_only, which answered "is it trading at
+    # all". The bot always trades now, so that flag can no longer be
+    # the switch -- it is False in both positions. The one source is
+    # execution.live: True means his money, False means paper.
+    #
+    # The rule this docstring was written under still holds: ONE
+    # source, read at call time, and unknown reported as unknown.
     engine = getattr(state, "engine", None)
-    alert_only = getattr(engine, "alert_only", None)
-    if alert_only is None:
+    execution = getattr(engine, "execution", None)
+    switch = getattr(execution, "live", None)
+    if switch is None:
         return {"on": None, "known": False,
                 "note": "no reading from the engine -- unknown, not off"}
 
@@ -174,20 +186,24 @@ def _bot_trading_now(state):
         mode = str(TRADING_MODE).upper()
     except Exception:                                       # noqa: BLE001
         mode = "UNKNOWN"
-    live = mode == "LIVE"
+    # Can this process place a real order at all? A switch turned ON in
+    # a process with no Dhan client would be the 21 August fault again
+    # -- a paper session wearing a real label.
+    can_go_live = getattr(execution, "_live", None) is not None
 
-    if alert_only:
-        note = "watching only -- it alerts and records, places nothing"
-    elif live:
-        note = "placing REAL orders"
+    if switch and can_go_live:
+        note = "REAL trades -- your clicks reach the exchange"
+    elif switch:
+        note = (f"ON, but this process cannot place real orders "
+                f"({getattr(execution, '_live_refused', None) or mode}) "
+                f"-- everything is still on paper")
     else:
-        note = (f"armed, but {mode} -- orders are simulated and "
-                f"nothing reaches the broker")
+        note = "PAPER trades -- it trades fully, nothing reaches the broker"
 
-    return {"on": not alert_only, "known": True,
+    return {"on": bool(switch), "known": True,
             "open_positions": len(getattr(engine, "open_positions", {}) or {}),
-            "mode": mode,
-            "placing_real_orders": bool(not alert_only and live),
+            "mode": "LIVE" if (switch and can_go_live) else "PAPER",
+            "placing_real_orders": bool(switch and can_go_live),
             "note": note,
             "resets_on_restart": True}
 
@@ -1256,7 +1272,30 @@ def build_app(dashboard_state, trade_controller, master_loader,
                                      "the bot will trade on incomplete "
                                      "inputs")}
         try:
-            engine.alert_only = not want_trading
+            # ==========================================================
+            # ON = REAL, OFF = PAPER.  31 August 2026.
+            # ==========================================================
+            #
+            #     "keep simple ON = REAL TRADES . OFF = PAPER TRADES .
+            #      all same entry, exits, capital allotted & everything
+            #      same"                          -- the operator
+            #
+            # It used to mean TRADE / DO NOT TRADE, and OFF meant the
+            # bot placed nothing at all -- not even a simulated fill.
+            # That is the third state that produced 65 alerts and 0
+            # trades on 31 August, and ten days with no record of
+            # whether any signal was right.
+            #
+            # The bot now ALWAYS trades. alert_only stays off in both
+            # positions; the switch chooses whose money, and nothing
+            # else changes -- same entries, same exits, same sizing,
+            # same capital.
+            engine.alert_only = False
+            execution = getattr(engine, "execution", None)
+            if execution is None:
+                return {"success": False,
+                        "error": "no execution path in this session"}
+            execution.live = bool(want_trading)
             # ---- THIS SWITCH ARMS THE RANKER. NOT THE BREAKOUT. ----
             # 6 August 2026. He turned this ON having been told the
             # ranker's rules and got eight breakout fills instead,

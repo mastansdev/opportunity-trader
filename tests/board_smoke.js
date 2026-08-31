@@ -350,9 +350,22 @@ check("the command comes from the button, never from a variable", () => {
     throw new Error("the button's own command is not what gets sent");
 });
 
-check("ON lights GREEN and says BOT TRADING; OFF lights YELLOW and says BOT OBSERVING", () => {
+check("ON lights GREEN, OFF lights YELLOW, and there is only ONE label", () => {
   // "show ON = BOT TRADING (FILL GREEN LIGHT IN ON) & OFF = BOT
-  //  OBSERVING (FILL YELLOW LIGHT IN OFF)"
+  //  OBSERVING (FILL YELLOW LIGHT IN OFF)"    -- 11 August
+  //
+  // ---- ONE LABEL, NOT TWO. 31 August 2026. ----
+  //
+  //   "on dashboard just show as this by default OFF PAPER TRADE .
+  //    after i click ON then REAL TRADE . thats it no explanation or
+  //    nothing required"
+  //
+  // There were two labels for one fact -- switchlabel said BOT
+  // TRADING / BOT OBSERVING and the chip beside it said PAPER / REAL
+  // MONEY. Two labels for one fact is how they end up disagreeing,
+  // which is what happened on 21 August. switchlabel is empty now and
+  // the mode chip carries the whole answer. The COLOURS stay: they
+  // are the same information, not an explanation.
   const html = fs.readFileSync(path.join(__dirname, "..", "dashboard",
     "static", "board.html"), "utf8");
   if (!/\.segb\.live-on \{background:#e1f5ee/.test(html))
@@ -361,11 +374,9 @@ check("ON lights GREEN and says BOT TRADING; OFF lights YELLOW and says BOT OBSE
     throw new Error("OFF is not filled yellow");
 
   draw(Object.assign({}, SNAP, {bot_trading: {on: true, known: true}}));
-  if (NODES["switchlabel"]._text !== "BOT TRADING")
-    throw new Error("ON shows '" + NODES["switchlabel"]._text + "'");
-  draw(Object.assign({}, SNAP, {bot_trading: {on: false, known: true}}));
-  if (NODES["switchlabel"]._text !== "BOT OBSERVING")
-    throw new Error("OFF shows '" + NODES["switchlabel"]._text + "'");
+  if (NODES["switchlabel"]._text !== "")
+    throw new Error("a second label is back: '"
+                    + NODES["switchlabel"]._text + "'");
 });
 
 check("the board says whose money this is", () => {
@@ -375,16 +386,19 @@ check("the board says whose money this is", () => {
   // The page never showed the mode at all. PAPER appeared only in
   // comments and a tooltip, while the console announced "Orders
   // placed from here are REAL" during a PAPER session.
+  // 31 August: two words, his words. And driven by
+  // placing_real_orders -- the truth about where an order would go --
+  // never by the position of the button.
   draw(Object.assign({}, SNAP, {
     mode: "PAPER",
     bot_trading: {on: true, known: true, placing_real_orders: false}}));
-  if (NODES["mode"]._text !== "PAPER")
+  if (NODES["mode"]._text !== "PAPER TRADE")
     throw new Error("PAPER session shows '" + NODES["mode"]._text + "'");
 
   draw(Object.assign({}, SNAP, {
     mode: "LIVE",
     bot_trading: {on: true, known: true, placing_real_orders: true}}));
-  if (NODES["mode"]._text !== "REAL MONEY")
+  if (NODES["mode"]._text !== "REAL TRADE")
     throw new Error("LIVE session shows '" + NODES["mode"]._text + "'");
 
   // Silence is the one answer it must never give. An unknown mode
@@ -402,9 +416,14 @@ check("the lit button and the words can never disagree", () => {
   const fn = html.split("function paintState(on)")[1];
   if (!fn) throw new Error("there is no single place that paints the state");
   const body = fn.slice(0, fn.indexOf("\n}"));
-  for (const part of ["live-on", "live-off", "BOT TRADING", "BOT OBSERVING"])
+  // The words moved to paintMode() on 31 August; the LIGHTS still
+  // belong here, and one place must own each.
+  for (const part of ["live-on", "live-off"])
     if (!body.includes(part))
       throw new Error(part + " is painted somewhere else");
+  if (!body.includes('lab.textContent = ""'))
+    throw new Error("paintState is writing words again -- there must be "
+                    + "exactly one label, and paintMode owns it");
 });
 
 check("the screen answers the click immediately", () => {
