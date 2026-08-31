@@ -64,7 +64,7 @@ module; getting confused is always reported.
 OFF BY DEFAULT
 --------------
 BROKER_STOP_ENABLED is False until the operator turns it on, same
-pattern as LIVE_ALLOW_BOT_ENTRIES. One switch away from placing real
+pattern as the paper/real switch. One switch away from placing real
 resting orders is not a switch this code gets to flip for him.
 
 Author : H&M Opportunity Trader

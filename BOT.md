@@ -1,4 +1,4 @@
-<!-- generated: 2026-08-29 18:44 by tools/bot_doc.py -- do not edit by hand -->
+<!-- generated: 2026-08-31 17:35 by tools/bot_doc.py -- do not edit by hand -->
 # Opportunity Trader — what the bot is, and what it does
 
 **This file is generated.** Every number below is read out of `config.py` and `core/rules.py` when it is written, so it cannot drift away from the running bot. To change a rule, change the code and run `py tools/bot_doc.py --write`.
@@ -18,8 +18,8 @@ A number with no `n` behind it is an opinion. Show it, count it, and do not let 
 An evidence panel with a BUY button. It reads Telegram pro channels, NSE/BSE filings and live prices, puts the reason next to the stock, and waits.
 
 - Short selling: **OFF** (`ENABLE_SHORT_TRADES`) — long only
-- Bot may place its own entries: **OFF** (`LIVE_ALLOW_BOT_ENTRIES`)
-- Alert-only mode: **ON** (`ALERT_ONLY_MODE`)
+- Two modes, and nothing else: the switch **OFF** is paper trading, **ON** is real money. Same stocks, same sizes, same stops in both. The only difference is whether the order reaches Dhan.
+- The switch starts OFF every morning. Only his click moves it.
 
 ## 2 · The money
 
@@ -126,7 +126,7 @@ Row counts and freshness are deliberately **not** printed here — they change h
 
 ## 8 · What the bot must never do
 
-- place an entry of its own while `LIVE_ALLOW_BOT_ENTRIES` is False
+- send anything to Dhan while the switch is OFF
 - buy a stock with no named event behind it
 - resend an order after a timeout without querying by ID first
 - report success when the broker never answered

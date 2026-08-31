@@ -2,19 +2,20 @@
 
 Execution._route sent every exit to the live executor, on the reasoning
 that "a real position needs a real stop". That reasoning is sound and
-still wins where it applies. It stopped applying on 31 August.
+still wins where nothing else is known. It is not the whole story.
 
-The configuration he will actually run first is: switch ON, and
-LIVE_ALLOW_BOT_ENTRIES off. In that configuration the bot's own entries
-fill on PAPER -- deliberately, that is the whole point of the flag --
-while this line sent their exits LIVE.
+The case it misses is an ordinary one: he flips the switch with a
+position already open. The bot buys on paper in the morning, he likes
+what he sees at noon and clicks ON. That morning's stock must still be
+SOLD on paper.
 
-A stop on a paper position would have placed a real SELL for stock he
-never bought. In NSE cash intraday that is not a harmless no-op; it
-opens a real short. The bot would then believe it was flat while
-carrying a live short it had no plan for, no stop on, and no record of.
+Selling it for real would place a real SELL for stock he never bought.
+In NSE cash intraday that is not a harmless no-op; it opens a real
+short. The bot would then believe it was flat while carrying a live
+short it had no plan for, no stop on, and no record of.
 
-An exit goes wherever its entry went. Nothing else is safe.
+An exit goes wherever its entry went. That is not a third mode -- it is
+the same two modes, remembered.
 """
 
 import sqlite3
@@ -48,11 +49,20 @@ def _execution(live_switch):
 
 
 def test_a_paper_entry_gets_a_paper_exit():
-    """The bug, exactly as it stood: switch ON, bot's own entry, so the
-    fill is paper -- and the stop must not reach Dhan."""
-    x = _execution(live_switch=True)
+    """He flips the switch with a position already open.
+
+    This is the only way a paper position and a live switch can coexist
+    now, and it is a normal Tuesday: the bot buys on paper in the
+    morning, he likes what he sees at noon and clicks ON. That
+    morning's stock must still be SOLD on paper. Selling it for real
+    would place a real SELL for stock he never bought -- an actual
+    short position, in cash intraday, that the bot does not know it is
+    carrying."""
+    x = _execution(live_switch=False)
     x.buy("1", "ASHOKA", 100.0, 10, "RANKED_SETUP")
     assert x._opened_by["ASHOKA"] == "paper"
+
+    x.live = True                      # he clicks ON at noon
     assert x._route("STOP_HIT", selling=True, symbol="ASHOKA") is x.executor
 
 
@@ -104,8 +114,9 @@ def test_a_restart_reads_the_fills_log(tmp_path, monkeypatch):
 
 def test_a_sell_reaches_the_right_executor_end_to_end():
     """_route is internal. This is the path the stop actually takes."""
-    x = _execution(live_switch=True)
+    x = _execution(live_switch=False)
     x.buy("1", "ASHOKA", 100.0, 10, "RANKED_SETUP")
+    x.live = True                      # he clicks ON while it is open
     x.sell("1", "ASHOKA", 95.0, 10, "STOP_HIT")
     assert ("SELL", "ASHOKA") in x.executor.calls
     assert ("SELL", "ASHOKA") not in x._live.calls

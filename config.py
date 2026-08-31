@@ -146,8 +146,28 @@ I_UNDERSTAND_THIS_PLACES_REAL_ORDERS = True
 #      once bot gets clarity shifts to bot (not autonomous - i'll be
 #      there 100%)"
 #
-# So the bot's own structural entries CANNOT place live orders until
-# this is turned on deliberately. Manual dashboard clicks can.
+# ---- THIS IS NO LONGER READ BY ANYTHING. 31 August 2026. ----
+#
+#     "i asked you to create two modes paper & real trading . all
+#      common in both with only distinct is real uses dhan path with
+#      real money & paper do not use dhan real money. remaining all
+#      same."                                        -- the operator
+#
+# It said: switch ON, but the bot's own trades still go to paper --
+# only his dashboard clicks are real. That is a third mode, and he has
+# asked twice for two. The order path does not consult it any more, and
+# tests/test_one_switch_paper_or_real.py fails if it ever does again.
+#
+# Point 3 above is still honoured, by the switch rather than by this.
+# The switch starts OFF, it moves only when he clicks it, and this
+# process still refuses to go live without a Dhan client and
+# I_UNDERSTAND_THIS_PLACES_REAL_ORDERS. Point 3 was never really about
+# whose IDEA a trade was; it was about him being at the desk when real
+# money moves, and that is what the switch means.
+#
+# Kept only so preflight and tools/bot_doc.py can report that it is
+# inert. Deleting the name would break their imports and tell him
+# nothing.
 LIVE_ALLOW_BOT_ENTRIES = False
 
 # ---------------------------------------------------------------
@@ -2031,8 +2051,13 @@ MAX_OPEN_POSITIONS = 3
 #
 # TRADING_MODE stays "PAPER" (above) -- this arms automated PAPER
 # entries only, on real live market data. No real order can result from
-# this flag alone; that still needs TRADING_MODE = "LIVE" AND
-# LIVE_ALLOW_BOT_ENTRIES = True, both separately, both untouched here.
+# this flag alone; that needs TRADING_MODE = "LIVE" and the dashboard
+# switch clicked ON, which is a decision he makes at the desk, not a
+# setting in this file.
+#
+# (This used to also name LIVE_ALLOW_BOT_ENTRIES. That was a third
+# mode -- switch ON but the bot's own trades still on paper -- and he
+# asked for two. Removed 31 August 2026.)
 #
 # The legacy structural ORB-breakout path (core/engine.py's
 # _try_structural_entry(), reached when NOT coming through the ranker)

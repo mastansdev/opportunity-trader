@@ -21,19 +21,37 @@ he would sit watching fills that never happened.
 Same for a missing client: LIVE without a Dhan client refuses to start.
 """
 
-from config import (TRADING_MODE, I_UNDERSTAND_THIS_PLACES_REAL_ORDERS,
-                    LIVE_ALLOW_BOT_ENTRIES)
+from config import TRADING_MODE, I_UNDERSTAND_THIS_PLACES_REAL_ORDERS
 
-
-# Reasons that mean HE pressed a button. Everything else is the bot
-# acting on its own, and only these may reach the exchange while
-# LIVE_ALLOW_BOT_ENTRIES is off.
-OPERATOR_CLICKS = ("MANUAL_BUY", "MANUAL_SELL", "MANUAL_SHORT",
-                   "MANUAL_COVER", "MANUAL_EXIT", "MANUAL_PARTIAL")
-
-
-def _is_the_operators_click(reason):
-    return str(reason or "").upper().startswith(OPERATOR_CLICKS)
+# ---- THE THIRD MODE IS GONE. 31 August 2026. ----
+#
+#     "i asked you to create two modes paper & real trading . all
+#      common in both with only distinct is real uses dhan path with
+#      real money & paper do not use dhan real money. remaining all
+#      same."                                        -- the operator
+#
+# There were three. Two of them he asked for; the third,
+# LIVE_ALLOW_BOT_ENTRIES, was mine. It said: even with the switch ON,
+# the bot's OWN trades stay on paper and only his dashboard clicks are
+# real. That is a third mode wearing a disguise, and it showed -- with
+# it in place, "what happens when I click ON" could not be answered in
+# one sentence. It needed a table.
+#
+# It also caused the bug fixed directly below. Entries filling on paper
+# while their exits went live is a state that can only exist if entries
+# and exits are allowed to disagree about which money they are, and
+# they could only disagree because of that flag.
+#
+# The safety it was meant to add is in the switch already, and always
+# was. The switch starts OFF. It moves only when he clicks it. The
+# process still refuses to go live without a Dhan client and without
+# I_UNDERSTAND_THIS_PLACES_REAL_ORDERS. Nothing about a trade the bot
+# thought of needed a permission that the same trade, clicked by hand,
+# did not.
+#
+# OPERATOR_CLICKS goes with it. Nothing asks whose idea a trade was any
+# more, because with two modes it cannot matter: in PAPER nothing
+# reaches Dhan, in REAL everything does.
 from core.logger import warn
 from trading.broker_view import BrokerView
 from trading.paper_execution import PaperExecution
@@ -146,31 +164,20 @@ class Execution:
         return getattr(self, "_live", None)
 
     def _route(self, reason, selling=False, symbol=None):
-        """Which executor takes this order.
+        """Which executor takes this order. Two answers, one question.
 
-        ---- THE GUARD THAT WAS ONLY EVER A COMMENT. 31 Aug 2026. ----
-        #
-        # config.LIVE_ALLOW_BOT_ENTRIES is described in three files:
-        #
-        #   "The bot's own structural entries cannot place a live order
-        #    until LIVE_ALLOW_BOT_ENTRIES is turned on deliberately"
-        #
-        # and implemented in NONE of them. Searched the whole
-        # repository on 31 August: config defines it, preflight reports
-        # it, two docstrings promise it, a test quotes it -- and no
-        # line of the order path ever reads it.
-        #
-        # So the only things between the bot's own signals and real
-        # money were ALERT_ONLY_MODE and TRADING_MODE. With the mode on
-        # LIVE and the switch ON, that day's 40+ structural entries
-        # would have gone to the exchange with no click from him.
-        #
-        # It is a real check now.
+            switch OFF  ->  paper.  Nothing reaches Dhan.
+            switch ON   ->  Dhan.
 
-        EXITS ARE NEVER GATED. A position opened live is real, and a
-        real position needs a real stop. Sending its exit to paper
-        would leave him holding stock the bot believes it has sold --
-        the worst outcome available here.
+        That is the whole rule and there is no third branch. `reason` is
+        still accepted because every caller passes it, but nothing here
+        reads it any more: it used to decide whether a trade was his
+        idea or the bot's, and with two modes that cannot matter.
+
+        The one thing that is not a mode is below -- an exit follows the
+        entry that opened it. That is not a third state, it is the same
+        two states remembered: a position opened on paper is closed on
+        paper even if he flips the switch while it is open.
         """
         if not self.live:
             return self.executor
@@ -189,35 +196,23 @@ class Execution:
             # a real exit". That comment states something the code had
             # not established, and on 31 August it stopped being true.
             #
-            # With the switch ON and LIVE_ALLOW_BOT_ENTRIES off -- which
-            # is the configuration he will actually run first -- the
-            # bot's own entries fill on PAPER while this line sent
-            # their exits LIVE. The stop on a paper position would have
-            # placed a real SELL for stock he never bought: in NSE cash
-            # intraday that is not a no-op, it opens a real short. The
-            # bot would then believe it was flat while holding a live
-            # short position it had no plan for.
+            # It matters for one situation, and it is one he will hit:
+            # he flips the switch with a position already open. A stock
+            # bought on paper this morning must be sold on paper this
+            # afternoon. Selling it for real would place a real SELL for
+            # stock he never bought, and in NSE cash intraday that is
+            # not a harmless no-op -- it opens a real short the bot does
+            # not know it is carrying.
             #
-            # So the exit goes wherever the entry went. Every fill is
-            # already stamped PAPER or LIVE in data/fills.db, and this
-            # process remembers its own besides, so this is a lookup
-            # rather than a guess.
+            # Every fill is stamped PAPER or LIVE in data/fills.db and
+            # this process remembers its own besides, so this is a
+            # lookup, not a guess.
             #
-            # The original concern still stands and still wins: a real
-            # position must get a real stop. When nothing is known
-            # about the entry, this returns live exactly as before.
-            opened = self._who_opened(symbol)
-            if opened == "paper":
+            # Nothing on record goes live, unchanged: a real position
+            # with no stop is the worse of the two mistakes.
+            if self._who_opened(symbol) == "paper":
                 return self.executor
-            return live                      # a real position, a real exit
-        if _is_the_operators_click(reason) or LIVE_ALLOW_BOT_ENTRIES:
-            return live
-        self._say_once(
-            "bot-entry",
-            "The switch is ON, but LIVE_ALLOW_BOT_ENTRIES is off, so the "
-            "BOT'S OWN entries stay on paper. Your dashboard clicks are "
-            "real. Every fill is stamped PAPER or LIVE in data/fills.db.")
-        return self.executor
+        return live
 
     def _say_once(self, key, message):
         seen = getattr(self, "_said", None)

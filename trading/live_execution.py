@@ -17,10 +17,21 @@ OPERATOR'S DECISIONS, 2026-07-28
 -------------------------------
 1. MARKET orders. Fills instantly; the price is not guaranteed.
 2. He watches on two or three screens.
-3. HIS CLICKS ONLY at first -- "initially i'll trade with bot dashboard.
-   once bot gets clarity shifts to bot (not autonomous - i'll be there
-   100%)". The bot's own structural entries cannot place a live order
-   until LIVE_ALLOW_BOT_ENTRIES is turned on deliberately.
+3. HE IS AT THE DESK -- "initially i'll trade with bot dashboard. once
+   bot gets clarity shifts to bot (not autonomous - i'll be there
+   100%)".
+
+   This used to say the bot's own entries could not place a live order
+   until LIVE_ALLOW_BOT_ENTRIES was turned on. That flag is gone: it
+   was a third mode, and he asked for two -- "all common in both with
+   only distinct is real uses dhan path with real money".
+
+   What point 3 actually asked for is unchanged and is now carried by
+   the switch, which is a better place for it. The switch starts OFF
+   every session, moves only when he clicks it, and this class is not
+   even built unless there is a Dhan client and
+   I_UNDERSTAND_THIS_PLACES_REAL_ORDERS is True. He is at the desk
+   because nothing reaches Dhan until he puts himself there.
 
 THE THREE THINGS THAT COST MONEY, AND WHAT IS DONE ABOUT EACH
 -------------------------------------------------------------

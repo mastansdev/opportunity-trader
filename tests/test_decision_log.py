@@ -214,21 +214,20 @@ def test_the_ranking_reaches_the_order_path_and_starts_disarmed():
     # completed trade of its own. It was never the gates refusing --
     # it was this flag, which he had not asked for.
     #
-    # The safety that assertion was protecting has not gone anywhere;
-    # it moved to where it can be checked. ALERT_ONLY_MODE could only
-    # say "do not trade". execution.live says "whose money", and
-    # LIVE_ALLOW_BOT_ENTRIES below is the one that has to be true
-    # before a bot decision can reach a real order.
+    # The safety that assertion was protecting has not gone anywhere.
+    # ALERT_ONLY_MODE could only say "do not trade at all". The switch
+    # says something better: whose money. It starts OFF, it moves only
+    # when he clicks it, and the process refuses to go live without a
+    # Dhan client and I_UNDERSTAND_THIS_PLACES_REAL_ORDERS.
     assert ALERT_ONLY_MODE is False, (
         "ALERT_ONLY_MODE is True -- the bot is back to watching, which "
         "is the state he did not ask for and which produced ten "
         "sessions without a trade. OFF must mean a full paper day.")
     assert TRADING_MODE == "PAPER", (
-        "TRADING_MODE is not PAPER. Real automated orders need their "
-        "own explicit decision (config.LIVE_ALLOW_BOT_ENTRIES), never a "
-        "side effect of the alert-only flag.")
-    from config import LIVE_ALLOW_BOT_ENTRIES
-    assert LIVE_ALLOW_BOT_ENTRIES is False, (
-        "LIVE_ALLOW_BOT_ENTRIES is True. This is the flag the switch "
-        "actually consults before a bot-decided order may reach Dhan. "
-        "It stays False until he says otherwise -- his hand only.")
+        "TRADING_MODE is not PAPER. This is what the bot comes up in "
+        "before he touches anything, and it must be paper.")
+    from trading.execution import Execution
+    assert Execution.live is False, (
+        "The switch does not start OFF. Every session begins on paper "
+        "until he clicks ON -- a restart while he is away from the desk "
+        "must come back simulated.")

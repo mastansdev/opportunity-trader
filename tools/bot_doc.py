@@ -107,11 +107,11 @@ def build():
     add("")
     add(f"- Short selling: **{_onoff(c.ENABLE_SHORT_TRADES)}** "
         f"(`ENABLE_SHORT_TRADES`) — long only")
-    add(f"- Bot may place its own entries: "
-        f"**{_onoff(c.LIVE_ALLOW_BOT_ENTRIES)}** "
-        f"(`LIVE_ALLOW_BOT_ENTRIES`)")
-    add(f"- Alert-only mode: **{_onoff(c.ALERT_ONLY_MODE)}** "
-        f"(`ALERT_ONLY_MODE`)")
+    add("- Two modes, and nothing else: the switch **OFF** is paper "
+        "trading, **ON** is real money. Same stocks, same sizes, same "
+        "stops in both. The only difference is whether the order "
+        "reaches Dhan.")
+    add("- The switch starts OFF every morning. Only his click moves it.")
     add("")
 
     # ---------------------------------------------------------
@@ -329,7 +329,7 @@ def build():
     add("## 8 · What the bot must never do")
     add("")
     for line in (
-        "place an entry of its own while `LIVE_ALLOW_BOT_ENTRIES` is False",
+        "send anything to Dhan while the switch is OFF",
         "buy a stock with no named event behind it",
         "resend an order after a timeout without querying by ID first",
         "report success when the broker never answered",

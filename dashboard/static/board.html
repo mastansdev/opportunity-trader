@@ -419,8 +419,8 @@ impressive -- if there is no store behind it, it is not on the list.
             title="click for the full list on the Post tab"></span>
       <span style="font-size:12px;color:var(--muted);">sort</span>
       <button class="tab sortb on" data-sort="activity">Activity</button>
-      <button class="tab sortb" data-sort="change">Change%</button>
-      <button class="tab sortb" data-sort="turnover">Turnover</button>
+      <button class="tab sortb" data-sort="change">Move today</button>
+      <button class="tab sortb" data-sort="turnover">Money traded</button>
     </div>
     <span style="font-size:12px;color:var(--muted);">movers = &ge;<span id="thr">4</span>%</span>
   </div>
@@ -434,7 +434,7 @@ impressive -- if there is no store behind it, it is not on the list.
       <th class="num">Money traded<span class="jargon">turnover</span></th>
       <th>Buying pressure<span class="jargon">order flow / delta</span></th>
       <th>Trend<span class="jargon">price action</span></th>
-      <th>Why it is moving</th><th>Verdict</th>
+      <th>Why it is moving</th><th>What to do<span class="jargon">verdict</span></th>
     </tr></thead>
     <tbody id="body"><tr><td colspan="13" class="empty">waiting for the first snapshot&hellip;</td></tr></tbody>
   </table>
@@ -453,7 +453,7 @@ it has already been sent.
   <div class="cap">Gapped UP from yesterday&rsquo;s close &mdash; top 20</div>
   <table>
     <thead><tr>
-      <th>Stock</th><th>Grade</th><th class="num">Prev close</th>
+      <th>Stock</th><th>Grade</th><th class="num">Yesterday close<span class="jargon">prev close</span></th>
       <th class="num">Open</th><th class="num">Gap</th><th class="num">Volume</th>
       <th>Why it gapped</th>
     </tr></thead>
@@ -462,7 +462,7 @@ it has already been sent.
   <div class="cap">Gapped DOWN from yesterday&rsquo;s close &mdash; top 20</div>
   <table>
     <thead><tr>
-      <th>Stock</th><th>Grade</th><th class="num">Prev close</th>
+      <th>Stock</th><th>Grade</th><th class="num">Yesterday close<span class="jargon">prev close</span></th>
       <th class="num">Open</th><th class="num">Gap</th><th class="num">Volume</th>
       <th>Why it gapped</th>
     </tr></thead>
@@ -486,7 +486,7 @@ charges, net. Nothing here is computed on the page.
       <th>Stock</th><th class="num">Qty</th>
       <th class="num">In</th><th class="num">Entry</th>
       <th class="num">Out</th><th class="num">Exit</th>
-      <th class="num">Net</th><th>Why in, why out</th>
+      <th class="num">Made or lost<span class="jargon">net</span></th><th>Why in, why out</th>
     </tr></thead>
     <tbody id="done"><tr><td colspan="8" class="empty">no trades closed today</td></tr></tbody>
   </table>
@@ -635,11 +635,11 @@ either plan module.
   <div id="brainverdict" class="note" style="margin:0 0 12px;"></div>
   <table>
     <thead><tr>
-      <th>Opportunity</th><th>Horizon</th>
+      <th>Opportunity</th><th>How long<span class="jargon">horizon</span></th>
       <th class="num">Seen</th><th class="num">n</th>
-      <th class="num">Avg (all)</th><th class="num">Up%</th>
+      <th class="num">Avg (all)</th><th class="num">Went up<span class="jargon">up%</span></th>
       <th class="num">n long</th><th class="num">Avg (long)</th>
-      <th>Verdict</th>
+      <th>What to do<span class="jargon">verdict</span></th>
     </tr></thead>
     <tbody id="brainrows">
       <tr><td colspan="9" class="empty">waiting for the first snapshot&hellip;</td></tr>
@@ -2020,7 +2020,7 @@ async function openCard(symbol){
   if (rows.length){
     html += `<div class="cap" style="margin-top:14px">Stored events `
       + `(${ev.count ?? rows.length})</div>`
-      + `<table><thead><tr><th>When</th><th>Kind</th><th>Grade</th>`
+      + `<table><thead><tr><th>When</th><th>Type<span class="jargon">kind</span></th><th>Grade</th>`
       + `<th>Headline</th></tr></thead><tbody>`
       + rows.map(e => `<tr><td style="white-space:nowrap">${
             att(String(e.at || "").slice(0, 16).replace("T", " "))}</td>`
@@ -2258,7 +2258,7 @@ function renderLinks(d){
   // Narrowest group first: sharing a 3-member theme says far more than
   // sharing a 151-member sector.
   return `<div class="cap">Every group it belongs to</div>`
-    + `<table><thead><tr><th>Axis</th><th>Group</th><th class="num">Peers</th>
+    + `<table><thead><tr><th>Compared by<span class="jargon">axis</span></th><th>Group</th><th class="num">Similar stocks<span class="jargon">peers</span></th>
        <th>Who else</th></tr></thead><tbody>`
     + g.map(x => `<tr>
         <td style="color:var(--muted)">${att(x.column.replace(/_/g, " "))}</td>

@@ -243,16 +243,18 @@ def main():
             # printed "Orders placed today are REAL" and said nothing
             # about either of these -- which reads as "the bot is
             # trading" when the plan was one order placed by hand.
-            check("bot entries", OK if not config.LIVE_ALLOW_BOT_ENTRIES
-                  else WARN,
-                  "BLOCKED -- only orders YOU click are sent"
-                  if not config.LIVE_ALLOW_BOT_ENTRIES else
-                  "ALLOWED -- the bot may open positions on its own, "
-                  "with real money, without asking")
-            check("alert only", OK if config.ALERT_ONLY_MODE else WARN,
-                  "ON -- breakouts go to the alert box, not to the broker"
-                  if config.ALERT_ONLY_MODE else
-                  "OFF -- breakouts become orders")
+            # ---- TWO MODES, SO TWO LINES. 31 August 2026. ----
+            #
+            # These two lines described a third mode that no longer
+            # exists, and the first of them said something now flatly
+            # untrue: "only orders YOU click are sent". Every order is
+            # sent when the switch is ON. A preflight that reassures him
+            # about a guard that was removed is worse than no preflight.
+            check("switch", OK,
+                  "starts OFF -- paper trades. Click ON for real money.")
+            check("what changes when you click ON", OK,
+                  "only where the order goes. Same stocks, same sizes, "
+                  "same stops.")
             qty = getattr(config, "MANUAL_TEST_QTY", None)
             if qty:
                 check("manual order size", WARN,

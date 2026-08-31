@@ -14,23 +14,34 @@ trades, and the ten days before it produced no completed trade at all.
 
 THE BOT ALWAYS TRADES NOW. The switch chooses whose money.
 
-AND THE GUARD THAT WAS ONLY A COMMENT. config.LIVE_ALLOW_BOT_ENTRIES
-is described in three files -- "the bot's own structural entries
-cannot place a live order until LIVE_ALLOW_BOT_ENTRIES is turned on
-deliberately" -- and was implemented in none of them. Searched the
-whole repository: config defines it, preflight reports it, two
-docstrings promise it, a test quotes it, and no line of the order path
-ever read it. With the mode on LIVE and the switch ON, that day's 40+
-structural entries would have reached the exchange with no click.
+AND THEN I ADDED A THIRD STATE ANYWAY. Later the same day, this file
+tested LIVE_ALLOW_BOT_ENTRIES: a flag meaning "switch ON, but the
+BOT'S trades stay on paper -- only your clicks are real." He had not
+asked for it. He said so:
 
-EXITS ARE NEVER GATED. A position opened live is real, and a real
-position needs a real stop. Sending its exit to paper would leave him
-holding stock the bot believes it has sold.
+    "i asked you to create two modes paper & real trading . all common
+     in both with only distinct is real uses dhan path with real money
+     & paper do not use dhan real money. remaining all same."
+
+The tell was that "what happens when I click ON" needed a table to
+answer. It also caused a bug: entries filling on paper while exits went
+live, which can only happen if entries and exits are allowed to
+disagree about whose money they are.
+
+It is gone. Two branches, and the safety is where it always was -- the
+switch starts OFF, moves only when he clicks it, and the process still
+refuses to go live without a Dhan client and
+I_UNDERSTAND_THIS_PLACES_REAL_ORDERS.
+
+AN EXIT FOLLOWS ITS OWN ENTRY. Not a third state -- the same two,
+remembered. A stock bought on paper is sold on paper even if he flips
+the switch while it is open, because selling it for real would open a
+real short in stock he never bought.
 """
 
 import pytest
 
-from trading.execution import Execution, _is_the_operators_click
+from trading.execution import Execution
 
 
 class _Spy:
@@ -85,35 +96,55 @@ def test_it_starts_on_paper_whatever_config_says():
     assert Execution.live is False
 
 
-# ---------------------------------- the guard that was only a comment
+# ------------------------------------------- no third state, either way
 
-def test_on_leaves_the_bots_own_entry_on_paper():
-    """LIVE_ALLOW_BOT_ENTRIES is off, so his clicks are real and the
-    bot's own signals are not."""
+def test_on_sends_the_bots_own_entry_to_the_exchange():
+    """This asserted the OPPOSITE until he read it back to me.
+
+    LIVE_ALLOW_BOT_ENTRIES kept the bot's own trades on paper while the
+    switch said REAL. That is a third mode, and it is the one thing he
+    has said twice that he does not want:
+
+        "all common in both with only distinct is real uses dhan path
+         with real money"
+
+    ON means the bot trades his money. That is what the switch is for.
+    It starts OFF and only his click moves it."""
     ex = _execution()
     ex.live = True
     for reason in ("STRUCTURAL_LONG_BREAKOUT", "RANKED_SETUP", "", None):
-        assert _who(ex.buy(1, "X", 100.0, 10, reason=reason)) == "paper"
+        assert _who(ex.buy(1, "X", 100.0, 10, reason=reason)) == "live"
 
 
-def test_a_click_is_recognised_and_a_bot_reason_is_not():
-    for click in ("MANUAL_BUY_DASHBOARD", "MANUAL_SELL", "MANUAL_EXIT",
-                  "manual_short_dashboard"):
-        assert _is_the_operators_click(click) is True, click
-    for bot in ("STRUCTURAL_LONG_BREAKOUT", "RANKED_SETUP", "TRAILING_STOP",
-                "ADOPTED_FROM_BROKER", "", None):
-        assert _is_the_operators_click(bot) is False, bot
+def test_the_reason_no_longer_changes_where_an_order_goes():
+    """Whose idea a trade was used to decide which money paid for it.
+    With two modes that cannot matter, and a router that reads the
+    reason is a router that can grow a third mode again."""
+    ex = _execution()
+    ex.live = True
+    where = {_who(ex.buy(1, "X", 100.0, 10, reason=r))
+             for r in ("MANUAL_BUY", "RANKED_SETUP", "ADOPTED_FROM_BROKER",
+                       "STRUCTURAL_LONG_BREAKOUT", "", None)}
+    assert where == {"live"}, "the reason still steers the order"
+
+    ex.live = False
+    where = {_who(ex.buy(1, "X", 100.0, 10, reason=r))
+             for r in ("MANUAL_BUY", "RANKED_SETUP", "ADOPTED_FROM_BROKER",
+                       "STRUCTURAL_LONG_BREAKOUT", "", None)}
+    assert where == {"paper"}
 
 
-def test_the_guard_is_real_code_not_a_docstring():
-    """The whole finding. Three files promised this behaviour and none
-    implemented it."""
+def test_the_third_state_cannot_come_back_quietly():
+    """It arrived as a flag nobody was watching. If it returns, this
+    fails on the day it does, not on the day it costs him money."""
     import inspect
 
     src = inspect.getsource(Execution._route)
     code = "\n".join(l for l in src.splitlines()
                      if not l.strip().startswith("#"))
-    assert "LIVE_ALLOW_BOT_ENTRIES" in code
+    assert "LIVE_ALLOW_BOT_ENTRIES" not in code
+    assert "_is_the_operators_click" not in code
+    assert "OPERATOR_CLICKS" not in code
 
 
 # --------------------------------------------------- exits are not gated
