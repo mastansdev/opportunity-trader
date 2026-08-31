@@ -409,7 +409,15 @@ def _no_test_may_litter_the_live_data_folder():
     # shape, so excusing them by name costs the guard nothing: a test
     # that writes data/whatever.db is still caught, which is the case
     # it exists for.
-    EXTERNAL = ("BhavCopy_", "sec_bhavdata", "MW-")
+    # Files the LIVE after-close chain downloads from NSE. They appear
+    # in data/ while the suite happens to be running and are not test
+    # pollution.
+    #
+    # sec_list_ joined the list on 31 August 2026: the chain fetched
+    # sec_list_28082026.csv (NSE's daily price bands, read by
+    # core/headroom.py) one minute before a suite run, and the guard
+    # reported the bot's own housekeeping as a test writing to data/.
+    EXTERNAL = ("BhavCopy_", "sec_bhavdata", "MW-", "sec_list_")
 
     def _fetched_by_the_live_chain(path):
         name = os.path.basename(path)

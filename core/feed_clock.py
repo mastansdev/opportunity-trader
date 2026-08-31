@@ -226,7 +226,71 @@ def _connect(db_path=TELEGRAM_DB):
         " last_seen_ist text,"      # when we last STORED anything
         " last_poll_ist text,"      # when we last LOOKED, even if empty
         " messages integer)")
+    # ---- THE COLUMN WAS RIGHT; NOBODY CALLED IT. 31 Aug 2026. ----
+    #
+    #     "if channel not posted then no error & if channel posted but
+    #      bot struck at different time stamp then it must fetch after
+    #      that time stamp data"           -- the operator
+    #
+    # last_poll_ist says "when we last LOOKED, even if empty" and it
+    # meant it -- record() only writes last_seen_ist when something
+    # arrived. But record() is called from _store(), which only runs
+    # when messages come back, so a look that found nothing and a look
+    # that FAILED both left the column untouched.
+    #
+    # Read off the live store that afternoon, every single row:
+    #
+    #     last_poll_ist == last_seen_ist
+    #
+    # So the bot could not tell a quiet channel from an unreadable one.
+    # Earnings 360 showed "quiet" while it had not been successfully
+    # read for two days.
+    for column, kind in (("last_try_ist", "text"),
+                         ("last_error", "text"),
+                         ("last_error_ist", "text")):
+        try:
+            con.execute("alter table feed_watermark add column %s %s"
+                        % (column, kind))
+        except sqlite3.OperationalError:
+            pass                                   # already there
     return con
+
+
+def note_attempt(channel, ok=True, error=None, db_path=TELEGRAM_DB):
+    """Record that we TRIED to read this channel, and how it went.
+
+    Called for every channel on every pass, whether or not anything
+    came back. Separate from record(), which is about what ARRIVED.
+
+        ok=True             a read that worked, even if empty
+        ok=False, error=..  the read failed and this is why
+
+    A successful read clears the error. Never raises -- a bookkeeping
+    failure must not stop the collection it is bookkeeping.
+    """
+    if isinstance(channel, dict):
+        channel = channel.get("name") or channel.get("handle") or ""
+    channel = str(channel or "").strip()
+    if not channel or channel.startswith("{"):
+        return False
+    try:
+        con = _connect(db_path)
+        now = now_ist().isoformat()
+        con.execute(
+            "insert into feed_watermark (channel, last_try_ist,"
+            " last_error, last_error_ist) values (?,?,?,?)"
+            " on conflict(channel) do update set"
+            "  last_try_ist = excluded.last_try_ist,"
+            "  last_error = excluded.last_error,"
+            "  last_error_ist = case when excluded.last_error is null"
+            "      then last_error_ist else excluded.last_error_ist end",
+            (channel, now, None if ok else str(error or "read failed")[:200],
+             None if ok else now))
+        con.commit()
+        con.close()
+        return True
+    except Exception:                                          # noqa: BLE001
+        return False
 
 
 # ---------------------------------------------------------------

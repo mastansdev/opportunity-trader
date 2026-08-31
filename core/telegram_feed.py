@@ -1292,7 +1292,12 @@ class TelegramFeed:
             except Exception as exc:                       # noqa: BLE001
                 warn(f"[TELEGRAM] {handle}: {exc}")
                 self._last_error = f"{handle}: {exc}"
+                self._note_attempt(channel, ok=False, error=exc)
                 continue
+            # A read that WORKED, even if it brought nothing back. This
+            # is what lets the board tell a quiet channel from an
+            # unreadable one -- see core/feed_clock.note_attempt().
+            self._note_attempt(channel, ok=True)
             stored += self._store(channel, messages)
 
         self._last_poll_at = datetime.now()
@@ -1373,6 +1378,15 @@ class TelegramFeed:
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[TELEGRAM] could not measure lag ({exc}).")
 
+    @staticmethod
+    def _note_attempt(channel, ok=True, error=None):
+        """Bookkeeping only. Never allowed to break a pass."""
+        try:
+            from core.feed_clock import note_attempt
+            note_attempt(channel, ok=ok, error=error)
+        except Exception:                                  # noqa: BLE001
+            pass
+
     def channel_report(self):
         """One row per channel, for the Telegram tab. Never raises.
 
@@ -1418,6 +1432,19 @@ class TelegramFeed:
                     if got:
                         held[name]["last_post"] = got["at"]
                         held[name]["last_read"] = got["seen_at"]
+                # How the LAST READ went, which the messages table
+                # cannot say -- a channel with no new posts and a
+                # channel we could not reach look identical in it.
+                try:
+                    for row in conn.execute(
+                            "SELECT channel, last_try_ist, last_error, "
+                            "last_error_ist FROM feed_watermark").fetchall():
+                        entry = held.setdefault(row["channel"], {})
+                        entry["last_try"] = row["last_try_ist"]
+                        entry["last_error"] = row["last_error"]
+                        entry["last_error_at"] = row["last_error_ist"]
+                except sqlite3.Error:
+                    pass                    # older store, no columns yet
                 conn.close()
         except Exception:                                  # noqa: BLE001
             held = {}
@@ -1459,6 +1486,8 @@ class TelegramFeed:
                 "pictures": row.get("pictures") or 0,
                 "pictures_read": row.get("read_back") or 0,
                 "named_a_stock": row.get("named") or 0,
+                "last_try": row.get("last_try"),
+                "last_error": row.get("last_error"),
                 "state": self._channel_state(role, in_season, row, late,
                                              row.get("last_post")),
             })
@@ -1514,6 +1543,23 @@ class TelegramFeed:
         he can do anything about. The number itself stays in its own
         column either way, so nothing is hidden.
         """
+        # ---- UNREADABLE IS NOT QUIET. 31 August 2026. ----
+        #
+        #     "if channel not posted then no error & if channel posted
+        #      but bot struck at different time stamp then it must
+        #      fetch after that time stamp data"   -- the operator
+        #
+        # This read the same for a channel that published nothing and
+        # one the bot could not reach. Earnings 360 showed "quiet" while
+        # it had not been successfully read for two days -- and it is a
+        # RESULTS channel, so from 15 October it is on the fast loop and
+        # carrying the most time-critical thing the bot reads.
+        #
+        # Checked FIRST, before role and before season: a results
+        # channel that cannot be read in October must not be excused as
+        # "off season".
+        if row.get("last_error"):
+            return "unreadable"
         if not row.get("held"):
             return "nothing yet"
         if role == "results" and not in_season:

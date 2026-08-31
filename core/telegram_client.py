@@ -116,8 +116,50 @@ class TelethonReader:
         return loop.run_until_complete(bounded())
 
     def _connect(self):
+        # ==========================================================
+        # IT NEVER RECONNECTED.  31 August 2026.
+        # ==========================================================
+        #
+        # 10:47:04, from his collector terminal:
+        #
+        #     [TELEGRAM] daytradertelugu: the API failed (Cannot send
+        #     requests while disconnected)
+        #     [TELEGRAM] orders_pulse: <urlopen error [Errno 11001]
+        #     getaddrinfo failed>
+        #
+        # The machine lost DNS for a moment. Telethon dropped the
+        # connection -- and this returned the DEAD client on every call
+        # afterwards, because it only ever checked that the object
+        # existed. Five hours of a trading session were served by a
+        # socket that had been closed since mid-morning, and the only
+        # cure was restarting the process.
+        #
+        # The channels with a public handle limped along on the web
+        # fallback. The four private ones had nothing to fall back to
+        # and simply went dark.
+        #
+        # A live object is reused, a dropped one is revived in place,
+        # and only a client that cannot be revived is rebuilt from the
+        # session file. Rebuilding first would be wrong: a fresh
+        # TelegramClient on the same session is what triggers Telegram's
+        # rate limits.
         if self._client is not None:
-            return self._client
+            try:
+                if self._client.is_connected():
+                    return self._client
+                diagnostic("[TELEGRAM] The connection had dropped. "
+                           "Reconnecting on the existing session.")
+                self._client.connect()
+                if self._client.is_connected():
+                    return self._client
+            except Exception as exc:                       # noqa: BLE001
+                warn(f"[TELEGRAM] Could not revive the connection "
+                     f"({str(exc)[:70]}). Building a new one.")
+            try:
+                self._client.disconnect()
+            except Exception:                              # noqa: BLE001
+                pass
+            self._client = None
         from telethon.sync import TelegramClient
         if not self.api_id or not self.api_hash:
             raise RuntimeError(
@@ -461,6 +503,23 @@ def api_reader():
     return TelethonReader()
 
 
+def _looks_like_a_username(handle):
+    """Could t.me/s/<handle> exist at all?
+
+    Telegram usernames are ASCII letters, digits and underscores. A
+    title -- "Breakouts", "Earnings 360" -- has spaces or emoji and can
+    never be a URL, which is what folder_sources() hands back for a
+    private channel with no username.
+
+    Deliberately loose on length: this is asking "is a web page even
+    possible", not "is this a valid username".
+    """
+    text = str(handle or "").strip().lstrip("@")
+    if not text:
+        return False
+    return all(c.isascii() and (c.isalnum() or c == "_") for c in text)
+
+
 class FallbackReader:
     """Try the API first, drop to the public web view if it fails.
 
@@ -500,6 +559,8 @@ class FallbackReader:
         self.secondary = secondary if secondary is not None \
             else TelegramWebReader()
         self._fell_back = set()
+        # Channels told about once, not every ninety seconds.
+        self._no_web_view = set()
 
     def fetch(self, channel, limit=30, before=None, since_id=None):
         handle = channel if isinstance(channel, str) else str(channel)
@@ -537,6 +598,41 @@ class FallbackReader:
                          f"({str(exc)[:70]}). Falling back to the public "
                          f"web view -- a PRIVATE channel has none, so it "
                          f"will simply be empty until the API works.")
+        # ==========================================================
+        # A PRIVATE CHANNEL HAS NO WEB PAGE.  31 August 2026.
+        # ==========================================================
+        #
+        # His terminal, four times every ninety seconds all afternoon:
+        #
+        #     [TELEGRAM] Breakouts: URL can't contain control
+        #     characters. '/s/Breakouts ...' (found at least ' ')
+        #
+        # core/telegram_client.folder_sources() takes a channel's
+        # USERNAME if it has one and falls back to its TITLE if it does
+        # not. Four of the ten came through as titles -- Breakouts,
+        # Business Pulse, Earnings 360, Earnings Pro -- which means
+        # they are private channels with no public username. There is
+        # no t.me/s/ page for them and never will be.
+        #
+        # So the fallback was being attempted on channels where it is
+        # impossible, failing every pass, and printing roughly 160
+        # warnings an hour over everything else in the terminal.
+        #
+        # It is skipped now, and said ONCE per channel per run. The
+        # sentence matters more than the silence: two of the four are
+        # RESULTS channels, and from 15 October they sit on the
+        # 90-second loop carrying the most time-critical thing the bot
+        # reads. When the API drops they go dark with nothing behind
+        # them, and he needs to know that is the arrangement rather
+        # than discover it in October.
+        if not _looks_like_a_username(handle):
+            if handle not in self._no_web_view:
+                self._no_web_view.add(handle)
+                warn(f"[TELEGRAM] {handle} is a private channel with no "
+                     f"public username, so it has NO web fallback. It is "
+                     f"readable through the API only -- if that drops, "
+                     f"this channel goes dark until it returns.")
+            return []
         # The public web view has no min_id -- it serves whole pages.
         # since_id is deliberately dropped rather than forwarded: the
         # id floor in telegram_feed._store() still skips what we hold,
