@@ -652,6 +652,27 @@ def _grade_reaches_the_signal():
         announcements = None
         results_gate = ResultsGate()
 
+        # _capture_reason() also asks the engine whether the stock's
+        # SECTOR is moving with it. That is a different question from
+        # the one this stage asks, and the stub had no answer at all --
+        # so the check raised, reported BROKEN, and the thing it was
+        # built to verify went untested while looking tested.
+        #
+        # None is the right answer here rather than a fake sector move:
+        # it isolates the grade, which is what stage 16 is about.
+        #
+        # Everything _capture_reason() reaches for is listed here
+        # EXPLICITLY, one attribute at a time. A catch-all __getattr__
+        # returning None would make this stage pass for ever, including
+        # on the day _capture_reason grows a dependency that is broken
+        # in the real engine -- which is the exact way this stage came
+        # to be reporting BROKEN about itself instead of about the bot.
+        def _sector_co_move_reason(self, symbol):
+            return None
+
+        def _channel_event_kind(self, symbol, on_date=None):
+            return None
+
     stub = _Stub()
     checked = carried = 0
     missed = []
