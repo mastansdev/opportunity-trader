@@ -61,60 +61,60 @@
    "symbol": "^FVX"
   },
   "dxy": {
-   "last": 99.524,
+   "last": 99.542,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -0.18,
+   "change_pct": -0.16,
    "previous": 99.702,
    "label": "Dollar index",
    "group": "RATES",
    "symbol": "DX-Y.NYB"
   },
   "crude": {
-   "last": 86.56,
+   "last": 86.23,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 3.79,
+   "change_pct": 3.39,
    "previous": 83.4,
    "label": "Crude oil",
    "group": "ENERGY",
    "symbol": "CL=F"
   },
   "natgas": {
-   "last": 2.919,
+   "last": 2.91,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 1.07,
+   "change_pct": 0.76,
    "previous": 2.888,
    "label": "Natural gas",
    "group": "ENERGY",
    "symbol": "NG=F"
   },
   "gold": {
-   "last": 4503.7,
+   "last": 4509.5,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -0.58,
+   "change_pct": -0.45,
    "previous": 4529.9,
    "label": "Gold",
    "group": "METALS",
    "symbol": "GC=F"
   },
   "silver": {
-   "last": 67.92,
+   "last": 68.065,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 0.2,
+   "change_pct": 0.41,
    "previous": 67.786,
    "label": "Silver",
    "group": "METALS",
    "symbol": "SI=F"
   },
   "copper": {
-   "last": 6.685,
+   "last": 6.696,
    "currency": "USD",
    "market_state": null,
-   "change_pct": 0.39,
+   "change_pct": 0.56,
    "previous": 6.659,
    "label": "Copper",
    "group": "METALS",
@@ -131,20 +131,20 @@
    "symbol": "^FTSE"
   },
   "dax": {
-   "last": 26384.04,
+   "last": 26395.22,
    "currency": "EUR",
    "market_state": null,
-   "change_pct": 0.06,
+   "change_pct": 0.11,
    "previous": 26367.24,
    "label": "DAX",
    "group": "EUROPE",
    "symbol": "^GDAXI"
   },
   "stoxx": {
-   "last": 6472.12,
+   "last": 6475.31,
    "currency": "EUR",
    "market_state": null,
-   "change_pct": -0.21,
+   "change_pct": -0.16,
    "previous": 6485.67,
    "label": "Euro Stoxx 50",
    "group": "EUROPE",
@@ -191,27 +191,27 @@
    "symbol": "INR=X"
   },
   "eurusd": {
-   "last": 1.16,
+   "last": 1.1601,
    "currency": "USD",
    "market_state": null,
-   "change_pct": -0.48,
+   "change_pct": -0.47,
    "previous": 1.1656,
    "label": "EUR / USD",
    "group": "FX",
    "symbol": "EURUSD=X"
   },
   "usdjpy": {
-   "last": 159.681,
+   "last": 159.696,
    "currency": "JPY",
    "market_state": null,
-   "change_pct": 0.23,
+   "change_pct": 0.24,
    "previous": 159.321,
    "label": "USD / JPY",
    "group": "FX",
    "symbol": "JPY=X"
   }
  },
- "fetched_at": "2026-08-31 17:33:29",
- "last_success_at": "2026-08-31 17:33:29",
+ "fetched_at": "2026-08-31 17:43:52",
+ "last_success_at": "2026-08-31 17:43:52",
  "failed": []
 }

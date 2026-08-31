@@ -121,6 +121,23 @@ STEPS = [
      "the whole point of Phase 1. Without it the bot records 27 picks "
      "a day and nobody ever finds out whether they were right."),
 
+    # ---- THE ONE HE ASKED FOR. 31 August 2026. ----
+    #
+    #     "i want report of every trade after market closed with
+    #      details , which stock , entry reason, entry time, entry
+    #      price, exit price, reason, time & pnl of that trade. after
+    #      exit change in stock all i need to see ."
+    #
+    # AFTER "intraday" ON PURPOSE. The after-exit columns are read from
+    # the minute store, and the minute store is written by that step. Run
+    # earlier and every trade reports "no candles left after the exit" --
+    # which is the one honest-looking way this report can be useless.
+    ("dayreport", "Every trade closed today, and what the stock did next",
+     ["tools/day_report.py"],
+     "one line per trade, both sides of it, and the close/high/low after "
+     "the exit. Nothing grouped and nothing averaged -- one day is not a "
+     "population."),
+
     ("volumeprofile", "Learn each stock's own normal pace by each minute",
      ["tools/build_volume_profile.py"],
      "without it volume_x divides a PART day by a WHOLE day, so at "
