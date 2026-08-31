@@ -888,7 +888,7 @@ class DashboardState:
         # snapshot and it runs once a second.
         shortlist = self._build_shortlist()
 
-        return {
+        snapshot = {
             "ready": True,
             "updated_at": datetime.now().strftime("%H:%M:%S"),
             # None during the session; the close time once trading has
@@ -1121,6 +1121,27 @@ class DashboardState:
             "result_tags": self._result_tags_today(),
             "result_details": self.result_details(),
         }
+
+        # ---- THE READING GOES ON EVERY ROW HE CAN SEE. 31 Aug ----
+        #
+        #     "Buying pressure / order flow / delta for all stocks on
+        #      dashboard except 1/2 stocks"      -- the operator
+        #
+        # build_ranked() attaches flow, shape and trend to the rows
+        # that CLEARED the gates -- three of them that afternoon. The
+        # board draws the gainers and the refused rows too, so 146 of
+        # 149 rows carried nothing and printed "not trading yet" over
+        # stocks up eleven percent.
+        #
+        # Done here, after the payload is assembled, so it reaches
+        # every list the board reads from and cannot drift out of step
+        # with whichever of them the page happens to draw.
+        ranked = snapshot.get("ranked") or {}
+        self._widen_flow_to_the_board(
+            ranked.get("rows"),
+            (snapshot.get("gainers_losers") or {}).get("gainers"),
+            ranked.get("refused_rows"))
+        return snapshot
 
     def _result_tags_today(self):
         """{symbol: "EXCELLENT"|"GOOD"|"AVOID"} for everything that
@@ -3036,6 +3057,23 @@ class DashboardState:
                 # for, buy against sell, classified off the real
                 # 5-level depth. It has been recorded since 29 August
                 # and reached no screen.
+                # ---- IT ONLY REACHED THE CLEARED ROWS. 31 Aug ----
+                #
+                #     "Buying pressure / order flow / delta for all
+                #      stocks on dashboard except 1/2 stocks"
+                #                                 -- the operator
+                #
+                # This loop walks the rows that PASSED the gates -- 3
+                # of them that afternoon. The board draws the gainers
+                # and the refused rows as well, so 146 of 149 rows
+                # carried no reading and printed "not trading yet"
+                # over stocks that were up eleven percent.
+                #
+                # Widened below, in _widen_flow_to_the_board(), to
+                # everything the board can draw. Not to everything:
+                # 51 ms a symbol lands in ONE cycle of a one-second
+                # refresh, so it is bounded by the mover threshold the
+                # board itself filters on.
                 row["flow"] = self._flow_for(row.get("symbol"))
                 # And today's shape, beside the 7-day one. A stock can
                 # be STRONG_UP on daily bars and sideways since 10:20.
@@ -3506,6 +3544,61 @@ class DashboardState:
             return None
         return None
 
+    # A row the board cannot draw does not need a flow reading. It
+    # filters on this, so this is the honest bound.
+    FLOW_ROWS_MIN_MOVE_PCT = 4.0
+    FLOW_ROWS_MAX = 40
+
+    def _widen_flow_to_the_board(self, *groups):
+        """Attach flow, shape and trend to every row the board draws.
+
+            "Buying pressure / order flow / delta for all stocks on
+             dashboard except 1/2 stocks"        -- 31 August 2026
+
+        build_ranked() enriches the rows that CLEARED the gates. The
+        board draws the gainers and the refused rows too, so almost
+        every row on his screen carried no reading and printed "not
+        trading yet" over stocks that were up eleven percent.
+
+        Bounded on purpose. One symbol costs about 51 ms of SQLite,
+        and the whole cost lands in the first cycle of each minute
+        because _flow_for caches per minute. Bounding it by the same
+        mover threshold the board filters on keeps that spike near
+        half a second instead of three.
+
+        Never raises; a row without a reading is left exactly as it
+        was.
+        """
+        seen = set()
+        done = 0
+        for rows in groups:
+            for row in (rows or []):
+                if done >= self.FLOW_ROWS_MAX:
+                    return
+                if not isinstance(row, dict):
+                    continue
+                symbol = row.get("symbol")
+                if not symbol or symbol in seen:
+                    continue
+                if row.get("flow") is not None:
+                    seen.add(symbol)
+                    continue
+                try:
+                    move = abs(float(row.get("change_pct") or 0.0))
+                except (TypeError, ValueError):
+                    move = 0.0
+                if move < self.FLOW_ROWS_MIN_MOVE_PCT:
+                    continue
+                seen.add(symbol)
+                done += 1
+                try:
+                    row["flow"] = self._flow_for(symbol)
+                    row["shape"] = self._shape_for(symbol)
+                    if row.get("trend") is None:
+                        row["trend"] = self._trend_for(symbol)
+                except Exception:                          # noqa: BLE001
+                    pass
+
     def _flow_for(self, symbol):
         """Who is winning this stock today, and whether that is
         measured or inferred. None until it has traded.
@@ -3536,6 +3629,11 @@ class DashboardState:
         try:
             from core import order_flow
 
+            # ONE read of the day's minutes, shared by both answers.
+            # divergence() would otherwise open the store a second
+            # time for the same symbol in the same call -- 51 ms a
+            # symbol measured, which is the whole cost of this panel.
+            series = order_flow.session_series(symbol)
             live = order_flow.pressure(symbol)
             if live:
                 buy = float(live.get("buy") or 0.0)
@@ -3558,7 +3656,7 @@ class DashboardState:
                     "book_pct": round(book_pct, 1),
                     "measured": book_pct >= _floor,
                     "ticks": ticks,
-                    "diverged": order_flow.divergence(symbol),
+                    "diverged": order_flow.divergence(symbol, series=series),
                 }
         except Exception:                                  # noqa: BLE001
             result = None       # a panel must never take the snapshot down
