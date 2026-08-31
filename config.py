@@ -2428,36 +2428,6 @@ TREND_RANK_REFRESH_SECONDS = 5   # recompute the leaderboard at most this often
 # Off. If it goes back on it is a decision he makes, not a default.
 ENABLE_SLOT_ROTATION = False
 
-# ---------------------------------------------------------------------
-# BOOK IT WHEN THE BUYING STOPS
-# ---------------------------------------------------------------------
-# 31 August 2026.
-#
-#     "book when momentum exhausted"                   -- the operator
-#
-# The bot had three ways out -- stop, target, trailing stop -- and none
-# of them says "the move is over". A stock that runs, stalls and drifts
-# back sits between its stop and its target indefinitely.
-#
-# NCC and CDSL, bought 21 August, still open on the 31st. Ten days.
-# CDSL was +3.84% on the 26th and came within Rs 8 of its target, then
-# finished at +1.18%. Neither level was touched. Nothing was broken.
-# There was simply no rule for it.
-#
-# What this reads is already measured and was already being ignored:
-# core/order_flow.still_buying() was wired to entries only. On ASHOKA,
-# live, on 31 August it turned false at 12:10 while the price was still
-# near +12%. The stock finished that window at +7.45%.
-#
-# WINNERS ONLY. It never closes a losing trade -- that is the stop's
-# decision and must stay the stop's decision.
-EXIT_ON_MOMENTUM_EXHAUSTED = True
-
-# The flow reading compares now against fifteen minutes ago, so a
-# position younger than that is being judged against its own entry
-# noise. This is the lookback, not a number anybody picked -- see
-# core/order_flow.STILL_BUYING_LOOKBACK.
-MOMENTUM_EXIT_MIN_MINUTES = 15
 
 # At most this many swaps a day.
 #
