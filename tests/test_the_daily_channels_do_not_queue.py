@@ -35,7 +35,29 @@ from core.telegram_feed import POLL_SECONDS, SLOW_POLL_SECONDS, TelegramFeed
 
 
 @pytest.fixture
-def feed(tmp_path):
+def off_season(monkeypatch):
+    """---- A TEST THAT DEPENDS ON THE DATE IS NOT A TEST. ----
+                                            31 August 2026
+
+    These were written on 30 August, a Sunday in the gap between
+    results seasons, and they asserted that the results channels sit
+    on the slow loop. On 31 August MILKYMIST reported, so
+    _results_matter_today() correctly promoted Earnings Pulse to the
+    fast loop -- and three tests failed on a working feature.
+
+    Whether earnings_pulse belongs in a fast pass is a REAL question
+    with two right answers depending on the day. So the day is pinned
+    here, and the promotion has its own tests in
+    tests/test_results_channels_lead_in_season.py.
+    """
+    from core.telegram_feed import TelegramFeed
+
+    monkeypatch.setattr(TelegramFeed, "_results_matter_today",
+                        lambda self, day=None: False)
+
+
+@pytest.fixture
+def feed(tmp_path, off_season):
     got = TelegramFeed(db_path=str(tmp_path / "tg.db"))
     got.channels = [
         {"handle": "orders_pulse", "name": "OrderBook Pulse"},

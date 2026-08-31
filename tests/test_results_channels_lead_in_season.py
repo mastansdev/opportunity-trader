@@ -127,3 +127,31 @@ def test_a_broken_calendar_does_not_make_the_pass_blind(feed, monkeypatch):
     monkeypatch.setattr(rc, "in_results_season", boom)
     assert feed._results_matter_today() is False
     assert len(feed._channels_for(fast=True)) == 2
+
+
+def test_a_single_reporting_company_promotes_the_results_channels():
+    """---- CAUGHT BY THE CALENDAR ITSELF. 31 August 2026. ----
+
+    MILKYMIST reported on 31 August -- one company, outside the Q1
+    window, which shut on the 14th. symbols_on() saw it, the results
+    channels moved to the 90-second loop, and three tests written on
+    30 August failed because they had assumed the quiet Sunday they
+    were written on.
+
+    The feature was right and the tests were dated. This pins the
+    behaviour that surprised them, so a one-company day is a case the
+    suite states rather than stumbles into.
+    """
+    import datetime
+
+    from core.telegram_feed import TelegramFeed
+    from core.results_calendar import ResultsCalendar
+
+    day = datetime.date(2026, 8, 31)
+    reporting = ResultsCalendar().symbols_on(day)
+    assert reporting, "31 August 2026 had a reporter; the fixture is stale"
+
+    feed = TelegramFeed.__new__(TelegramFeed)
+    assert feed._results_matter_today(day) is True, (
+        "a company reporting today must lift the results channels onto "
+        "the fast loop, whatever the SEBI window says")

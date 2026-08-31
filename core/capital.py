@@ -134,9 +134,28 @@ ABSOLUTE_MAX_POSITIONS = 25
 #
 # THE ONE COST, SAID PLAINLY: eight seats leave Rs 6,593 free. MTF
 # margin is re-quoted per stock and can move intraday, so a shortfall
-# has almost no buffer. Seven seats leave Rs 36,593 and still deploy
-# 85% of the account. He asked for max; seven is one edit away.
-WORKING_MAX_POSITIONS = 8
+# has almost no buffer.
+#
+# ---- CAPITAL DECIDES THE SEATS, NOTHING ELSE. 31 Aug 2026. ----
+#
+#     "yes bot needs to use complete capital & the seats depends on
+#      available capital , no minimum & no maximum seat count"
+#                                         -- the operator
+#
+# So the working ceiling is lifted to meet ABSOLUTE_MAX_POSITIONS,
+# which stays as what it has always been: a guard against a BAD
+# CAPITAL READ, not a view on the strategy. A corrupt balance of ten
+# crore must not open three hundred positions.
+#
+# WHAT THIS CHANGES TODAY: nothing. Rs 1,46,593 divided by Rs 30,000
+# is four seats, and four is what slots() already returns. It binds
+# only once the account clears Rs 2,40,000.
+#
+# WHAT IT WILL CHANGE, said once and then left alone: the recorded
+# book is 139 trades at minus Rs 99,317 net of charges. More seats
+# multiply whatever the selector produces, in either direction. He
+# has been told; the instruction stands.
+WORKING_MAX_POSITIONS = ABSOLUTE_MAX_POSITIONS
 
 
 def slots(capital_rs, held=0, floor_rs=None, per_position_rs=None):
@@ -163,13 +182,20 @@ def slots(capital_rs, held=0, floor_rs=None, per_position_rs=None):
                         f"{floor:,.0f} must stay free -- that leaves "
                         f"less than one position")}
 
-    total = int(deployable // per)
-    total = min(total, ABSOLUTE_MAX_POSITIONS)
-    # ---- THE WORKING CEILING. See the note at the top. ----
-    # Cash says how many he COULD hold; this says how many the bot may
-    # hold while the selector is still unproven. Both must be satisfied.
-    capped_by_rule = total > WORKING_MAX_POSITIONS
-    total = min(total, WORKING_MAX_POSITIONS)
+    # What cash alone allows, before any ceiling.
+    by_cash = int(deployable // per)
+    # ---- THE CEILINGS. See the note at the top. ----
+    # Since 31 August the working ceiling equals ABSOLUTE_MAX_POSITIONS,
+    # so cash decides and the ceiling is only a guard against a bad
+    # capital read.
+    #
+    # capped_by_rule is computed against BY_CASH, not against the
+    # already-capped figure. The old order compared total to the
+    # working ceiling AFTER applying the absolute one, so once the two
+    # became equal the flag could never fire again -- a dead light on
+    # the panel, which is worse than no light.
+    total = min(by_cash, ABSOLUTE_MAX_POSITIONS, WORKING_MAX_POSITIONS)
+    capped_by_rule = by_cash > total
     open_now = max(total - held, 0)
     free_after = capital - (held + open_now) * per
 

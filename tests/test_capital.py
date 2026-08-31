@@ -62,13 +62,35 @@ def test_the_working_ceiling_still_caps_a_big_account():
 
     Asserted against the constant, not a literal, so the guarantee is
     "the ceiling binds" rather than "the ceiling is five".
+
+    ---- AND LIFTED ALTOGETHER. 31 August 2026. ----
+
+    "yes bot needs to use complete capital & the seats depends on
+     available capital , no minimum & no maximum seat count"
+
+    So the guarantee this test defends changed. It is no longer "the
+    ceiling holds the book below what cash allows" -- that is the
+    opposite of the instruction. It is now:
+
+        capital alone decides the seats, and the only ceiling left is
+        the guard against a BAD CAPITAL READ
+
+    which is ABSOLUTE_MAX_POSITIONS, unchanged at 25. A corrupt
+    balance of ten crore must still not open three hundred positions.
     """
     from core import capital
-    got = capital.slots(431_116)
-    assert got["total"] == capital.WORKING_MAX_POSITIONS
-    assert got["capped_by_rule"] is True
-    assert capital.WORKING_MAX_POSITIONS < 11, (
-        "the ceiling no longer holds the book below what cash alone allows")
+
+    # Cash decides, all the way up.
+    assert capital.slots(431_116)["total"] == int(431_116 // 30_000)
+    assert capital.slots(146_593)["total"] == 4
+
+    # ...until the bad-read guard, which is the only thing left.
+    absurd = capital.slots(100_000_000)
+    assert absurd["total"] == capital.ABSOLUTE_MAX_POSITIONS
+    assert absurd["capped_by_rule"] is True
+    assert capital.WORKING_MAX_POSITIONS == capital.ABSOLUTE_MAX_POSITIONS, (
+        "a working ceiling below the bad-read guard is a seat limit, "
+        "and he asked for none")
 
 
 def test_the_book_is_bounded_by_the_daily_halt_not_the_seat_count():
