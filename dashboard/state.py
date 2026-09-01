@@ -131,7 +131,7 @@ from core.watchlist import build as watchlist_build
 from core.watchlist import counts as watchlist_counts
 from core.reporting import counts as reporting_counts
 from core.reporting import watchlist as reporting_watchlist
-from core.logger import warn, diagnostic
+from core.logger import warn, diagnostic, when_it_changes
 from core.shortlist import ShortlistBuilder
 from trading.charges import round_trip_charges, nights_between
 
@@ -2961,8 +2961,10 @@ class DashboardState:
                 kept.append(row)
             if dropped:
                 got.setdefault("refusals", {}).update(dropped)
-                diagnostic(f"[RULES] {len(dropped)} pick(s) removed: a card "
-                           f"is required and the move must still be going.")
+                when_it_changes(
+                    "rules-dropped",
+                    f"[RULES] {len(dropped)} pick(s) removed: a card "
+                    f"is required and the move must still be going.")
             got["rows"] = kept
         except Exception as exc:                           # noqa: BLE001
             warn(f"[RULES] Could not apply the entry rules ({exc}). "
@@ -5378,8 +5380,10 @@ class DashboardState:
                 "as_of": str(latest),
             })
         if rows:
-            diagnostic(f"[GL] No live prices -- showing the {latest} close "
-                       f"for {len(rows)} symbols, labelled at_close.")
+            when_it_changes(
+                "gl-no-live-prices",
+                f"[GL] No live prices -- showing the {latest} close "
+                f"for {len(rows)} symbols, labelled at_close.")
         return rows
 
     def _build_stock_gainers_losers(self):
@@ -6163,8 +6167,10 @@ class DashboardState:
         extra = [row for row in (self._compute_gl_rows() or [])
                  if str(row.get("symbol") or "").upper() in wanted]
         if extra:
-            diagnostic(f"[RANK] {len(extra)} stock(s) added by reason "
-                       f"that the top-50 list would have hidden.")
+            when_it_changes(
+                "rank-added-by-reason",
+                f"[RANK] {len(extra)} stock(s) added by reason "
+                f"that the top-50 list would have hidden.")
         return list(movers) + [dict(r) for r in extra]
 
     def _symbols_with_news_today(self):

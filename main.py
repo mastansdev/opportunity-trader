@@ -78,7 +78,8 @@ from core import broker_funds
 # connection. See core/order_route.py for why that split exists.
 from core import order_route
 from config import ORDER_PROXY
-from core.logger import decision, diagnostic, warn, log_file_path
+from core.logger import (decision, diagnostic, warn, log_file_path,
+                         when_it_changes)
 from core import auto_entry
 from core import state_store
 from trading.portfolio import Portfolio
@@ -2078,9 +2079,12 @@ def main():
                 if trade_brain is not None:
                     _said = trade_brain.report()
                     if _said.get("candidates"):
-                        decision(f"[BRAIN] {_said['candidates']} candidate(s) "
-                                 f"{_said['by_finder']} -> would back "
-                                 f"{_said['picked']}")
+                        when_it_changes(
+                            "brain-candidates",
+                            f"[BRAIN] {_said['candidates']} candidate(s) "
+                            f"{_said['by_finder']} -> would back "
+                            f"{_said['picked']}",
+                            how=decision)
             except Exception as _exc:                      # noqa: BLE001
                 diagnostic(f"[BRAIN] report skipped ({_exc}).")
 

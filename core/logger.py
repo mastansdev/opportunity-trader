@@ -145,3 +145,60 @@ def diagnostic(message):
 def warn(message):
     """Something is wrong or missing -- always shown live."""
     log.warning(f"WARNING: {message}")
+
+
+# ==========================================================
+#  SAY IT WHEN IT CHANGES, NOT WHEN IT IS TRUE.  1 Sept 2026
+# ==========================================================
+#
+#     "why main.py needs to print every thing ? is it mandatory"
+#
+# Measured on his own log, 1 September, eight minutes before the open
+# with no trading happening at all:
+#
+#     6,167 lines
+#     77% of them repeats
+#
+#     913x  [FLOWS] fii_cr differs between the two sources
+#     912x  [RANK] 262 stock(s) added by reason
+#     457x  [GL] No live prices -- showing the 2026-08-31 close
+#     456x  [RANK] refused: no event x169, not moving enough x73
+#     456x  [RULES] 1 pick(s) removed
+#     288x  [BRAIN] 8 candidate(s) -> would back [...]
+#
+# Not one of those is a decision, a trade, or a fault. They are the
+# refresh loop narrating a state that has not changed. "No live prices"
+# before 09:15 is true and unchanging for ninety minutes.
+#
+# WHY IT IS NOT JUST UNTIDY. The log rotates at 25 MB and pre-flight
+# reported the largest already at 20 MB. At this rate the one line that
+# matters -- an order refused, the feed dropping, BUYING DRIED UP -- is
+# buried in five thousand identical ones. He would never find it, and
+# neither would I.
+#
+# NOT a rate limit and NOT a "say once". Both of those hide a change.
+# This says the message the FIRST time and every time it DIFFERS from
+# the last one under the same key, so "refused: 169 no-event" prints
+# when 169 becomes 170 and stays quiet while it stays 169.
+_LAST_SAID = {}
+
+
+def when_it_changes(key, message, how=None):
+    """Log `message` only if it differs from the last one for `key`.
+
+    `how` is the log function to use -- diagnostic by default, so a
+    caller has to opt in to anything louder.
+    """
+    if _LAST_SAID.get(key) == message:
+        return False
+    _LAST_SAID[key] = message
+    (how or diagnostic)(message)
+    return True
+
+
+def forget_what_was_said(key=None):
+    """Test hook, and the way to force a repeat after a restart."""
+    if key is None:
+        _LAST_SAID.clear()
+    else:
+        _LAST_SAID.pop(key, None)

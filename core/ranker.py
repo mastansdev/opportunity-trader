@@ -75,7 +75,7 @@ Author : H&M Opportunity Trader
 
 import math
 
-from core.logger import diagnostic
+from core.logger import diagnostic, when_it_changes
 
 # ---------------------------------------------------------------
 # What a candidate has to clear before it is even considered
@@ -1115,7 +1115,7 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
     out = _best_of_each_sector(out)
 
     if rejected:
-        diagnostic("[RANK] refused: " + ", ".join(
+        when_it_changes("rank-refused", "[RANK] refused: " + ", ".join(
             f"{k} x{v}" for k, v in sorted(rejected.items())))
 
     return {"rows": out[:top],
