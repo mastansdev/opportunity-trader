@@ -370,6 +370,7 @@ impressive -- if there is no store behind it, it is not on the list.
 <div class="tabs">
   <button class="tab" data-tab="pre">Pre</button>
   <button class="tab on" data-tab="live">Live</button>
+  <button class="tab" data-tab="trade">Trade</button>
   <button class="tab" data-tab="post">Post</button>
   <button class="tab" data-tab="watch">Watch</button>
   <button class="tab" data-tab="brain">Brain</button>
@@ -479,6 +480,57 @@ Every column below is a field the state ALREADY publishes -- entry and
 exit price, both times, the reason for each end, qty, gross pnl,
 charges, net. Nothing here is computed on the page.
 -->
+<!-- ==========================================================
+     TRADE -- two tables, never mixed.  1 September 2026.
+
+       "in OFF = PAPER MODE
+          table = paper trades
+          my own dhan trades table both separate
+        in ON = REAL MODE
+          Table = BOT TRADED
+          My own trades too
+        each mode has two tables thats settles & doesn't interfere"
+
+     The two have always been in the same snapshot and told apart by a
+     flag -- book.rows carry bot_managed, broker_sync splits
+     only_in_bot from only_at_broker, and a trade he closed himself
+     carries the exit reason "closed on the Dhan platform".
+
+     They were shown in ONE table with a small "adopted" chip, which is
+     how a -Rs 89,212 run of his own hope trades sat beside the bot's
+     own record and made both unreadable.
+
+     The heading follows the switch: OFF says PAPER TRADES, ON says BOT
+     TRADED. Same two tables either way -- the switch decides whose
+     money, not what is shown.
+     ========================================================== -->
+<div id="trade-pane" style="display:none">
+  <div class="card">
+    <div class="hd"><b id="tradebot-title">PAPER TRADES</b>
+      <span class="sub" id="tradebot-sub"></span></div>
+    <table><thead><tr>
+      <th>Stock</th><th class="num">Qty</th>
+      <th class="num">In</th><th>At</th>
+      <th class="num">Out</th><th>At</th>
+      <th class="num">Made or lost<span class="jargon">net</span></th>
+      <th>Why in, why out</th>
+    </tr></thead><tbody id="tradebot"></tbody></table>
+  </div>
+
+  <div class="card">
+    <div class="hd"><b>YOUR OWN TRADES</b>
+      <span class="sub">opened on the Dhan platform &mdash; the bot shows
+        them and never touches them</span></div>
+    <table><thead><tr>
+      <th>Stock</th><th class="num">Qty</th>
+      <th class="num">In</th><th>At</th>
+      <th class="num">Out</th><th>At</th>
+      <th class="num">Made or lost<span class="jargon">net</span></th>
+      <th>State</th>
+    </tr></thead><tbody id="tradeyours"></tbody></table>
+  </div>
+</div>
+
 <div id="post-pane" style="display:none">
   <div class="cap">What the bot did today</div>
   <table>
@@ -1691,6 +1743,7 @@ start of day limit: Rs ${bf.sod}` : "");
   drawBrain(s);
   drawTelegram(s);
   drawRefused(s);
+  drawTrade(s);
 }
 
 // ---- THE STOCKS IT SAID NO TO. 30 August 2026. ----
@@ -1706,6 +1759,89 @@ start of day limit: Rs ${bf.sod}` : "");
 // Grouped by reason, because "which gate is doing the refusing" is
 // the question behind his -- 40 names under "no volume behind it" is
 // a gate to argue with; the same 40 in symbol order is a list.
+// ==========================================================
+//  TRADE -- his and the bot's, side by side and never mixed
+// ==========================================================
+//
+//   "each mode has two tables thats settles & doesn't interfere"
+//
+// A trade belongs to the bot if the bot decided it. Two independent
+// marks say so and both are already in the snapshot:
+//
+//     bot_managed      set on every book row
+//     exit_reason      "closed on the Dhan platform" is HIS
+//
+// Neither is inferred. If a row carries neither mark it goes to HIS
+// table, because the bot knows its own trades and anything it does not
+// recognise is not one.
+function isTheBots(row){
+  if (row.bot_managed === true) return true;
+  if (row.bot_managed === false) return false;
+  const why = String(row.exit_reason || "");
+  if (why.indexOf("Dhan platform") >= 0) return false;
+  if (String(row.origin || "").toUpperCase() === "DHAN") return false;
+  // A bot trade always carries the reason it was opened for.
+  return Boolean(row.entry_reason);
+}
+
+function tradeRow(r, mine){
+  const inAt  = r.entry_time ? String(r.entry_time).slice(11, 16)
+                             || String(r.entry_time).slice(0, 5) : "—";
+  const outAt = r.exit_time  ? String(r.exit_time).slice(11, 16)
+                             || String(r.exit_time).slice(0, 5) : "";
+  const open  = !r.exit_price;
+  const pnl   = (r.net_pnl !== undefined && r.net_pnl !== null)
+                ? r.net_pnl : r.pnl;
+  const money = (pnl === null || pnl === undefined)
+    ? '<span style="color:var(--muted)">&mdash;</span>'
+    : `<b style="color:${pnl >= 0 ? "#0a7d55" : "#b00020"}">Rs ${rs(pnl)}</b>`;
+  const last = mine
+    ? (open ? "open at Dhan" : "closed by you")
+    : `${r.entry_reason || "&mdash;"}${r.exit_reason ? " &rarr; " + r.exit_reason : ""}`;
+  return `<tr>
+    <td><b>${r.symbol}</b></td>
+    <td class="num">${r.qty ?? "&mdash;"}</td>
+    <td class="num">${r.entry_price ? Number(r.entry_price).toFixed(2) : "&mdash;"}</td>
+    <td style="font-size:12px">${inAt}</td>
+    <td class="num">${r.exit_price ? Number(r.exit_price).toFixed(2)
+        : '<span style="color:var(--muted)">still open</span>'}</td>
+    <td style="font-size:12px">${outAt || "&mdash;"}</td>
+    <td class="num">${money}</td>
+    <td class="why" style="font-size:12px">${last}</td>
+  </tr>`;
+}
+
+function drawTrade(s){
+  const bot = [], mine = [];
+  // Open first, then closed -- the same trade never appears twice
+  // because an open position has no exit_price and a closed one is not
+  // in the open list.
+  for (const r of (s.open_positions || []))
+    (isTheBots(r) ? bot : mine).push(r);
+  for (const r of (s.closed_positions || []))
+    (isTheBots(r) ? bot : mine).push(r);
+  // And the ones sitting at Dhan that the bot never opened.
+  for (const r of ((s.broker_sync || {}).only_at_broker || []))
+    mine.push({symbol: r.symbol, qty: r.broker_qty,
+               entry_price: r.avg_price, origin: "DHAN"});
+
+  const on = (s.bot_trading || {}).on === true;
+  const title = $("tradebot-title");
+  if (title) title.textContent = on ? "BOT TRADED" : "PAPER TRADES";
+  const sub = $("tradebot-sub");
+  if (sub) sub.textContent = on
+    ? "real money — these reached Dhan"
+    : "nothing reached the broker";
+
+  const b = $("tradebot"), m = $("tradeyours");
+  if (b) b.innerHTML = bot.length
+    ? bot.map(r => tradeRow(r, false)).join("")
+    : `<tr><td colspan="8" style="color:var(--muted)">no trades yet today</td></tr>`;
+  if (m) m.innerHTML = mine.length
+    ? mine.map(r => tradeRow(r, true)).join("")
+    : `<tr><td colspan="8" style="color:var(--muted)">nothing of your own today</td></tr>`;
+}
+
 function drawRefused(s){
   const rows = s.refused_today || [];
   const body = $("refbody");
@@ -2632,13 +2768,13 @@ document.addEventListener("keydown", e => {
 document.querySelectorAll(".tabs [data-tab]").forEach(b =>
   b.addEventListener("click", () => {
     const name = b.dataset.tab;
-    if (!["pre", "live", "post", "watch", "brain", "tg",
-          "refused"].includes(name)) return;
+    if (!["pre", "live", "trade", "post", "watch", "brain",
+          "tg", "refused"].includes(name)) return;
     document.querySelectorAll(".tabs [data-tab]").forEach(
       x => x.classList.remove("on"));
     b.classList.add("on");
-    for (const pane of ["pre", "live", "post", "watch", "brain", "tg",
-                        "refused"])
+    for (const pane of ["pre", "live", "trade", "post", "watch",
+                        "brain", "tg", "refused"])
       $(pane + "-pane").style.display = (pane === name) ? "" : "none";
   }));
 

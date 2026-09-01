@@ -450,5 +450,29 @@ class LiveGuard:
             self.say(f"  Restart py tools/collector.py, then arm it again "
                      f"from the dashboard.")
             self.say("=" * 62)
+        elif self.say is not None and not self.disarmed:
+            # ---- IT WENT SILENT WITH NO DISARM. 1 Sept 2026. ----
+            #
+            # With disarm removed -- see main.py's note, the guard shut
+            # the bot down on a quiet Tuesday morning -- this branch did
+            # nothing at all, because it only spoke when it had acted.
+            #
+            # So a feed that was genuinely dead would warn twice and
+            # then go quiet for the rest of the session, which is worse
+            # than the fault being fixed. Warning is now the guard's
+            # ONLY job, so it has to keep doing it.
+            #
+            # Said once, not every poll: the strike count is already at
+            # the ceiling and repeating it every few seconds is the
+            # noise problem from earlier the same day.
+            self.disarmed = True          # "already said", not "acted"
+            self.say("=" * 62)
+            self.say(f"  THE FEED LOOKS DEAD. The bot is STILL TRADING.")
+            self.say(f"  {state['why']}.")
+            self.say(f"  Nothing here switches trading off -- that is "
+                     f"yours alone.")
+            self.say(f"  Check py tools/collector.py is running. If it is "
+                     f"and the channels are simply quiet, ignore this.")
+            self.say("=" * 62)
         return {"acted": acted, "strikes": self.strikes, "ok": False,
                 "why": state["why"]}

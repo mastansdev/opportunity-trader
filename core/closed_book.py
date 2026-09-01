@@ -144,7 +144,7 @@ def from_dhan(rows):
     return out
 
 
-def merge(bot_rows, dhan_rows):
+def merge(bot_rows, dhan_rows, mode=None):
     """The bot's book and the account's book, as one list.
 
     Where both describe the same symbol, DHAN WINS -- it is the
@@ -160,13 +160,37 @@ def merge(bot_rows, dhan_rows):
         by_symbol[str(row.get("symbol") or "").upper()] = row
         merged.append(row)
 
+    # ---- IN PAPER THEY ARE NEVER THE SAME TRADE. 1 Sept 2026. ----
+    #
+    #     "each mode has two tables thats settles & doesn't interfere"
+    #
+    # On 1 September the bot bought MARINE on paper -- 109 @ 430.16,
+    # out at 431.78 for +Rs 177 -- while he separately bought MARINE
+    # himself on Dhan, 100 @ 415, out at 429.91.
+    #
+    # Two trades, two different sums of money, one symbol. This merged
+    # them into ONE row carrying HIS prices and the BOT'S label, so his
+    # trade appeared in the bot's table showing +Rs 1,491 against a
+    # trade that actually made Rs 177. He spotted it; every store
+    # disagreed with the screen.
+    #
+    # The merge is right when the bot is LIVE: then the bot's order and
+    # Dhan's record ARE one trade, and Dhan is the settled truth.
+    #
+    # In PAPER the bot's orders never reach Dhan, so a Dhan row for the
+    # same symbol is always a SEPARATE, real trade of his. Merging them
+    # is not reconciliation, it is two people's money in one row.
+    paper = str(mode or "").upper() == "PAPER"
     for row in (dhan_rows or []):
         mine = by_symbol.get(row["symbol"])
-        if mine is None:
+        if mine is None or paper:
+            # Paper: his row stands on its own, marked as his, even when
+            # the bot happened to trade the same stock.
             merged.append(row)
             continue
-        # Same trade, two records. Take Dhan's prices and P&L, keep the
-        # bot's explanation, and say plainly that the bot opened it.
+        # LIVE, same symbol: one trade, two records. Take Dhan's prices
+        # and P&L, keep the bot's explanation -- "why it closed" is the
+        # one thing Dhan cannot tell him.
         reason = mine.get("exit_reason") or mine.get("reason")
         mine.update({k: v for k, v in row.items()
                      if k not in ("exit_reason", "origin") and v is not None})

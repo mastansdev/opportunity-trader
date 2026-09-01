@@ -2839,11 +2839,55 @@ class DashboardState:
         # volume ratio lives on the mover row. Stashing it here is what
         # lets a surge count as a reason without that function having to
         # go and re-derive a number the caller is already holding.
+        # ---- IT READ A KEY THAT IS NOT ON THE ROW. 1 Sept 2026. ----
+        #
+        #     "dycl starting 10:55 order flow confirmed surge in volume
+        #      that usual . which exactly reason to trigger in buy"
+        #
+        # DYCL rose 11.8% on 1 September and was skipped as "no event".
+        # The volume-surge rule added on 31 August was supposed to catch
+        # exactly that -- and it never fired once, because this loop
+        # looked for "volume_ratio" or "volume_x" and a mover row
+        # carries neither. It carries `volume`, `ltp`, and a `vol_ratio`
+        # that is None at this point in the build.
+        #
+        # So _volume_now was empty every cycle and the surge could never
+        # be a reason. Measured after the fix, at 11:30 that morning:
+        # GODREJAGRO 98.9x its own normal pace, DYCL and IZMO likewise
+        # far above the 20x bar.
+        #
+        # The ratio is COMPUTED here, the same way core/ranker.py
+        # computes it -- turnover so far against this stock's own normal
+        # pace by this minute. Reading a pre-computed field was the
+        # mistake: nothing computes it before this point.
         self._volume_now = {}
+        _adv = {}
+        try:
+            import json as _json
+            with open(os.path.join("data", "liquidity.json"),
+                      encoding="utf-8") as _fh:
+                _adv = (_json.load(_fh) or {}).get("adv_cr") or {}
+        except Exception:                                  # noqa: BLE001
+            _adv = {}
+        _now = datetime.now().strftime("%H:%M")
         for row in movers or []:
             key = str(row.get("symbol") or "").upper()
-            ratio = row.get("volume_ratio") or row.get("volume_x")
-            if key and ratio:
+            if not key:
+                continue
+            ratio = row.get("vol_ratio") or row.get("volume_ratio")                 or row.get("volume_x")
+            if ratio is None:
+                volume, price, adv = (row.get("volume"), row.get("ltp"),
+                                      _adv.get(key))
+                if volume and price and adv:
+                    try:
+                        traded_cr = float(volume) * float(price) / 1e7
+                        from core.volume_pace import pace_ratio
+                        ratio = pace_ratio(traded_cr, float(adv), key, _now)
+                        if ratio is None:
+                            ratio = traded_cr / float(adv)
+                    except Exception:                      # noqa: BLE001
+                        ratio = None
+            if ratio:
                 try:
                     self._volume_now[key] = float(ratio)
                 except (TypeError, ValueError):
@@ -6540,8 +6584,19 @@ class DashboardState:
         # BOTH BOOKS. The bot's own exits carry the reason it exited,
         # which Dhan cannot know; Dhan's rows carry the trades the bot
         # never saw, which is all of them on a day he trades by hand.
+        # The mode decides whether a Dhan row for the same symbol is the
+        # SAME trade or a DIFFERENT one. In paper the bot's orders never
+        # reach Dhan, so it is always a different one -- his. Read at
+        # call time, because he flips the switch mid-session.
+        _mode = None
+        try:
+            _execution = getattr(self.engine, "execution", None)
+            _mode = "LIVE" if getattr(_execution, "live", False) else "PAPER"
+        except Exception:                                  # noqa: BLE001
+            _mode = "PAPER"
         closed_positions = closed_book.merge(
-            list(closed_positions or []), self._closed_from_dhan())
+            list(closed_positions or []), self._closed_from_dhan(),
+            mode=_mode)
         rows = []
         for record in closed_positions:
             sector_record = self.master_loader.get_by_symbol(record["symbol"])

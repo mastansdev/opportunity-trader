@@ -379,7 +379,26 @@ UNEXPLAINED_MIN_VOLUME_RATIO = 5.0
 # ratio, still size to a real plan, still pass the circuit and
 # liquidity checks. It buys nothing on its own.
 SURGE_IS_A_REASON = True
-SURGE_REASON_MIN_RATIO = 20.0
+# ---- 10x, HIS CALL. 1 September 2026. ----
+#
+# 20.0 was a number I picked off a single day's board on 31 August,
+# and it was never measured -- the comment above says so.
+#
+# On 1 September the rule had never fired ONCE, because the code that
+# fed it read a key the mover rows do not carry. With that fixed and
+# the ratio actually computed, the top fourteen gainers at 11:35 read:
+#
+#     GODREJAGRO  +12.47%   98.8x        VTL         +5.97%  256.4x
+#     SOTL         +9.91%   46.9x        DYCL       +11.92%   16.5x
+#     ENGINERSIN   +7.94%   44.1x        GRAPHITE    +5.91%   14.5x
+#     SSWL        +10.42%   34.9x        CAPLIPOINT  +5.79%    9.5x
+#
+# At 20x that is 5 of 14 and DYCL -- the stock he asked about, up
+# 11.9% on a confirmed surge from 10:55 -- is still missed by 3.5x.
+#
+# He set it at 10x. That takes DYCL and GRAPHITE and leaves CAPLIPOINT
+# at 9.5x out, which is where he wants the line.
+SURGE_REASON_MIN_RATIO = 10.0
 UNEXPLAINED_WEIGHT = 0.35
 
 

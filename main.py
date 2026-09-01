@@ -1784,11 +1784,47 @@ def main():
     # inside the guard, so it can be driven in a test without one.
     from core.morning_ready import LiveGuard as _LiveGuard
 
-    def _disarm_for_dead_feed():
-        engine.alert_only = True
-        engine.breakout_armed = False
-
-    _live_guard = _LiveGuard(disarm=_disarm_for_dead_feed, say=decision)
+    # ---- IT STOPPED THE BOT ON A QUIET TUESDAY. 1 Sept 2026. ----
+    #
+    #     "but why & who the fucker will telegram to stop my bot ?"
+    #
+    # Nobody. I built this guard and I built it wrong.
+    #
+    # 08:24:38  [GUARD] no telegram message for 20 minutes -- Strike 1
+    # 08:24:43  [GUARD] no telegram message for 20 minutes -- Strike 2
+    # 08:24:46  BOT TRADING SWITCHED OFF BY THE GUARD.
+    #
+    # Fifty minutes before the market opened, because nobody had posted
+    # to Telegram since 08:04. The collector was alive the whole time --
+    # it had filed 17 catch-up messages at 08:01 and was polling
+    # normally. It simply had nothing new to file, because nobody posts
+    # at 08:20 on a Tuesday.
+    #
+    # Every candidate that followed came back "ALERT ONLY -- bot not
+    # trading": CHALET, MARINE, INTELLECT, all sized and ready. A whole
+    # session lost, and the eleventh day in a row with no trade.
+    #
+    # THREE THINGS WRONG, ALL MINE:
+    #
+    #   * It cannot tell a DEAD collector from a QUIET one. It measures
+    #     "when did a channel last post", which is a fact about the
+    #     channels, not about the bot.
+    #   * "Deliberately slow to panic" meant three strikes spaced by the
+    #     caller's loop. The loop runs every few seconds, so the whole
+    #     thing fired in EIGHT SECONDS.
+    #   * On 31 August I found this guard, read it, and fixed its log
+    #     MESSAGE so it would say "still not trading" on recovery. I
+    #     never asked why it was disarming at all.
+    #
+    # AND IT WAS NEVER NEEDED. Its job was to stop the bot buying on
+    # stale news. core/ranker.py already refuses any stock with no fresh
+    # reason, per stock, every cycle -- 169 refusals of "no event" this
+    # morning alone. This was a blunter second copy of a check that
+    # works, and it is the copy that silenced the session.
+    #
+    # The WARNING stays: he must still be told if the collector dies.
+    # The switch does not. Nothing may turn trading off but him.
+    _live_guard = _LiveGuard(disarm=None, say=decision)
 
     # The dashboard and its banner now run BEFORE start_feed() --
     # see the note there for why. Nothing to do here.

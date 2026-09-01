@@ -71,10 +71,58 @@ def show_switch():
         print(f"    switch starts          "
               f"{'ON -- REAL' if Execution.live else 'OFF -- PAPER'}")
         print(f"    TRADING_MODE           {config.TRADING_MODE}")
-        print(f"    ALERT_ONLY_MODE        {config.ALERT_ONLY_MODE}"
-              f"{'   <- the bot is NOT trading' if config.ALERT_ONLY_MODE else ''}")
+        # ---- IT READ THE FILE, NOT THE BOT. 1 September 2026. ----
+        #
+        # This printed "ALERT_ONLY_MODE False" all morning while the
+        # RUNNING bot had been in alert-only since 08:24, disarmed by
+        # the feed guard fifty minutes before the open. Three sized
+        # candidates came back "ALERT ONLY -- bot not trading" and this
+        # screen said trading was on.
+        #
+        # config.ALERT_ONLY_MODE is what the bot STARTS with.
+        # engine.alert_only is what it is doing NOW, and they are
+        # different the moment anything changes it at runtime.
+        #
+        # The whole point of this file is that he should not have to
+        # trust a summary. A summary is exactly what that line was.
+        print(f"    starts in alert-only   {config.ALERT_ONLY_MODE}")
+        _live = _running_bot()
+        if _live is None:
+            print("    trading right now      no bot running to ask")
+        else:
+            alert = _live.get("alert_only")
+            print(f"    trading right now      "
+                  f"{'NO -- alerts only' if alert else 'yes'}"
+                  f"{'   <<< it is NOT taking trades' if alert else ''}")
     except Exception as exc:                               # noqa: BLE001
         print(f"    could not read: {exc}")
+
+
+def _running_bot():
+    """What the LIVE process is doing, or None if none is running.
+
+    Read from the dashboard rather than from config, because config is
+    what it started with and this file exists to report what is true.
+    """
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(
+                "http://127.0.0.1:8000/api/snapshot", timeout=8) as r:
+            snap = json.load(r)
+    except Exception:                                      # noqa: BLE001
+        return None
+    bot = snap.get("bot_trading") or {}
+    note = str(bot.get("note") or "")
+    routing = snap.get("routing_decisions") or snap.get("routing") or []
+    # "ALERT ONLY -- bot not trading" is what take() records against
+    # every candidate while alert_only is on. It is the plainest
+    # evidence available and it comes from the decision path itself.
+    alert = any("ALERT ONLY" in str(r.get("why") or "")
+                for r in routing if isinstance(r, dict))
+    return {"alert_only": alert, "note": note,
+            "switch_on": bool(bot.get("on"))}
 
 
 def show_holdings(today):

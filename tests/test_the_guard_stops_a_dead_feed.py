@@ -143,12 +143,70 @@ def test_main_creates_the_guard_before_it_polls_it():
     assert used > created, "main.py polls the guard before creating it"
 
 
-def test_disarming_stops_new_entries_and_nothing_else():
-    """It must never close what he is holding."""
+def test_the_guard_can_no_longer_stop_the_bot():
+    """---- IT STOPPED HIM ON A QUIET TUESDAY. 1 September 2026. ----
+
+    This asserted the disarm exists and only sets alert_only. The
+    disarm is GONE, and this now asserts the opposite.
+
+        08:24:38  [GUARD] no telegram message for 20 minutes -- Strike 1
+        08:24:43  [GUARD] no telegram message for 20 minutes -- Strike 2
+        08:24:46  BOT TRADING SWITCHED OFF BY THE GUARD.
+
+    Fifty minutes before the market opened, because nobody had posted
+    to Telegram since 08:04. The collector was alive throughout -- it
+    had filed 17 catch-up messages at 08:01. It simply had nothing new,
+    because nobody posts at 08:20 on a Tuesday.
+
+    Every candidate that followed came back "ALERT ONLY -- bot not
+    trading": CHALET, MARINE, INTELLECT, all sized and ready. A whole
+    session, and the eleventh day running with no trade.
+
+    Three faults, all mine: it could not tell a DEAD collector from a
+    QUIET one; "slow to panic" meant three strikes spaced by the
+    caller's loop, which fired the lot in EIGHT SECONDS; and on 31
+    August I found this guard and fixed its log MESSAGE without asking
+    why it was disarming at all.
+
+    It was never needed. core/ranker.py already refuses any stock with
+    no fresh reason, per stock, every cycle. This was a blunter second
+    copy, and it is the copy that silenced the session.
+
+    The warning stays. The switch does not."""
     src = open("main.py", encoding="utf-8").read()
-    block = src[src.find("def _disarm_for_dead_feed"):]
-    block = block[:block.find("_live_guard =")]
-    assert "alert_only = True" in block
-    for forbidden in ("close", "exit", "sell", "square"):
-        assert forbidden not in block.lower(), (
-            f"the disarm touches positions: found '{forbidden}'")
+    assert "disarm=None" in src, (
+        "the guard has been given a disarm again -- something other "
+        "than him can stop the bot trading")
+    assert "def _disarm_for_dead_feed" not in src
+
+
+def test_nothing_anywhere_can_set_alert_only_true():
+    """The whole point. On 1 September exactly one line could do it and
+    it cost a session. If a second ever appears, this fails on the day
+    it is written rather than on the day it costs him a move."""
+    import pathlib
+    import re
+
+    # THE LIVE PATH ONLY. tools/pipeline.py legitimately builds a
+    # stand-in engine with alert_only=True to CHECK that the switch
+    # guards rotation -- an audit asserting the rule, not code that can
+    # silence the running bot. Tests do the same. Scoping this to what
+    # actually runs during a session is the difference between a guard
+    # and a nuisance.
+    LIVE = ("core/", "dashboard/", "trading/", "main.py")
+    offenders = []
+    for path in pathlib.Path(".").rglob("*.py"):
+        s = str(path).replace("\\", "/")
+        if "__pycache__" in s:
+            continue
+        if not (s == "main.py" or s.startswith(LIVE)):
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for i, line in enumerate(text.splitlines(), 1):
+            if line.strip().startswith("#"):
+                continue
+            if re.search(r"alert_only\s*=\s*True", line):
+                offenders.append(f"{s}:{i}")
+    assert not offenders, (
+        "these can put the bot back into alert-only: "
+        + ", ".join(offenders))

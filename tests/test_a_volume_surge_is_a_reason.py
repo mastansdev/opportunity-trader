@@ -83,11 +83,24 @@ def test_an_ordinary_busy_day_is_still_not_a_reason():
         assert s._mechanism_for(symbol) is None, symbol
 
 
-def test_the_bar_is_well_above_the_old_lane():
-    """UNEXPLAINED_MIN_VOLUME_RATIO = 5.0 let NCC be bought twice on
-    8.5x with nothing behind it. That objection stands and this bar has
-    to stay clear of it."""
-    assert SURGE_REASON_MIN_RATIO >= 4 * UNEXPLAINED_MIN_VOLUME_RATIO
+def test_the_bar_is_above_the_old_lane():
+    """---- 10x, HIS CALL. 1 September 2026. ----
+
+    This asserted 4x the old 5.0 lane -- i.e. 20x -- because 20 was the
+    number I had picked off a single day's board. It was never
+    measured, and the rule had never fired ONCE, because the code
+    feeding it read a key the mover rows do not carry.
+
+    With that fixed and the ratio actually computed, DYCL -- up 11.9%
+    on a surge he watched from 10:55 -- read 16.5x and was still
+    missed. He set the bar at 10x.
+
+    What survives from the old objection: 5.0 let NCC be bought twice
+    on 8.5x with nothing behind it, so the bar must stay clear of that
+    lane. 10x does."""
+    assert SURGE_REASON_MIN_RATIO > UNEXPLAINED_MIN_VOLUME_RATIO
+    assert SURGE_REASON_MIN_RATIO >= 8.5, (
+        "8.5x is the NCC case -- the bar must sit above it")
 
 
 def test_a_stock_with_no_volume_reading_gets_no_reason():

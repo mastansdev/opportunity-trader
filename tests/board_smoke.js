@@ -93,6 +93,11 @@ const CONTROLS = [
   armBtn("btn-off", "off"),
   control("tab-pre",   {tab: "pre"}),
   control("tab-live",  {tab: "live"}),
+  // 1 September 2026: the Trade tab. Two tables -- what the bot did
+  // and what he did himself -- because they were in one table with a
+  // small "adopted" chip, and a -Rs 89,212 run of his own trades sat
+  // beside the bot's record making both unreadable.
+  control("tab-trade", {tab: "trade"}),
   control("tab-post",  {tab: "post"}),
   // 16 August 2026: Watch and Brain were in the markup and were never
   // clicked here. The coverage check below counts controls in the HTML
@@ -270,7 +275,11 @@ check("qty and BUY sit inside the symbol cell", () => {
 // does not know about looks like "blanked every pane" when the page is
 // working perfectly. That is exactly what happened when Watch and
 // Brain were added: 16 August 2026.
-const PANES = ["pre", "live", "post", "watch", "brain"];
+// 1 September 2026: "trade" added. This list was already short of
+// the markup -- tg and refused have panes and were never in it -- so
+// the "exactly one pane" check was only ever looking at five of eight.
+const PANES = ["pre", "live", "trade", "post", "watch", "brain",
+               "tg", "refused"];
 
 function paneState(){
   return PANES.map(n => NODES[n + "-pane"]
