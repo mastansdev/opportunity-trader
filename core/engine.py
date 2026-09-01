@@ -6126,102 +6126,53 @@ class Engine:
             restored[symbol] = position
         self.open_positions = restored
 
-    BROKER_HELD_SECONDS = 30
+    def symbols_traded_today(self):
+        """Every stock the bot has ALREADY opened and closed today.
 
-    def symbols_at_broker(self):
-        """Every symbol he actually holds at Dhan, whoever opened it.
+        ---- ONE STOCK, ONE TRADE A DAY. 1 September 2026. ----
 
-        ---- DHAN AND THE BOT WERE NOT IN LINE. 1 September 2026. ----
+            "done one stock one trade per trade by bot."
+                                            -- the operator
 
-            "another thing dhan & bot is not inline. i had caplinpoint
-             stock but bot does'nt know that still"
+        On 1 September the exit rule and the ranker fought over the same
+        two names and both won, in turn:
 
-        Measured on the live snapshot as he said it:
+            VTL     out 15:02:16  ->  back in 15:02:18   (2 seconds)
+            MARINE  out 11:29:08  ->  back in 11:30:46   (98 seconds)
 
-            his at Dhan     CAPLIPOINT, SSWL, INTELLECT, MARINE, ...
-            ranked to BUY   CAPLIPOINT, SSWL, DYCL, ENGINERSIN, ...
+        Both rules were behaving correctly on their own terms. The exit
+        sold because buyers had stopped; the ranker bought because it
+        was still the best-scoring stock on the board. Nothing was
+        wrong, and the pair of them paid brokerage twice for it -- VTL's
+        entire loss that day was that round trip.
 
-        CAPLIPOINT and SSWL were his own positions AND live buy
-        candidates at the same moment. Nothing was bought on top of them
-        only because the book happened to be full -- luck, not a guard.
+        A stock the bot has finished with today is finished with. If it
+        runs again afterwards that is a miss, and he has weighed that
+        against the churn and chosen this.
 
-        IT WAS NEVER A DATA PROBLEM. core/broker_sync.py prints "[BOOK]
-        CAPLIPOINT: 50 at Dhan, opened outside the bot" every cycle and
-        the panel shows it. The reading was there, correct, and
-        displayed. It never reached the DECISION.
-
-        IT LIVES HERE, not on the dashboard, because the ENGINE owns
-        self.execution -- and because both readers need the same answer.
-        main.py builds auto_entry's `held` from engine.open_positions
-        and dashboard/state.py builds the ranker's separately, so a
-        helper on either one of them would have fixed exactly half the
-        problem and left the order path untouched.
-
-        NOT an adoption and NOT a block: the bot still will not stop,
-        trail or exit anything he opened. This only stops it BUYING a
-        stock he is already in -- what "no pyramiding" has always meant
-        for its own positions.
-
-        FAILS OPEN. If Dhan cannot be reached this returns an empty set
-        and both paths behave exactly as they did before, rather than
-        refusing everything because one REST call timed out.
-
-        IT NEVER BLOCKS THE CALLER. This is a REST call on the live
-        account, and BOTH callers are on hot loops -- dashboard
-        build_ranked() on the refresh loop and main.py's auto_entry on
-        the trading loop, the same loop that checks square-off and the
-        feed watchdog. core/engine.py has been bitten by exactly this
-        before (the 52-week scan: "a 3.5s scan there is a 3.5s stall in
-        the bot's own heartbeat"), and a slow Dhan reply measured 25.6s
-        on 1 September. So the answer is always returned from memory and
-        refreshed on a worker; a stale reading is worth far more than a
-        stalled heartbeat.
+        SOLD BY HAND IS NOT TRADED BY THE BOT. Only the bot's own
+        closed positions count, so his own exit on the dashboard does
+        not lock the bot out of a name for the rest of the day.
         """
-        import threading
-        import time
-
-        now = time.time()
-        cached = getattr(self, "_broker_held_cache", None)
-        fresh = cached and (now - cached[0]) < self.BROKER_HELD_SECONDS
-        known = cached[1] if cached else set()
-
-        if not fresh and not getattr(self, "_broker_held_running", False):
-            self._broker_held_running = True
-            threading.Thread(target=self._refresh_broker_held,
-                             name="broker-held", daemon=True).start()
-        return known
-
-    def _refresh_broker_held(self):
-        """The worker. Never raises -- it is a thread, so an exception
-        here is silent and would leave the flag stuck on forever."""
-        import time
-
+        today = datetime.now().date()
         out = set()
-        try:
-            executor = getattr(self, "execution", None)
-            executor = getattr(executor, "executor", executor)
-            reader = getattr(executor, "positions", None)
-            rows = reader() if reader else None
-            for entry in (rows if isinstance(rows, list) else []):
-                if not isinstance(entry, dict):
-                    continue
-                symbol = str(entry.get("tradingSymbol")
-                             or entry.get("symbol") or "").upper()
+        for closed in (self.closed_positions or []):
+            if not isinstance(closed, dict):
+                continue
+            symbol = str(closed.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            when = closed.get("exit_time") or closed.get("entry_time")
+            if isinstance(when, str):
                 try:
-                    # The same two keys dashboard/state.py's _book_row()
-                    # reads, so the panel and the decision can never
-                    # disagree about what he owns.
-                    qty = float(entry.get("netQty")
-                                or entry.get("quantity") or 0)
-                except (TypeError, ValueError):
-                    qty = 0.0
-                if symbol and qty:
-                    out.add(symbol)
-            self._broker_held_cache = (time.time(), out)
-        except Exception as exc:                           # noqa: BLE001
-            diagnostic(f"[BOOK] Could not read holdings from Dhan: {exc}")
-        finally:
-            self._broker_held_running = False
+                    when = datetime.fromisoformat(when)
+                except ValueError:
+                    when = None
+            # No timestamp at all -- it is in THIS session's list, so it
+            # closed in this session. Count it.
+            if when is None or when.date() == today:
+                out.add(symbol)
+        return out
 
     def export_entry_blocks(self):
         """Plain-dict snapshot, safe to json.dump directly."""

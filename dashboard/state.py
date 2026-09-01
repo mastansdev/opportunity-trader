@@ -2776,35 +2776,19 @@ class DashboardState:
             if name:
                 held.add(str(name).upper())
 
-        # ---- DHAN AND THE BOT WERE NOT IN LINE. 1 September 2026. ----
+
+        # ---- HIS BOOK IS NOT THE BOT'S BOOK. 1 September 2026. ----
         #
-        #     "another thing dhan & bot is not inline. i had caplinpoint
-        #      stock but bot does'nt know that still"
+        #     "bot doesnot confuse with my trades incase i trade in vtl,
+        #      bot can also trade if all rules satisfies"
         #
-        # Measured on the live snapshot as he said it:
+        # For a few hours `held` was widened with his own Dhan holdings,
+        # read from his CAPLIPOINT message as "do not buy on top of me".
+        # He meant the two books must not be CONFUSED -- a reporting
+        # problem, answered by the two tables on the Trade tab and the
+        # three buckets in core/broker_sync.py, not by refusing trades.
         #
-        #     his at Dhan     CAPLIPOINT, SSWL, INTELLECT, MARINE, ...
-        #     ranked to BUY   CAPLIPOINT, SSWL, DYCL, ENGINERSIN, ...
-        #
-        # CAPLIPOINT and SSWL were his own positions AND live buy
-        # candidates at the same moment. Nothing was bought on top of
-        # them only because the book happened to be full -- luck, not a
-        # guard. `held` above is engine.open_positions, the BOT'S OWN
-        # trades and nothing else, so a stock he opened himself was
-        # invisible to routing.
-        #
-        # IT WAS NEVER A DATA PROBLEM. core/broker_sync.py prints
-        # "[BOOK] CAPLIPOINT: 50 at Dhan, opened outside the bot" every
-        # cycle and build_book() puts it on the screen. The reading was
-        # there, correct, and displayed -- it just never reached the
-        # DECISION, the same shape as core/ranker.py sitting unwired
-        # through 3,541 green tests.
-        #
-        # NOT an adoption and NOT a block: the bot still will not stop,
-        # trail or exit anything he opened. This only stops it BUYING a
-        # stock he is already in, which is what "no pyramiding" has
-        # always meant for its own positions.
-        held |= self._symbols_at_broker()
+        # `held` is the BOT'S book and nothing else.
 
         blocked = []
         try:
@@ -4554,17 +4538,6 @@ class DashboardState:
                 "note": "" if out else
                         "nothing meets the bar right now -- a reason, "
                         "movement behind it, and a clear call"}
-
-    def _symbols_at_broker(self):
-        """What he holds at Dhan. The ENGINE owns this -- see
-        Engine.symbols_at_broker() for why it lives there and not here.
-        Kept as a one-line delegate so the ranker and main.py's
-        auto_entry call can never get different answers."""
-        try:
-            return self.engine.symbols_at_broker()
-        except Exception as exc:                           # noqa: BLE001
-            diagnostic(f"[RANK] Could not read holdings from Dhan: {exc}")
-            return set()
 
     def build_book(self, open_positions):
         """EVERY position you hold, wherever the order came from.

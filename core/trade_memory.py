@@ -43,11 +43,29 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 
 from core.db import resolve_database_url
-from core.logger import warn, diagnostic
+from core.logger import warn, diagnostic, decision
 
 
 def _utcnow():
     return datetime.now(timezone.utc)
+
+def _as_datetime(value):
+    """A datetime, whatever shape it arrived in.
+
+    The engine hands real datetimes. data/session_state.json hands ISO
+    strings back for anything carried across a restart -- and on MTF
+    the bot carries positions overnight by design, so this is the
+    normal case, not the edge one.
+    """
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+
 
 
 class TradeMemory:
@@ -111,14 +129,29 @@ class TradeMemory:
             Column("had_reason", Integer, index=True),     # 1/0, the headline
             Column("reason_summary", String(160)),         # human-readable
             Column("recorded_at", DateTime(timezone=True), default=_utcnow),
-            # One row per symbol per direction per day -- matches the
-            # engine's own one-attempt-per-day rule, so a re-run or a
-            # restart can't double-count a trade into the statistics.
+            # ---- ONE ROW PER STOCK PER DAY LOST HALF A SESSION ----
+            #      1 September 2026.
+            #
+            # This said "matches the engine's own one-attempt-per-day
+            # rule". The engine has no such rule: on 1 September it
+            # bought MARINE at 11:08, sold it at 11:29 and bought it
+            # again at 11:30. Two trades, and the database refused the
+            # second -- not the code guard, THIS, at the storage layer,
+            # raising IntegrityError into an `except: return False`.
+            # The report card showed 2 trades out of 4 and said nothing.
+            #
+            # ENTRY TIME is what separates them. Two round trips have
+            # different ones; the same trade re-recorded after a
+            # restart has the same one, so the double-count this was
+            # written to prevent is still prevented. An adopted broker
+            # position has no entry time at all and is still guarded by
+            # the price check in record().
             UniqueConstraint("symbol", "direction", "trade_date",
-                             name="uq_trade_memory"),
+                             "entry_time", name="uq_trade_memory"),
         )
         self.metadata.create_all(self.engine)
         self._add_missing_columns()
+        self._widen_the_unique_constraint()
 
     # ----------------------------------------------------------
 
@@ -136,6 +169,111 @@ class TradeMemory:
         "had_reason": "INTEGER",
         "reason_summary": "TEXT",
     }
+
+    def _widen_the_unique_constraint(self):
+        """Rebuild a table still carrying the old one-row-per-day rule.
+
+        ---- IT DROPPED HALF A SESSION. 1 September 2026. ----
+
+        UNIQUE(symbol, direction, trade_date) refused the second trade
+        in a stock on the same day. The bot did exactly that twice on
+        1 September (MARINE and VTL), so the report card showed two
+        trades out of four and logged nothing, because record() catches
+        IntegrityError and returns False.
+
+        SQLite cannot ALTER a constraint, so the table is rebuilt. It
+        is COPIED, never dropped-and-recreated: a bookkeeping change
+        must not be able to lose 143 real trades. A .backup file is
+        written first, and if anything fails the original is left
+        exactly as it was.
+
+        Idempotent and silent once done -- it looks at the constraint,
+        not at a version number.
+        """
+        import shutil
+        from datetime import datetime as _dt
+
+        if not self.url.startswith("sqlite"):
+            return
+        path = self.url.replace("sqlite:///", "", 1)
+        if not path or path == ":memory:" or not os.path.exists(path):
+            return
+        try:
+            with self.engine.begin() as conn:
+                sql = conn.exec_driver_sql(
+                    "select sql from sqlite_master where type='table' "
+                    "and name='trade_memory'").scalar()
+            # Match the CONSTRAINT text itself. An earlier version of
+            # this check looked for "entry_time" near the constraint and
+            # found the COLUMN of that name instead, so it decided the
+            # table was already migrated and returned -- silently, which
+            # is the same failure shape as the bug it is fixing.
+            if not sql:
+                return
+            if "UNIQUE (symbol, direction, trade_date, entry_time)" in sql:
+                return                      # already wide
+            if "UNIQUE (symbol, direction, trade_date)" not in sql:
+                return                      # some other shape; leave it
+
+            stamp = _dt.now().strftime("%Y%m%d-%H%M%S")
+            backup = f"{path}.backup-{stamp}"
+            shutil.copy2(path, backup)
+
+            # ---- THE RENAME BRINGS THE INDEXES WITH IT. ----
+            #
+            # SQLite moves a table's indexes when the table is renamed
+            # and KEEPS THEIR NAMES, so create_all() then fails on
+            # "index ix_trade_memory_entry_hour already exists" -- after
+            # the rename, with the real table already out of the way.
+            # The first version of this migration hit exactly that and
+            # left trade_memory empty while reporting "the database is
+            # untouched". Drop them first, and put the table back if
+            # anything goes wrong.
+            with self.engine.begin() as conn:
+                before = conn.exec_driver_sql(
+                    "select count(*) from trade_memory").scalar()
+                cols = [r[1] for r in conn.exec_driver_sql(
+                    "pragma table_info(trade_memory)")]
+                idx = [r[0] for r in conn.exec_driver_sql(
+                    "select name from sqlite_master where type='index' "
+                    "and tbl_name='trade_memory' and name not like "
+                    "'sqlite_autoindex%'")]
+                for name in idx:
+                    conn.exec_driver_sql(f'drop index if exists "{name}"')
+                conn.exec_driver_sql(
+                    "alter table trade_memory rename to trade_memory_old")
+
+            try:
+                self.metadata.create_all(self.engine)
+                names = ", ".join(f'"{c}"' for c in cols)
+                with self.engine.begin() as conn:
+                    conn.exec_driver_sql(
+                        f"insert into trade_memory ({names}) "
+                        f"select {names} from trade_memory_old")
+                    after = conn.exec_driver_sql(
+                        "select count(*) from trade_memory").scalar()
+                    if after != before:
+                        raise RuntimeError(
+                            f"copied {after} of {before} trades")
+                    conn.exec_driver_sql("drop table trade_memory_old")
+            except Exception:
+                # PUT IT BACK. Losing the trade history to a bookkeeping
+                # change is far worse than keeping the old constraint.
+                with self.engine.begin() as conn:
+                    conn.exec_driver_sql("drop table if exists trade_memory")
+                    conn.exec_driver_sql(
+                        "alter table trade_memory_old rename to trade_memory")
+                raise
+
+            decision(f"[LEARN] Trade memory rebuilt: a stock can be traded "
+                     f"more than once a day now and every trade is kept. "
+                     f"{before} past trades carried over, backup at "
+                     f"{os.path.basename(backup)}.")
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[LEARN] Could not widen the trade-memory constraint "
+                 f"({exc}). Re-entries into the same stock will still be "
+                 f"dropped from the report. The trades are intact -- the "
+                 f"table was put back and a backup was written first.")
 
     def _add_missing_columns(self):
         """Idempotent, runs at every startup, never raises.
@@ -173,7 +311,17 @@ class TradeMemory:
         try:
             symbol = closed_position.get("symbol")
             direction = closed_position.get("direction")
-            entry_time = closed_position.get("entry_time")
+            # ---- A CARRIED TRADE CAME BACK AS TEXT. 1 Sept 2026. ----
+            #
+            # data/session_state.json is JSON, so a position that
+            # survives a restart returns its times as ISO STRINGS. Every
+            # isinstance(..., datetime) test below then failed and the
+            # trade was filed with entry_time None -- which is the
+            # signature this file uses to mean "adopted, the bot never
+            # saw the fill". A trade the bot opened itself and carried
+            # is not that, and must not be treated as that.
+            entry_time = _as_datetime(closed_position.get("entry_time"))
+            exit_time = _as_datetime(closed_position.get("exit_time"))
             if not symbol or not direction:
                 return False
             trade_date = (entry_time.date().isoformat()
@@ -187,8 +335,7 @@ class TradeMemory:
                 direction=direction,
                 trade_date=trade_date,
                 entry_time=entry_time if isinstance(entry_time, datetime) else None,
-                exit_time=closed_position.get("exit_time")
-                if isinstance(closed_position.get("exit_time"), datetime) else None,
+                exit_time=exit_time,
                 entry_price=closed_position.get("entry_price"),
                 exit_price=closed_position.get("exit_price"),
                 qty=closed_position.get("qty"),
@@ -210,12 +357,37 @@ class TradeMemory:
                 recorded_at=_utcnow(),
             )
             with self.engine.begin() as conn:
+                # ---- IT KEPT ONE TRADE PER STOCK PER DAY. 1 Sep ----
+                #
+                #     "for today no issue but from tomorrow it must
+                #      report"                      -- the operator
+                #
+                # This guard exists so a restart cannot double-count a
+                # trade, and it did that job. It also threw away every
+                # RE-ENTRY. On 1 September the bot traded MARINE twice
+                # and VTL twice; the report card showed two trades out
+                # of four, silently, with no error logged:
+                #
+                #   MARINE  11:08 -> 11:29  +177   stored
+                #   MARINE  11:30 -> 14:58   +98   DROPPED as a duplicate
+                #   VTL     14:38 -> 15:02   -32   stored
+                #   VTL     15:02 -> 15:17   +24   DROPPED as a duplicate
+                #
+                # Re-entering the same name the same day is ordinary --
+                # it happened twice in one session -- so the day is not
+                # a fine enough key. The ENTRY TIME is: two round trips
+                # have different ones, and the same trade re-recorded
+                # after a restart has the same one. Where there is no
+                # entry time (an adopted broker position) the old
+                # day-level guard still applies, which is the case it
+                # was written for.
+                where = ((self.trades.c.symbol == symbol)
+                         & (self.trades.c.direction == direction)
+                         & (self.trades.c.trade_date == trade_date))
+                if entry_time is not None:
+                    where = where & (self.trades.c.entry_time == entry_time)
                 existing = conn.execute(
-                    select(self.trades.c.id).where(
-                        (self.trades.c.symbol == symbol)
-                        & (self.trades.c.direction == direction)
-                        & (self.trades.c.trade_date == trade_date)
-                    ).limit(1)
+                    select(self.trades.c.id).where(where).limit(1)
                 ).first()
                 if existing is not None:
                     return False

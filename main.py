@@ -1980,18 +1980,12 @@ def main():
                             now=datetime.now(),
                             security_id_of=master_loader.security_id,
                             held=set(engine.open_positions),
-                            # HIS OWN DHAN POSITIONS, KEPT SEPARATE.
-                            # 1 Sept 2026 -- CAPLIPOINT and SSWL were
-                            # his AND live buy candidates at once.
-                            #
-                            # NOT folded into `held`: that set is also
-                            # the SEAT COUNT (len(held) >= max_positions),
-                            # and his seven Dhan holdings against a cap
-                            # of three would read "book full" forever --
-                            # a bot that never trades again, which is
-                            # far worse than the fault being fixed.
-                            # See Engine.symbols_at_broker().
-                            owned_elsewhere=engine.symbols_at_broker(),
+                            # One stock, one trade a day -- his call
+                            # after VTL was sold and bought back two
+                            # seconds later. The BOT'S own book only:
+                            # what he trades himself is a separate book
+                            # and never blocks the bot.
+                            traded_today=engine.symbols_traded_today(),
                             # ---- CASH, NOT THE NUMBER 3. 8 Aug 2026. ----
                             # The engine sizes the book from the balance
                             # (core/capital.py) and falls back to
@@ -2499,6 +2493,26 @@ def _hold_dashboard_for_review(dashboard_state):
         where = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}/"
     except Exception:                                      # noqa: BLE001
         where = "the dashboard"
+
+    # ---- THE REPORT CARD, WITHOUT BEING ASKED. 1 Sept 2026. ----
+    #
+    #     "i want bot report card after market closed time"
+    #
+    # tools/day_report.py already answers it and he had to remember to
+    # run it. Printed here instead, on the same console he is already
+    # watching, the moment trading ends. Never raises: a report that
+    # fails must not stop the dashboard holding open behind it.
+    # NOT day_report.main() -- that one calls argparse, which would
+    # read main.py's OWN command line and exit on anything it does not
+    # recognise. The two functions under it take the date directly.
+    try:
+        from datetime import datetime as _dt
+        from tools.day_report import render as _render, rows_for as _rows_for
+        _today = _dt.now().strftime("%Y-%m-%d")
+        decision("\n" + _render(_today, _rows_for(_today)))
+    except Exception as exc:                               # noqa: BLE001
+        warn(f"[REVIEW] Could not print the day's report ({exc}). "
+             f"Run it by hand: py tools/day_report.py")
 
     decision(
         f"[REVIEW] Trading is finished. The dashboard stays up at {where} "

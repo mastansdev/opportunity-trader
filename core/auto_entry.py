@@ -650,7 +650,7 @@ def _alert_lines(row, plan):
 
 
 def refuse_reason(row, engine, now=None, held=None, max_positions=None,
-                  owned_elsewhere=None):
+                  traded_today=None):
     """Why this pick must NOT be taken, or None if it may be.
 
     Returns a plain sentence, because every refusal is shown to him.
@@ -678,24 +678,42 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None,
     if symbol in held:
         return "already holding it -- no pyramiding"
 
-    # ---- HIS OWN POSITIONS COUNT AS HELD. 1 September 2026. ----
+    # ---- HIS BOOK IS NOT THE BOT'S BOOK. 1 September 2026. ----
     #
-    #     "another thing dhan & bot is not inline. i had caplinpoint
-    #      stock but bot does'nt know that still"
+    #     "bot doesnot confuse with my trades incase i trade in vtl ,
+    #      bot can also trade if all rules satisfies"
     #
-    # CAPLIPOINT and SSWL were his own Dhan positions AND live buy
-    # candidates at the same moment. `held` above is the BOT'S OWN book,
-    # so nothing here knew he already owned them.
+    # A refusal lived here for a few hours: a stock he held at Dhan was
+    # refused to the bot. It came from his CAPLIPOINT message earlier
+    # the same day, and I read that as "do not buy on top of me". He
+    # meant the opposite -- the two books must not be CONFUSED with each
+    # other, which is a reporting problem, not a trading one. They are
+    # kept apart where that belongs: two tables on the Trade tab, and
+    # core/broker_sync.py's three buckets behind them.
     #
-    # A SEPARATE SET, NOT MERGED INTO held, and the reason matters:
-    # len(held) is also the SEAT COUNT below. Folding his seven holdings
-    # in against a cap of three would read "book full" every cycle for
-    # the rest of time -- a bot that never trades again. His stock
-    # occupies no seat of the bot's; it only answers "do I already own
-    # this one".
-    if symbol in {str(s).upper() for s in (owned_elsewhere or [])}:
-        return ("you already hold it at Dhan -- the bot will not buy "
-                "on top of your own position")
+    # So his position blocks nothing. The bot's own book still does --
+    # "already holding it" above -- because that is the bot pyramiding
+    # into itself, which is a different thing entirely.
+
+    # ---- ONE STOCK, ONE TRADE A DAY. 1 September 2026. ----
+    #
+    #     "done one stock one trade per trade by bot."
+    #
+    # The exit rule and the ranker fought over the same name and both
+    # won, in turn: VTL was sold at 15:02:16 because its buyers had
+    # stopped and bought back at 15:02:18 because it was still the best
+    # stock on the board. Two seconds, two lots of brokerage, and VTL's
+    # whole loss for the day. MARINE did the same 98 seconds apart.
+    #
+    # Neither rule was wrong. They were answering different questions
+    # about the same stock in the same second, and nothing above them
+    # said which one settles it. This does.
+    #
+    # A MISS IS THE PRICE. If the stock runs again after the bot is out,
+    # it is missed. He has weighed that against paying the spread twice
+    # and chosen this. See Engine.symbols_traded_today().
+    if symbol in {str(s).upper() for s in (traded_today or [])}:
+        return ("already traded today -- one stock, one trade a day")
 
     # ==========================================================
     # SUPPLY IS NOT DEMAND -- IN THE LIVE PATH.  9 August 2026.
@@ -871,7 +889,7 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None,
 
 
 def take(rows, engine, now=None, security_id_of=None, held=None,
-         owned_elsewhere=None,
+         traded_today=None,
          max_positions=None, alert=None, enter=None):
     """Route the ranker's picks into the order path.
 
@@ -971,7 +989,7 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
         symbol = str(row.get("symbol") or "").upper()
         why = refuse_reason(row, engine, now=now, held=held,
                             max_positions=seats,
-                            owned_elsewhere=owned_elsewhere)
+                            traded_today=traded_today)
         if why:
             _journal_pick(engine, row, False, why)
             out.append({"symbol": symbol, "taken": False, "why": why,

@@ -145,7 +145,19 @@ class ReplayEngine:
         self.alerts = []
 
     # auto_entry asks the engine's risk layer for the last word.
-    def entry_blocked_reason(self, symbol, direction):
+    def entry_blocked_reason(self, symbol, direction, at_time=None):
+        # ---- THE STUB WENT STALE AND ATE THE REPLAY. 1 Sep 2026. ----
+        #
+        # The real method gained `at_time` on 12 August so the whole
+        # entry decision reads ONE clock. This stand-in never did, so
+        # every call raised TypeError -- and core/auto_entry.py fails
+        # CLOSED on that by design ("a safety gate that fails open is
+        # worse than no gate"). The replay therefore refused 121 trades
+        # with "the risk check itself failed" and reported NO ORDERS for
+        # a day the live bot took seven.
+        #
+        # A stand-in that drifts from the thing it stands in for does
+        # not report a quiet day. It reports a wrong one.
         return None
 
     # A full book asks to rotate. In the replay we never rotate -- the
