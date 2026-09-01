@@ -191,6 +191,30 @@ STEPS = [
      "on 31 July this found six wrong ids. One would have bought a "
      "different company."),
 
+    # ---- HE SHOULD NOT HAVE TO REMEMBER THIS. 31 August 2026. ----
+    #
+    #     "thats not my job to spoon feed you boss."
+    #
+    # tools/dry_run_live_path.py walks all 19 stages of the live path
+    # with a fake broker and reports each junction CONNECTED or BROKEN.
+    # It is the only check that asks whether the PARTS ARE JOINED,
+    # which is the shape of every fault found on 31 August: the exit
+    # that never checked its order, the refusals that lost the stock
+    # name, the guard that said "recovered" and stayed off. Five
+    # thousand passing tests missed all of them, because each one
+    # tested a part.
+    #
+    # It existed and was run when somebody thought to. Now it runs
+    # after every close, so a broken junction is a line in tonight's
+    # output instead of a surprise during tomorrow's session.
+    #
+    # LAST, and read-only. It places no orders and touches no store.
+    ("junctions", "Does the live path still join up end to end?",
+     ["tools/dry_run_live_path.py"],
+     "19 stages, fake broker, no orders. Reports BROKEN where a stage "
+     "no longer hands its output to the next one -- the one failure a "
+     "green test suite cannot see."),
+
     # ---- IT KNEW IT WAS STALE AND NOBODY ASKED. 31 August 2026. ----
     #
     # core/index_members.py has MAX_AGE_DAYS = 7 and an is_stale() that
@@ -250,29 +274,7 @@ STEPS = [
      "mode where everything looks fine because the numbers keep "
      "growing."),
 
-    # ---- HE SHOULD NOT HAVE TO REMEMBER THIS. 31 August 2026. ----
-    #
-    #     "thats not my job to spoon feed you boss."
-    #
-    # tools/dry_run_live_path.py walks all 19 stages of the live path
-    # with a fake broker and reports each junction CONNECTED or BROKEN.
-    # It is the only check that asks whether the PARTS ARE JOINED,
-    # which is the shape of every fault found on 31 August: the exit
-    # that never checked its order, the refusals that lost the stock
-    # name, the guard that said "recovered" and stayed off. Five
-    # thousand passing tests missed all of them, because each one
-    # tested a part.
-    #
-    # It existed and was run when somebody thought to. Now it runs
-    # after every close, so a broken junction is a line in tonight's
-    # output instead of a surprise during tomorrow's session.
-    #
-    # LAST, and read-only. It places no orders and touches no store.
-    ("junctions", "Does the live path still join up end to end?",
-     ["tools/dry_run_live_path.py"],
-     "19 stages, fake broker, no orders. Reports BROKEN where a stage "
-     "no longer hands its output to the next one -- the one failure a "
-     "green test suite cannot see."),
+
 ]
 
 MORNING_ONLY = [

@@ -279,16 +279,66 @@ def main():
         # was removed. A pre-flight that describes yesterday's bot is
         # worse than one that says nothing, because it is read at 08:45
         # and believed.
+        # ---- SHOW TODAY'S RULES, NOT JULY'S. 1 September 2026. ----
+        #
+        #     "why either bot or user needs to see the old methods under
+        #      new working mechansim ... bot needs to show the current
+        #      set of rules, thats plain simple right"
+        #
+        # This printed a WARNING every morning saying the trailing stop
+        # "cost Rs 22,626 over 3 sessions". That measurement is real and
+        # it is about a bot that no longer exists:
+        #
+        #   * 27-29 July, on the 35 STRUCTURAL breakout entries
+        #   * that lane is switched off -- engine.breakout_armed is
+        #     False and _try_structural_entry returns immediately
+        #   * it was FIRST-COME: it bought whatever broke out first as
+        #     ticks arrived, with no score and no comparison. The
+        #     current path sorts by score and takes rank 1
+        #   * no reason gate, different sizing, different exits
+        #
+        # So it warned about a rule, on a lane, that the bot does not
+        # run, using a number measured before every part of the entry
+        # changed. Three lines above, this file's own comment says a
+        # pre-flight that describes yesterday's bot is worse than one
+        # that says nothing, "because it is read at 08:45 and believed".
+        #
+        # It now lists the ways a position can actually end today, read
+        # from the settings rather than recited. When the exits change
+        # again, this line changes with them.
+        # ---- AND I PUT THE WRONG STOP IN THIS LINE. 1 Sept 2026. ----
+        #
+        # The first version of this said "stop 0.8x ATR from entry",
+        # read straight off ATR_STOP_MULTIPLIER. He read it and said
+        # 0.8 was far too narrow and had been changed long ago.
+        #
+        # He was right. That branch is an `elif` under
+        # VOLATILITY_SCALED_STOP, which is True, so it cannot be
+        # reached -- its own comment says it was demoted because "0.8 x
+        # a one-minute ATR sits under the 1% floor on every stock".
+        #
+        # The live stop is 2.0 x the stock's own DAILY ATR, floored and
+        # capped. On real names: ASHOKA 5.53%, DIFFNKG 6.00% (capped).
+        #
+        # So the same mistake this whole check was written to fix --
+        # printing a number that describes code the bot does not run --
+        # went straight back in, in the fix. It is read off the live
+        # branch now, in the same order the engine chooses it.
+        exits = ["buying dries up (order flow)"]
         if config.ENABLE_BOT_TRAILING_STOP:
-            check("bot exit rule", WARN,
-                  f"TRAILING stop is ON ({config.ATR_TRAIL_MULTIPLIER}x ATR) "
-                  f"-- measured at a median 1.06% from the peak, which cost "
-                  f"Rs 22,626 over 3 sessions")
+            exits.append(f"trailing stop {config.ATR_TRAIL_MULTIPLIER}x ATR")
+        if config.FIXED_STOP_PCT:
+            exits.append(f"stop {float(config.FIXED_STOP_PCT):.1f}% flat")
+        elif config.VOLATILITY_SCALED_STOP:
+            exits.append(f"stop {config.DAILY_ATR_STOP_MULT}x the stock's "
+                         f"own DAILY ATR")
         else:
-            check("bot exit rule", OK,
-                  f"hard stop {config.HARD_STOP_FROM_ENTRY_PCT * 100:.1f}% "
-                  f"below entry, fixed for the life of the trade. No trail, "
-                  f"no partial, no target")
+            exits.append(f"stop {config.HARD_STOP_FROM_ENTRY_PCT * 100:.1f}% "
+                         f"from entry")
+        if config.FORCE_SQUARE_OFF_AT_CLOSE:
+            exits.append(f"square-off at {config.SQUARE_OFF_TIME}")
+        check("how a position ends", OK, " / ".join(exits)
+              + "  (no profit target on the bot's own entries)")
         check("partial exit", OK,
               "OFF" if not config.ENABLE_PARTIAL_EXIT else
               f"ON -- books {config.PARTIAL_EXIT_FRACTION * 100:.0f}% at "
