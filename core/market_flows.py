@@ -363,22 +363,49 @@ def from_telegram(telegram, hours=FLOW_LOOKBACK_HOURS, limit=FLOW_SCAN_ROWS):
             break
 
     if typed is None:
+        # No typed figure in the window. The picture is all there is,
+        # and it is already marked via="image" so the panel can say so.
         return photo
-    if photo is not None:
-        # Both are here. Say so when they disagree; do NOT try to pick
-        # a winner on size, which would be inventing a bound nobody
-        # measured. The typed one is already the one being returned.
-        for field in ("fii_cr", "dii_cr"):
-            a, b = typed.get(field), photo.get(field)
-            if a is None or b is None:
-                continue
-            if abs(a - b) > 1.0:
-                typed["disagrees_with_image"] = True
-                warn(f"[FLOWS] {field} differs between the two sources: "
-                     f"{typed['source']} says {a:,.2f}, "
-                     f"{photo['source']} (read off an image) says "
-                     f"{b:,.2f}. Using the typed one.")
+
+    # ---- THE COMPARISON WAS MY IDEA AND IT WAS WRONG. 1 Sep 2026 ----
+    #
+    #     "FII/DII data is not uploaded by day trader channel till now.
+    #      then how bot see that?"
+    #
+    # On 31 August I made this warn whenever the typed figure and the
+    # OCR'd card disagreed, to catch the digit the OCR had inserted.
+    # It fired all morning on 1 September and he asked the obvious
+    # question: the Telugu channel had not posted today's card at all.
+    #
+    # It had not. The window reaches back 96 hours, so this was
+    # comparing News Pulse's figure for the 31 August session against a
+    # Telugu card POSTED on 31 August that reports the 29 August
+    # session. Two different sessions, called a disagreement.
+    #
+    # And it cannot be fixed by comparing dates, which was my next
+    # attempt: `as_of` is when the message was POSTED, not the session
+    # it describes. News Pulse posts in the evening about that day.
+    # The Telugu card arrives next morning about the day before. Both
+    # carry the same date and mean different things, and nothing in
+    # either message says which session it is.
+    #
+    # So the comparison goes. Typed text wins, which was always the
+    # rule and is the part that works; the picture stays as the
+    # fallback for when no typed figure exists. A check that cannot
+    # tell a stale card from a wrong one is not a check.
     return typed
+
+
+# Said once per key, for the life of the process. A warning repeated
+# every second is one nobody reads, which is the same as not warning.
+_SAID = set()
+
+
+def _say_once(key, message):
+    if key in _SAID:
+        return
+    _SAID.add(key)
+    warn(message)
 
 
 def _flow_from(row, body, via):

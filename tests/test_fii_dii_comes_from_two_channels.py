@@ -125,15 +125,36 @@ def test_typed_beats_photographed():
     assert got["via"] == "text"
 
 
-def test_the_disagreement_is_not_swallowed():
-    """Silently preferring one source would hide a broken OCR for as
-    long as it kept happening."""
+def test_it_does_not_cry_wolf_across_two_sessions():
+    """---- THE CHECK I ADDED, AND REMOVED. 1 September 2026. ----
+
+    This asserted that a difference between the typed figure and the
+    OCR'd card raised a flag. It fired all morning on 1 September and
+    he asked the obvious question: the Telugu channel had not posted
+    today's card at all.
+
+    It had not. The window reaches back 96 hours, so it was comparing
+    News Pulse's figure for the 31 August session against a Telugu
+    card POSTED on 31 August that reports the 29 August session.
+
+    And it cannot be fixed by comparing dates: `as_of` is when a
+    message was POSTED, not the session it describes. News Pulse posts
+    in the evening about that day; the Telugu card arrives next
+    morning about the day before. Both carry the same date and mean
+    different things.
+
+    A check that cannot tell a stale card from a wrong one is not a
+    check. What survives is the part that works and is asserted above:
+    typed text wins, the picture is the fallback."""
     got = from_telegram(_Feed([
         _row("Day Trader Telugu", "2026-08-31T02:29:08+00:00",
              ocr=TELUGU_BAD_OCR),
         _row("News Pulse", "2026-08-30T14:12:50+00:00", text=NEWS_PULSE),
     ]))
-    assert got.get("disagrees_with_image") is True
+    assert got["fii_cr"] == -5039.80, "the typed figure must still win"
+    assert "disagrees_with_image" not in got, (
+        "the false-alarm flag is back -- it fires whenever the two "
+        "channels describe different sessions, which is most mornings")
 
 
 def test_the_picture_is_used_when_it_is_all_there_is():
