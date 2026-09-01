@@ -363,7 +363,8 @@ def main():
               "blanket -- closes near EITHER limit, including winners")
         check("daily limits", OK,
               f"stop new entries at -Rs {config.DAILY_MAX_LOSS_RS:,.0f} "
-              f"or +Rs {config.DAILY_PROFIT_TARGET_RS:,.0f} "
+              f"(the +Rs {config.DAILY_PROFIT_TARGET_RS:,.0f} goal is "
+              f"announced only -- it no longer stops entries) "
               f"(about {config.DAILY_MAX_LOSS_RS / (config.MTF_MARGIN_PER_POSITION_RS * 3.8 * config.HARD_STOP_FROM_ENTRY_PCT):.0f} "
               f"failed trades)")
         check("staleness", OK,

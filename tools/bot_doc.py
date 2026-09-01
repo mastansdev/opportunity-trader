@@ -130,7 +130,11 @@ def build():
     add(f"| A stop-out therefore costs | ≈₹{stop_cost:,.0f} | derived |")
     add(f"| Stop for the day after losing | ₹{c.DAILY_MAX_LOSS_RS:,.0f} "
         f"(≈{stops_to_halt:.0f} stop-outs) | `config.DAILY_MAX_LOSS_RS` |")
-    add(f"| Stop for the day after making | ₹{c.DAILY_PROFIT_TARGET_RS:,.0f} "
+    # NOT a stop since 1 Sep 2026 -- it is announced and decides
+    # nothing. "there is no fixed time ,price or fixed limitations to
+    # follow. this is stock market not our own shop to do as we want."
+    add(f"| Day's goal (announced, does NOT stop trading) "
+        f"| ₹{c.DAILY_PROFIT_TARGET_RS:,.0f} "
         f"| `config.DAILY_PROFIT_TARGET_RS` |")
     add(f"| Positions open at once | {r.MAX_OPEN_POSITIONS} "
         f"| `core/rules.py` (engine sizes from the real balance first) |")

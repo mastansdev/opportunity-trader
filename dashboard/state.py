@@ -2776,6 +2776,36 @@ class DashboardState:
             if name:
                 held.add(str(name).upper())
 
+        # ---- DHAN AND THE BOT WERE NOT IN LINE. 1 September 2026. ----
+        #
+        #     "another thing dhan & bot is not inline. i had caplinpoint
+        #      stock but bot does'nt know that still"
+        #
+        # Measured on the live snapshot as he said it:
+        #
+        #     his at Dhan     CAPLIPOINT, SSWL, INTELLECT, MARINE, ...
+        #     ranked to BUY   CAPLIPOINT, SSWL, DYCL, ENGINERSIN, ...
+        #
+        # CAPLIPOINT and SSWL were his own positions AND live buy
+        # candidates at the same moment. Nothing was bought on top of
+        # them only because the book happened to be full -- luck, not a
+        # guard. `held` above is engine.open_positions, the BOT'S OWN
+        # trades and nothing else, so a stock he opened himself was
+        # invisible to routing.
+        #
+        # IT WAS NEVER A DATA PROBLEM. core/broker_sync.py prints
+        # "[BOOK] CAPLIPOINT: 50 at Dhan, opened outside the bot" every
+        # cycle and build_book() puts it on the screen. The reading was
+        # there, correct, and displayed -- it just never reached the
+        # DECISION, the same shape as core/ranker.py sitting unwired
+        # through 3,541 green tests.
+        #
+        # NOT an adoption and NOT a block: the bot still will not stop,
+        # trail or exit anything he opened. This only stops it BUYING a
+        # stock he is already in, which is what "no pyramiding" has
+        # always meant for its own positions.
+        held |= self._symbols_at_broker()
+
         blocked = []
         try:
             blocked = list(self.engine.results_gate.blocked_symbols())
@@ -2864,7 +2894,8 @@ class DashboardState:
         _adv = {}
         try:
             import json as _json
-            with open(os.path.join("data", "liquidity.json"),
+            import os as _os
+            with open(_os.path.join("data", "liquidity.json"),
                       encoding="utf-8") as _fh:
                 _adv = (_json.load(_fh) or {}).get("adv_cr") or {}
         except Exception:                                  # noqa: BLE001
@@ -2876,15 +2907,20 @@ class DashboardState:
                 continue
             ratio = row.get("vol_ratio") or row.get("volume_ratio")                 or row.get("volume_x")
             if ratio is None:
-                volume, price, adv = (row.get("volume"), row.get("ltp"),
-                                      _adv.get(key))
-                if volume and price and adv:
+                # NOT `adv` -- that name holds the adv_of CALLABLE that
+                # is handed to rank() thirty lines below, and binding a
+                # float to it here took ranking down completely with
+                # "'float' object is not callable" the moment movers had
+                # any rows in it. 1 September 2026.
+                volume, price, _a = (row.get("volume"), row.get("ltp"),
+                                     _adv.get(key))
+                if volume and price and _a:
                     try:
                         traded_cr = float(volume) * float(price) / 1e7
                         from core.volume_pace import pace_ratio
-                        ratio = pace_ratio(traded_cr, float(adv), key, _now)
+                        ratio = pace_ratio(traded_cr, float(_a), key, _now)
                         if ratio is None:
-                            ratio = traded_cr / float(adv)
+                            ratio = traded_cr / float(_a)
                     except Exception:                      # noqa: BLE001
                         ratio = None
             if ratio:
@@ -2913,7 +2949,14 @@ class DashboardState:
                        now=datetime.now(),
                        open_of=self.market_data.get_day_open)
         except Exception as exc:                           # noqa: BLE001
+            # THE MESSAGE ALONE WAS NOT ENOUGH. 1 September 2026.
+            # "'float' object is not callable" is true and useless -- it
+            # names no file and no line, and the whole ranker was down
+            # for a session while I guessed. The traceback goes to the
+            # quiet channel so the console keeps one line.
+            import traceback
             warn(f"[RANK] Ranking failed: {exc}")
+            diagnostic("[RANK] " + traceback.format_exc())
             return {"available": False, "note": str(exc)}
 
         # ---- HIS RULES DECIDE WHO SURVIVES. 8 August 2026. ----
@@ -4511,6 +4554,17 @@ class DashboardState:
                 "note": "" if out else
                         "nothing meets the bar right now -- a reason, "
                         "movement behind it, and a clear call"}
+
+    def _symbols_at_broker(self):
+        """What he holds at Dhan. The ENGINE owns this -- see
+        Engine.symbols_at_broker() for why it lives there and not here.
+        Kept as a one-line delegate so the ranker and main.py's
+        auto_entry call can never get different answers."""
+        try:
+            return self.engine.symbols_at_broker()
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[RANK] Could not read holdings from Dhan: {exc}")
+            return set()
 
     def build_book(self, open_positions):
         """EVERY position you hold, wherever the order came from.
@@ -6280,6 +6334,72 @@ class DashboardState:
             out.update(watchlist_builder.reporting_on(cutoff_day) or {})
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[RANK] Could not widen by watchlist: {exc}")
+
+        # ---- THE SURGE RULE COULD NOT FIRE. 1 September 2026. ----
+        #
+        #     "opportunity = news , govt order, volume surge, events"
+        #
+        # A volume surge counts as a reason since 31 August, and on 1
+        # September it had still never fired once. The last cause was
+        # circular and is here.
+        #
+        # This function is the SEED for the candidate pool -- state.py
+        # says so: movers starts as [] and _widen_by_reason fills it
+        # from this set. Everything here is a stock something was FILED
+        # or REPORTED about.
+        #
+        # So a stock whose only reason is its volume was never in the
+        # pool, never had its ratio computed, never got a surge reason,
+        # and was never a candidate. The rule was unreachable by
+        # construction. On 1 September DYCL sat at +9.97% on 32x its
+        # normal pace with an empty reason list, and GODREJAGRO at
+        # +6.98% on 89.6x.
+        #
+        # The surge names its own stocks now, from the same gainers
+        # rows the leaderboard is sliced from -- no new polling, and
+        # every gate downstream is untouched. This only gives the stock
+        # the chance to be looked at.
+        try:
+            if SURGE_IS_A_REASON:
+                for symbol, ratio in (self._surging_now() or {}).items():
+                    if ratio >= SURGE_REASON_MIN_RATIO:
+                        out.add(symbol)
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[RANK] Could not seed by volume surge: {exc}")
+        return out
+
+    def _surging_now(self):
+        """{SYMBOL: ratio} for every mover trading far above its own
+        normal pace by this minute.
+
+        Computed, not read off a field: nothing computes a volume ratio
+        before this point in the build, which is the mistake the first
+        version of the surge rule made.
+        """
+        out = {}
+        try:
+            import json as _json
+            import os as _os
+            from core.volume_pace import pace_ratio
+            with open(_os.path.join("data", "liquidity.json"),
+                      encoding="utf-8") as fh:
+                adv = (_json.load(fh) or {}).get("adv_cr") or {}
+        except Exception:                                  # noqa: BLE001
+            return out
+        now = datetime.now().strftime("%H:%M")
+        for row in (self._compute_gl_rows() or []):
+            symbol = str(row.get("symbol") or "").upper()
+            volume, price, a = row.get("volume"), row.get("ltp"), adv.get(symbol)
+            if not (symbol and volume and price and a):
+                continue
+            try:
+                traded_cr = float(volume) * float(price) / 1e7
+                ratio = pace_ratio(traded_cr, float(a), symbol, now)
+                if ratio is None:
+                    ratio = traded_cr / float(a)
+                out[symbol] = float(ratio)
+            except Exception:                              # noqa: BLE001
+                continue
         return out
 
     def _safe_watchlist(self):

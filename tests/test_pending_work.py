@@ -109,10 +109,30 @@ def test_a_position_the_bot_does_not_know_about_is_reported():
 
 
 def test_a_partial_fill_shows_as_a_quantity_difference():
+    """---- THE ROW GREW ON PURPOSE. 1 September 2026. ----
+
+    This asserted the whole dict, so it broke the day the row gained
+    the fields it needed to be DRAWN. He holds 50 CAPLIPOINT at Dhan
+    and the bot opened its own 34, which put the symbol in this bucket
+    -- and the Trade tab's "your trades" table was built from
+    only_at_broker alone, so his 50 vanished off the screen. The table
+    now reads this bucket too, and a bare quantity cannot be rendered
+    as a position: no entry price, no current price, no P&L.
+
+    Checked field by field so the next honest addition does not fail
+    here for no reason -- the quantities are what this test is about.
+    """
     got = compare({"TATASTEEL": {"qty": 50, "direction": "LONG"}},
                   [{"tradingSymbol": "TATASTEEL", "netQty": 30}])
-    assert got["quantity_differs"] == [
-        {"symbol": "TATASTEEL", "bot_qty": 50.0, "broker_qty": 30.0}]
+    rows = got["quantity_differs"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["symbol"] == "TATASTEEL"
+    assert row["bot_qty"] == 50.0
+    assert row["broker_qty"] == 30.0
+    # And it must be drawable, which is why the row grew at all.
+    for field in ("avg_price", "cmp", "pnl", "pnl_pct"):
+        assert field in row, f"{field} missing -- his row cannot be drawn"
 
 
 def test_a_short_is_compared_as_a_negative_quantity():

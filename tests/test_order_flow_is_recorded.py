@@ -257,18 +257,60 @@ def test_it_never_reaches_a_decision():
     decided it is in, on one session's evidence, and the measurement
     is owed.
 
-    Everywhere else the ban holds.
+    ---- WHAT THE BAN ACTUALLY IS. 1 September 2026. ----
+
+    This asserted the literal string "order_flow" appeared nowhere in
+    five files. That is not the contract and it broke on a COMMENT --
+    a note in core/engine.py explaining why the flow reading now
+    outranks the 0.25%-off-high price gate tripped it, while the code
+    it describes obeys the rule completely.
+
+    The contract is IMPORT, and engine.py states it itself:
+
+        "self.buying_check is a function handed in by main.py, never
+         imported here. That keeps this engine free of the flow store
+         (which records; it does not decide) and, more practically,
+         stops a unit test reading the real store and closing a live
+         position, which is what happened the first time this was
+         written."
+
+    So the engine decides WITH a flow reading and still cannot reach
+    the store: main.py injects still_buying after construction, and an
+    Engine built by a tool, a replay or a test gets None and behaves
+    exactly as it did before any of this existed. Two uses now, both
+    his call -- the exit rule on 31 August, and on 1 September the
+    entry gate, after 16 of the 41 stocks that gate refused in one
+    session turned out to have buyers still winning them.
+
+    THE ORIGINAL WARNING STILL STANDS AND IS STILL NOT SETTLED. The
+    surge-size version of this idea measured -Rs 30,664 over 1,049
+    stock-days. These variants are different and UNMEASURED beyond one
+    session each. The measurement is owed.
+
+    Everywhere else the ban holds -- and now it bans the thing that
+    would actually do the damage.
     """
+    import ast
+
     for name in ("core/engine.py", "core/ranker.py",
                  "core/position_plan.py", "core/select.py",
                  "core/why_moving.py"):
         path = ROOT / name
         if not path.exists():
             continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        assert "order_flow" not in text, (
-            f"{name} references order_flow. It records; it must not "
-            f"decide until the question has been measured.")
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        for node in ast.walk(tree):
+            hit = False
+            if isinstance(node, ast.Import):
+                hit = any("order_flow" in a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                hit = ("order_flow" in (node.module or "")
+                       or any("order_flow" in a.name for a in node.names))
+            assert not hit, (
+                f"{name}:{getattr(node, 'lineno', '?')} imports the flow "
+                f"store. It may DECIDE on a reading handed to it, but it "
+                f"must never reach the store itself -- a unit test would "
+                f"read the real one and close a live position.")
 
 
 # ---------------------------------------------- the book, when it is there

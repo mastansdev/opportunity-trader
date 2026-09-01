@@ -158,6 +158,56 @@ def plan(entry, side, day_low=None, day_high=None, atr=None,
                      else entry + distance, 2)
     else:
         stop = stop_for(entry, side, day_low, day_high, atr)
+
+        if stop is None and symbol:
+            # ---- IT REFUSED WITH THE ANSWER IN ITS HAND. 1 Sep 2026 ----
+            #
+            #     "first settle this one as it occured today might
+            #      return tomorrow right with same set of rules. how do
+            #      u expect different outcome while using same inputs?"
+            #                                        -- the operator
+            #
+            # stop_for() has exactly two ways to find a level for a
+            # long: today's low if it is BELOW the entry, or entry
+            # minus the ATR. dashboard/state.py's ranked path calls
+            # plan() WITHOUT atr -- it passes day_low, day_high,
+            # margin_pct and symbol and nothing else -- so on the live
+            # path the ATR branch is dead and the day low is the only
+            # candidate. Missing day low, or a stock sitting at its own
+            # low, and the whole trade was refused.
+            #
+            # On 1 September that cost NORTHARC at 49.2x its normal
+            # volume, ATHERENERG, TBZ and PTC. None of them was
+            # evaluated on its merits.
+            #
+            # THIS IS NOT AN INVENTED STOP. It is the same
+            # core/atr.scaled_stop_pct() the widening below already
+            # uses, the same one core/engine.py sizes every live stop
+            # from -- the stock's own daily range, bounded by the same
+            # floor and ceiling. The refusal below still stands for a
+            # stock with no daily range at all, which is the case the
+            # original comment was really about.
+            try:
+                from core.atr import scaled_stop_pct
+                from config import DAILY_ATR_STOP_MULT
+                # fallback_pct=None ON PURPOSE. The widening call
+                # below passes MIN_STOP_DISTANCE_PCT because it already
+                # HAS a stop and is only stretching it. Here there is no
+                # stop at all, so accepting a fallback would invent one
+                # for a stock with no daily range -- caught in test:
+                # an unknown symbol was handed a 0.75% stop and 3,333
+                # shares. None means "no range", and no range still
+                # refuses.
+                from_range = scaled_stop_pct(
+                    symbol, DAILY_ATR_STOP_MULT, MIN_STOP_DISTANCE_PCT,
+                    MAX_STOP_DISTANCE_PCT, None)
+            except Exception:                              # noqa: BLE001
+                from_range = None
+            if from_range:
+                gap = entry * float(from_range) / 100.0
+                stop = round(entry - gap if side == "BUY"
+                             else entry + gap, 2)
+
         if stop is None:
             # SAY SO. An invented stop is worse than none, because it
             # will be believed and it will be wrong at the worst moment.

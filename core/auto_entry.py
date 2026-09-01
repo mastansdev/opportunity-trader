@@ -649,7 +649,8 @@ def _alert_lines(row, plan):
     return lines
 
 
-def refuse_reason(row, engine, now=None, held=None, max_positions=None):
+def refuse_reason(row, engine, now=None, held=None, max_positions=None,
+                  owned_elsewhere=None):
     """Why this pick must NOT be taken, or None if it may be.
 
     Returns a plain sentence, because every refusal is shown to him.
@@ -676,6 +677,25 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None):
     held = {str(s).upper() for s in (held or [])}
     if symbol in held:
         return "already holding it -- no pyramiding"
+
+    # ---- HIS OWN POSITIONS COUNT AS HELD. 1 September 2026. ----
+    #
+    #     "another thing dhan & bot is not inline. i had caplinpoint
+    #      stock but bot does'nt know that still"
+    #
+    # CAPLIPOINT and SSWL were his own Dhan positions AND live buy
+    # candidates at the same moment. `held` above is the BOT'S OWN book,
+    # so nothing here knew he already owned them.
+    #
+    # A SEPARATE SET, NOT MERGED INTO held, and the reason matters:
+    # len(held) is also the SEAT COUNT below. Folding his seven holdings
+    # in against a cap of three would read "book full" every cycle for
+    # the rest of time -- a bot that never trades again. His stock
+    # occupies no seat of the bot's; it only answers "do I already own
+    # this one".
+    if symbol in {str(s).upper() for s in (owned_elsewhere or [])}:
+        return ("you already hold it at Dhan -- the bot will not buy "
+                "on top of your own position")
 
     # ==========================================================
     # SUPPLY IS NOT DEMAND -- IN THE LIVE PATH.  9 August 2026.
@@ -851,6 +871,7 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None):
 
 
 def take(rows, engine, now=None, security_id_of=None, held=None,
+         owned_elsewhere=None,
          max_positions=None, alert=None, enter=None):
     """Route the ranker's picks into the order path.
 
@@ -949,7 +970,8 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
             continue
         symbol = str(row.get("symbol") or "").upper()
         why = refuse_reason(row, engine, now=now, held=held,
-                            max_positions=seats)
+                            max_positions=seats,
+                            owned_elsewhere=owned_elsewhere)
         if why:
             _journal_pick(engine, row, False, why)
             out.append({"symbol": symbol, "taken": False, "why": why,

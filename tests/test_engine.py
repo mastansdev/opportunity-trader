@@ -2910,12 +2910,79 @@ def test_daily_loss_halt_blocks_new_entries(monkeypatch):
     assert "TCS" not in engine.open_positions
 
 
-def test_daily_profit_goal_blocks_new_entries_once_met(monkeypatch):
+def test_a_good_day_does_not_stop_the_next_trade(monkeypatch):
+    """---- INVERTED ON HIS ORDER. 1 September 2026. ----
+
+    This asserted the opposite: once realized P&L reached
+    DAILY_PROFIT_TARGET_RS the bot refused every entry for the rest of
+    the session.
+
+        "new entries only when opportunity showed up. there is no fixed
+         time ,price or fixed limitations to follow. this is stock
+         market not our own shop to do as we want."
+
+        "remove them , old methods ... this can stay =
+         DAILY_MAX_LOSS_RS = Rs 12,000"
+
+    Rs 75,000 is a number we chose. The market does not stop offering
+    at it. The LOSS cap stays and is tested below -- it is a different
+    shape: protection against a bad day compounding, triggered by money
+    already lost rather than money not yet made."""
     import core.engine as engine_module
     monkeypatch.setattr(engine_module, "DAILY_PROFIT_TARGET_RS", 500.0)
 
     engine = _engine()
     engine.closed_positions.append({"symbol": "X", "pnl": 600.0})
+
+    _feed_orb_range(engine, high=110.0)
+    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
+    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
+    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
+
+    assert "TCS" in engine.open_positions, (
+        "a met profit target is still closing the door")
+
+
+def test_the_goal_is_still_announced_when_it_is_passed(monkeypatch):
+    """It stops DECIDING; it does not stop being said. He wants to know
+    the day cleared its goal."""
+    import core.engine as engine_module
+    monkeypatch.setattr(engine_module, "DAILY_PROFIT_TARGET_RS", 500.0)
+    said = []
+    monkeypatch.setattr(engine_module, "decision", said.append)
+
+    engine = _engine()
+    engine.closed_positions.append({"symbol": "X", "pnl": 600.0})
+    _feed_orb_range(engine, high=110.0)
+    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
+    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
+    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
+
+    assert any("DAILY GOAL MET" in line for line in said)
+    assert any("Trading continues" in line for line in said)
+
+
+def test_the_profit_target_no_longer_refuses_the_ranked_lane(monkeypatch):
+    """core/auto_entry.py asks entry_blocked_reason() before every
+    ranked entry. The halt was in there too, so removing it from one
+    path only would have left the other door shut."""
+    import core.engine as engine_module
+    monkeypatch.setattr(engine_module, "DAILY_PROFIT_TARGET_RS", 500.0)
+
+    engine = _engine()
+    engine.closed_positions.append({"symbol": "X", "pnl": 600.0})
+    got = engine.entry_blocked_reason("TCS", "LONG", _t(11, 0, 0))
+    assert not (got and "profit target" in got), got
+
+
+def test_the_loss_cap_still_closes_the_door(monkeypatch):
+    """His explicit exception -- "this can stay". If this ever fails,
+    the bot has no protection against a bad day compounding."""
+    import core.engine as engine_module
+    monkeypatch.setattr(engine_module, "DAILY_MAX_LOSS_RS", 500.0)
+
+    engine = _engine()
+    engine.closed_positions.append({"symbol": "X", "pnl": -600.0})
 
     _feed_orb_range(engine, high=110.0)
     engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))

@@ -157,6 +157,13 @@ SERVED ALONGSIDE, NOT INSTEAD
        border-radius:6px;cursor:pointer;border:1px solid transparent;
        background:var(--ok-bg);color:var(--ok-fg);}
   .buy:active{transform:translateY(1px);}
+  /* SELL reuses the warn tokens rather than a new red, so it stays
+     correct in dark mode without adding a colour the page has never
+     defined. Distinct from BUY at a glance, which is the whole job. */
+  .sell{font:inherit;font-size:12px;font-weight:600;padding:5px 12px;
+        border-radius:6px;cursor:pointer;border:1px solid transparent;
+        background:var(--warn-bg);color:var(--warn-fg);}
+  .sell:active{transform:translateY(1px);}
   #toast{position:fixed;right:18px;bottom:18px;z-index:50;padding:10px 16px;
          border-radius:10px;font-size:13px;display:none;max-width:60vw;}
   table + .cap{margin-top:18px;}
@@ -514,6 +521,7 @@ charges, net. Nothing here is computed on the page.
       <th class="num">Out</th><th>At</th>
       <th class="num">Made or lost<span class="jargon">net</span></th>
       <th>Why in, why out</th>
+      <th></th>
     </tr></thead><tbody id="tradebot"></tbody></table>
   </div>
 
@@ -1807,7 +1815,9 @@ function tradeRow(r, mine){
         : '<span style="color:var(--muted)">still open</span>'}</td>
     <td style="font-size:12px">${outAt || "&mdash;"}</td>
     <td class="num">${money}</td>
-    <td class="why" style="font-size:12px">${last}</td>
+    <td class="why" style="font-size:12px">${last}</td>${mine ? "" : `
+    <td>${open ? `<button class="sell" data-sell="${att(r.symbol)}">SELL</button>`
+               : ""}</td>`}
   </tr>`;
 }
 
@@ -1825,6 +1835,23 @@ function drawTrade(s){
     mine.push({symbol: r.symbol, qty: r.broker_qty,
                entry_price: r.avg_price, origin: "DHAN"});
 
+  // ---- HIS POSITION FELL THROUGH THE GAP. 1 September 2026. ----
+  //
+  //     "thats why i asked to create a separate table in each mode"
+  //
+  // only_at_broker means "at Dhan and the bot does NOT hold it too".
+  // On 1 September he held 50 CAPLIPOINT and the bot opened its own 34
+  // at 14:59 -- so the symbol moved to quantity_differs and his 50
+  // vanished from his own table. Two separate tables, and his position
+  // fell down the crack between them.
+  //
+  // The bot's side of the same symbol is already in `bot` from
+  // open_positions above, so this adds his half and nothing is
+  // duplicated: one row each, in the table each belongs to.
+  for (const r of ((s.broker_sync || {}).quantity_differs || []))
+    mine.push({symbol: r.symbol, qty: r.broker_qty,
+               entry_price: r.avg_price, origin: "DHAN"});
+
   const on = (s.bot_trading || {}).on === true;
   const title = $("tradebot-title");
   if (title) title.textContent = on ? "BOT TRADED" : "PAPER TRADES";
@@ -1836,7 +1863,7 @@ function drawTrade(s){
   const b = $("tradebot"), m = $("tradeyours");
   if (b) b.innerHTML = bot.length
     ? bot.map(r => tradeRow(r, false)).join("")
-    : `<tr><td colspan="8" style="color:var(--muted)">no trades yet today</td></tr>`;
+    : `<tr><td colspan="9" style="color:var(--muted)">no trades yet today</td></tr>`;
   if (m) m.innerHTML = mine.length
     ? mine.map(r => tradeRow(r, true)).join("")
     : `<tr><td colspan="8" style="color:var(--muted)">nothing of your own today</td></tr>`;
@@ -2920,6 +2947,36 @@ document.addEventListener("click", async (e) => {
       sendWatchlist("add", picked
         || (first ? first.getAttribute("data-sym") : ($("wlAdd").value || "").trim()));
     }
+    return;
+  }
+
+  // ---- THERE WAS NO WAY OUT FROM THIS PAGE. 1 September 2026. ----
+  //
+  //     "now in paper mode how many trades were there & how to exit
+  //      them ?"
+  //
+  // POST /api/sell/{symbol} has existed in dashboard/server.py the
+  // whole time. The button that called it lived on screen.html, which
+  // was DELETED when this page replaced it -- so the endpoint has had
+  // no caller anywhere since, and the only way to close a position was
+  // a command line. Same shape as every other fault this week: built,
+  // and the last step to where it is used missing.
+  //
+  // Only on the BOT's own OPEN rows. broker_sync says of anything he
+  // opened himself: "the bot will not stop or exit it" -- a SELL
+  // button there would promise something the bot will not do.
+  const out = e.target && e.target.getAttribute("data-sell");
+  if (out){
+    if (!confirm(`SELL the whole ${out} position?`)) return;
+    try{
+      const res = await fetch(`/api/sell/${encodeURIComponent(out)}`,
+        {method: "POST",
+         headers: {"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+      if (res.status === 403){ toast("View-only link -- nothing was sent.", false); return; }
+      const data = await res.json();
+      if (data.success){ toast(`SELL requested: ${out}`, true); }
+      else { toast(data.error || "Request failed", false); }
+    }catch(err){ toast("Could not reach the bot: " + err.message, false); }
     return;
   }
 

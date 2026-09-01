@@ -144,7 +144,25 @@ from core.orb_engine import OrbEngine, EARLY_ORB_END_T, ORB_WINDOW_END_T
 from core.candle_engine import CandleEngine
 from core.strategy import Strategy
 from core.trailing_stop import TrailingStopEngine, LONG, SHORT
-from core.logger import decision, diagnostic, warn
+from core.logger import (decision, diagnostic, warn,
+                         when_it_changes)
+
+# A refusal that is true RIGHT NOW and must be asked again next
+# cycle, rather than one that settles the stock for the session.
+# entry_blocked is otherwise permanent: nothing clears it, and
+# _try_structural_entry() returns on it before any gate runs. So
+# a stock refused at 12:34 could never be bought at 14:00 however
+# the day turned. The reason is still recorded and still shown on
+# the panel -- it just no longer settles the question.
+#
+#     "new entries only when opportunity showed up. there is no
+#      fixed time ,price or fixed limitations to follow."
+#                                 -- the operator, 1 Sept 2026
+FOR_NOW = "for now -- "
+
+
+def _is_provisional(reason):
+    return str(reason or "").startswith(FOR_NOW)
 
 # Position "stop_mode" values -- decides HOW an open position's
 # stop is managed after entry (core/engine.py's _check_trailing_stop()
@@ -2539,18 +2557,94 @@ class Engine:
 
         off = abs((close - extreme) / extreme) * 100.0
         if off <= BREAKOUT_MAX_OFF_HIGH_PCT:
+            self._unblock(symbol, direction)
             return True
 
-        # Said out loud, once per symbol per direction, because a
-        # silent skip here is indistinguishable from a bot that never
-        # saw the stock -- and he asked to be able to tell.
+        # ---- THE PROXY DEFERS TO THE MEASUREMENT. 1 September 2026. ----
+        #
+        #     "we created more reliable sources to enter rather than
+        #      blank coating some percentages of move"
+        #                                          -- the operator
+        #
+        # He is right, and this gate is the clearest case of it. It was
+        # written on 18 August because the reason source of the day --
+        # STRUCTURAL_LONG_BREAKOUT -- measured the break against the
+        # 09:15-09:30 opening range, a level frozen at 09:30 and never
+        # updated, so the third re-cross of a dead level read as fresh.
+        # The signal could not tell a live move from an old one, so this
+        # demanded the price be glued to the high instead. It is a fence
+        # around a broken signal, not a rule about markets.
+        #
+        # WHAT IT ACTUALLY ASKS. "Is the move still going?" -- inferred
+        # from where the price happens to sit. core/order_flow.py's
+        # still_buying() answers that same question by measurement:
+        # cumulative delta positive (buyers ahead today) AND higher than
+        # fifteen minutes ago (still adding), on a real bid and ask. Its
+        # own docstring is this same objection, from PRECWIRE on 31
+        # August -- refused 518 times on where its price sat while
+        # buyers took 63% of every share traded all session.
+        #
+        # MEASURED ON THE 41 STOCKS THIS GATE REFUSED ON 1 SEPTEMBER:
+        #
+        #     16   buyers still winning   <- this gate was wrong
+        #     25   buyers had stopped     <- this gate was right
+        #      0   flow could not answer  <- this gate keeps the word
+        #
+        # So it is not a rubber stamp: it overturns 16 and BACKS 25.
+        # BEML was refused at 13:22 for sitting 1.13% under its high
+        # while its cumulative delta was at 100% of the day's peak.
+        # SSWL passed the volume surge at 49x and still fails here,
+        # because its delta is negative -- sellers have won it all day.
+        #
+        # IT ONLY REMOVES A VETO. Every other gate is untouched, and
+        # long-only is untouched. still_buying() returns None on a thin
+        # book -- "a guess must not overrule a gate" -- and None does
+        # not overrule anything here either.
+        if direction == LONG:
+            check = getattr(self, "buying_check", None)
+            if check is not None:
+                try:
+                    reading = check(symbol)
+                except Exception:                          # noqa: BLE001
+                    reading = None
+                if reading and reading.get("still_buying"):
+                    self._unblock(symbol, direction)
+                    when_it_changes(
+                        f"flow-overrules-{symbol}-{direction}",
+                        f"[FLOW] {symbol} is {off:.2f}% under today's "
+                        f"{extreme_key}, but the buyers are still "
+                        f"winning it -- delta {reading.get('delta'):,.0f} "
+                        f"against {reading.get('was'):,.0f} fifteen "
+                        f"minutes ago, {reading.get('of_peak')}% of the "
+                        f"day's peak. The price gate does not get the "
+                        f"last word.",
+                        how=decision)
+                    return True
+
+        # REFUSED FOR NOW, NOT FOR THE DAY. Buyers who have stopped at
+        # 12:34 may be back at 14:00, and until today this line settled
+        # the stock for the session -- see FOR_NOW.
+        already = _is_provisional(
+            self.entry_blocked.get(symbol, {}).get(direction))
         self._block_entry(
             symbol, direction,
+            FOR_NOW +
             f"not a fresh breakout -- {close:.2f} is {off:.2f}% below "
             f"today's {extreme_key} of {extreme:.2f}, which it has "
             f"already made and come back from (limit "
-            f"{BREAKOUT_MAX_OFF_HIGH_PCT}%)")
+            f"{BREAKOUT_MAX_OFF_HIGH_PCT}%), and the buyers are not "
+            f"still winning it either",
+            say=not already)
         return False
+
+    def _unblock(self, symbol, direction):
+        """Drop a provisional block once the stock clears the gate that
+        set it, so the panel never shows a refusal that has passed."""
+        held = self.entry_blocked.get(symbol)
+        if held and _is_provisional(held.get(direction)):
+            held.pop(direction, None)
+            if not held:
+                self.entry_blocked.pop(symbol, None)
 
     def _is_exhausted(self, symbol):
         """
@@ -3507,7 +3601,10 @@ class Engine:
                 and self._circuit_blocks(symbol, direction):
             return
 
-        if direction in self.entry_blocked.get(symbol, {}):
+        if _is_provisional(self.entry_blocked.get(symbol, {})
+                           .get(direction)):
+            pass                    # true at the time; ask again now
+        elif direction in self.entry_blocked.get(symbol, {}):
             return
 
         # 2026-07-24 (evening) -- the frozen 9:30 top-25-gainers/
@@ -3660,9 +3757,10 @@ class Engine:
                 self._note_slot_refusal(symbol, direction, position_cap)
                 return
 
-        # Daily guardrails (item 5): a realized day at/below the loss
-        # switch, or at/above the goal, takes no further entries.
-        # Edge-triggered log so the moment it trips is loud, once.
+        # Daily guardrail (item 5): a realized day at/below the LOSS
+        # switch takes no further entries. The profit goal is announced
+        # and nothing more -- see the note on it below. Edge-triggered
+        # log so the moment it trips is loud, once.
         realized = self._daily_realized_pnl()
         if realized <= -DAILY_MAX_LOSS_RS:
             if self._daily_halt_logged != "LOSS":
@@ -3674,16 +3772,35 @@ class Engine:
                     f"managed normally."
                 )
             return
+        # ---- A GOOD DAY IS NOT A REASON TO STOP. 1 Sept 2026. ----
+        #
+        #     "new entries only when opportunity showed up. there is no
+        #      fixed time ,price or fixed limitations to follow. this is
+        #      stock market not our own shop to do as we want."
+        #                                            -- the operator
+        #
+        # This used to return here once realized P&L reached
+        # DAILY_PROFIT_TARGET_RS, so the bot refused every opportunity
+        # for the rest of the session because of a number WE chose. The
+        # market does not stop offering at Rs 75,000, and a target that
+        # closes the door is our shop's opening hours, not a reading of
+        # anything.
+        #
+        # THE LOSS CAP ABOVE STAYS, and he said so explicitly. It is not
+        # the same shape: it is protection against a bad day compounding,
+        # and it triggers on money already lost, not money not yet made.
+        #
+        # Still said out loud when it is passed -- he wants to know the
+        # day cleared its goal. It just no longer decides anything.
         if realized >= DAILY_PROFIT_TARGET_RS:
             if self._daily_halt_logged != "GOAL":
                 self._daily_halt_logged = "GOAL"
                 decision(
                     f"[DAILY GOAL MET] Realized P&L {realized:.0f} >= "
-                    f"{DAILY_PROFIT_TARGET_RS:.0f} -- day's goal met, "
-                    f"no new entries. Open positions still managed "
-                    f"normally."
+                    f"{DAILY_PROFIT_TARGET_RS:.0f}. Trading continues -- "
+                    f"a good day is not a reason to stop taking the next "
+                    f"opportunity."
                 )
-            return
 
         # Breakout-quality margin (items 8/9): the close must clear
         # the ORB boundary by a real, conviction-sized margin --
@@ -4731,8 +4848,12 @@ class Engine:
             if streak[1] >= FROZEN_PRICE_STREAK_CANDLES
         )
 
-    def _block_entry(self, symbol, direction, reason):
+    def _block_entry(self, symbol, direction, reason, say=True):
         self.entry_blocked.setdefault(symbol, {})[direction] = reason
+        if not say:
+            # A provisional block is re-taken every cycle. Saying it
+            # every cycle is how the log became 77% repeats.
+            return
         warn(
             f"[NO_TRADE] {symbol} {direction} skipped -- {reason}. "
             f"No {direction.lower()} trade for {symbol} today."
@@ -4791,12 +4912,9 @@ class Engine:
             return (f"daily loss cap hit ({realized:.0f} <= "
                     f"-{DAILY_MAX_LOSS_RS:.0f}) -- no new entries for the "
                     f"rest of the session")
-        if realized >= DAILY_PROFIT_TARGET_RS:
-            return (f"daily profit target met ({realized:.0f} >= "
-                    f"{DAILY_PROFIT_TARGET_RS:.0f}) -- no new entries")
 
         blocked = self.entry_blocked.get(symbol, {}).get(direction)
-        if blocked:
+        if blocked and not _is_provisional(blocked):
             return blocked
 
         return None
@@ -4880,10 +4998,36 @@ class Engine:
                 f"\nMANUAL SHORT (dashboard): {symbol}\n"
                 f"Price                    : {price:.2f}"
                             )
-        else:
+        elif entry_reason == ENTRY_REASON_MANUAL_DASHBOARD:
             decision(
                 f"\nMANUAL BUY (dashboard): {symbol}\n"
                 f"Price                  : {price:.2f}"
+                            )
+        else:
+            # ---- THE LOG LIED ABOUT WHO TRADED. 1 Sept 2026. ----
+            #
+            #     "34 qty is bots . mine 50 qty"
+            #     "maintain 2 tables in each mode"
+            #
+            # This was the `else`, so EVERY entry whose reason was
+            # not one of the two structural constants printed
+            # "MANUAL BUY (dashboard)" -- including every
+            # RANKED_SETUP, which is the bot's main lane:
+            #
+            #     14:38:18  MANUAL BUY (dashboard): VTL
+            #     14:59:03  MANUAL BUY (dashboard): CAPLIPOINT
+            #
+            # Both were the bot deciding on its own, and I twice
+            # told him VTL was his own click on the strength of it.
+            #
+            # He is separating his trades from the bot's across two
+            # tables precisely so this cannot be confused. Those
+            # tables read entry_reason and were never wrong; the LOG
+            # was, and the log is what he reads while it runs.
+            decision(
+                f"\nBOT BUY: {symbol}\n"
+                f"Reason : {entry_reason}\n"
+                f"Price  : {price:.2f}"
                             )
 
         if direction == LONG:
@@ -5981,6 +6125,103 @@ class Engine:
             position.setdefault("partial_exit_done", False)
             restored[symbol] = position
         self.open_positions = restored
+
+    BROKER_HELD_SECONDS = 30
+
+    def symbols_at_broker(self):
+        """Every symbol he actually holds at Dhan, whoever opened it.
+
+        ---- DHAN AND THE BOT WERE NOT IN LINE. 1 September 2026. ----
+
+            "another thing dhan & bot is not inline. i had caplinpoint
+             stock but bot does'nt know that still"
+
+        Measured on the live snapshot as he said it:
+
+            his at Dhan     CAPLIPOINT, SSWL, INTELLECT, MARINE, ...
+            ranked to BUY   CAPLIPOINT, SSWL, DYCL, ENGINERSIN, ...
+
+        CAPLIPOINT and SSWL were his own positions AND live buy
+        candidates at the same moment. Nothing was bought on top of them
+        only because the book happened to be full -- luck, not a guard.
+
+        IT WAS NEVER A DATA PROBLEM. core/broker_sync.py prints "[BOOK]
+        CAPLIPOINT: 50 at Dhan, opened outside the bot" every cycle and
+        the panel shows it. The reading was there, correct, and
+        displayed. It never reached the DECISION.
+
+        IT LIVES HERE, not on the dashboard, because the ENGINE owns
+        self.execution -- and because both readers need the same answer.
+        main.py builds auto_entry's `held` from engine.open_positions
+        and dashboard/state.py builds the ranker's separately, so a
+        helper on either one of them would have fixed exactly half the
+        problem and left the order path untouched.
+
+        NOT an adoption and NOT a block: the bot still will not stop,
+        trail or exit anything he opened. This only stops it BUYING a
+        stock he is already in -- what "no pyramiding" has always meant
+        for its own positions.
+
+        FAILS OPEN. If Dhan cannot be reached this returns an empty set
+        and both paths behave exactly as they did before, rather than
+        refusing everything because one REST call timed out.
+
+        IT NEVER BLOCKS THE CALLER. This is a REST call on the live
+        account, and BOTH callers are on hot loops -- dashboard
+        build_ranked() on the refresh loop and main.py's auto_entry on
+        the trading loop, the same loop that checks square-off and the
+        feed watchdog. core/engine.py has been bitten by exactly this
+        before (the 52-week scan: "a 3.5s scan there is a 3.5s stall in
+        the bot's own heartbeat"), and a slow Dhan reply measured 25.6s
+        on 1 September. So the answer is always returned from memory and
+        refreshed on a worker; a stale reading is worth far more than a
+        stalled heartbeat.
+        """
+        import threading
+        import time
+
+        now = time.time()
+        cached = getattr(self, "_broker_held_cache", None)
+        fresh = cached and (now - cached[0]) < self.BROKER_HELD_SECONDS
+        known = cached[1] if cached else set()
+
+        if not fresh and not getattr(self, "_broker_held_running", False):
+            self._broker_held_running = True
+            threading.Thread(target=self._refresh_broker_held,
+                             name="broker-held", daemon=True).start()
+        return known
+
+    def _refresh_broker_held(self):
+        """The worker. Never raises -- it is a thread, so an exception
+        here is silent and would leave the flag stuck on forever."""
+        import time
+
+        out = set()
+        try:
+            executor = getattr(self, "execution", None)
+            executor = getattr(executor, "executor", executor)
+            reader = getattr(executor, "positions", None)
+            rows = reader() if reader else None
+            for entry in (rows if isinstance(rows, list) else []):
+                if not isinstance(entry, dict):
+                    continue
+                symbol = str(entry.get("tradingSymbol")
+                             or entry.get("symbol") or "").upper()
+                try:
+                    # The same two keys dashboard/state.py's _book_row()
+                    # reads, so the panel and the decision can never
+                    # disagree about what he owns.
+                    qty = float(entry.get("netQty")
+                                or entry.get("quantity") or 0)
+                except (TypeError, ValueError):
+                    qty = 0.0
+                if symbol and qty:
+                    out.add(symbol)
+            self._broker_held_cache = (time.time(), out)
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[BOOK] Could not read holdings from Dhan: {exc}")
+        finally:
+            self._broker_held_running = False
 
     def export_entry_blocks(self):
         """Plain-dict snapshot, safe to json.dump directly."""

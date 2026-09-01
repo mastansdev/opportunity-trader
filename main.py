@@ -1671,7 +1671,9 @@ def main():
         decision(
             f"[FLOW] Recording order flow for {len(security_id_to_symbol)} "
             f"symbols -- buyer/seller split, written every "
-            f"{ORDER_FLOW_FLUSH_SECONDS}s. Reads into no decision."
+            f"{ORDER_FLOW_FLUSH_SECONDS}s. Two decisions read it -- the "
+            f"exit rule (BUYING DRIED UP) and the entry gate that "
+            f"lets a still-bought stock past the off-the-high test."
         )
 
     # ==========================================================
@@ -1978,6 +1980,18 @@ def main():
                             now=datetime.now(),
                             security_id_of=master_loader.security_id,
                             held=set(engine.open_positions),
+                            # HIS OWN DHAN POSITIONS, KEPT SEPARATE.
+                            # 1 Sept 2026 -- CAPLIPOINT and SSWL were
+                            # his AND live buy candidates at once.
+                            #
+                            # NOT folded into `held`: that set is also
+                            # the SEAT COUNT (len(held) >= max_positions),
+                            # and his seven Dhan holdings against a cap
+                            # of three would read "book full" forever --
+                            # a bot that never trades again, which is
+                            # far worse than the fault being fixed.
+                            # See Engine.symbols_at_broker().
+                            owned_elsewhere=engine.symbols_at_broker(),
                             # ---- CASH, NOT THE NUMBER 3. 8 Aug 2026. ----
                             # The engine sizes the book from the balance
                             # (core/capital.py) and falls back to

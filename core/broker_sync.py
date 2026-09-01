@@ -203,8 +203,41 @@ def compare(bot_positions, broker_rows, price_lookup=None):
                 "cmp": live, "pnl": pnl, "pnl_pct": pct,
             })
         elif round(mine, 2) != round(yours, 2):
+            # ---- HIS POSITION FELL THROUGH THE GAP. 1 Sept 2026. ----
+            #
+            #     "thats why i asked to create a separate table in each
+            #      mode"                              -- the operator
+            #
+            # He holds 50 CAPLIPOINT at Dhan; the bot opened its own 34
+            # at 14:59. Both exist, so the symbol lands HERE rather than
+            # in only_at_broker -- and the Trade tab's "your trades"
+            # table is built from only_at_broker alone, so his 50
+            # DISAPPEARED from his own table the moment the bot bought
+            # the same stock. "i do not want to miss / loose any info
+            # even by mistake."
+            #
+            # These rows carried a bare quantity, so nothing downstream
+            # could render them as a position even once it read them.
+            # Priced the same way only_theirs is, from the tick feed
+            # this symbol is already subscribed to.
+            info = detail.get(symbol) or {}
+            entry = info.get("avg_price")
+            live = None
+            if price_lookup is not None:
+                try:
+                    live = price_lookup(symbol)
+                except Exception:                          # noqa: BLE001
+                    live = None
+            pnl = pct = None
+            if entry and live:
+                pnl = (live - entry) * yours
+                pct = ((live - entry) / entry) * 100.0
+                if yours < 0:
+                    pct = -pct
             different.append({"symbol": symbol, "bot_qty": mine,
-                              "broker_qty": yours})
+                              "broker_qty": yours, "avg_price": entry,
+                              "product": info.get("product"),
+                              "cmp": live, "pnl": pnl, "pnl_pct": pct})
 
     return {
         "available": True,

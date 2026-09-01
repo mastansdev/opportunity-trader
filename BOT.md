@@ -1,4 +1,4 @@
-<!-- generated: 2026-09-01 12:25 by tools/bot_doc.py -- do not edit by hand -->
+<!-- generated: 2026-09-01 14:10 by tools/bot_doc.py -- do not edit by hand -->
 # Opportunity Trader — what the bot is, and what it does
 
 **This file is generated.** Every number below is read out of `config.py` and `core/rules.py` when it is written, so it cannot drift away from the running bot. To change a rule, change the code and run `py tools/bot_doc.py --write`.
@@ -32,7 +32,7 @@ An evidence panel with a BUY button. It reads Telegram pro channels, NSE/BSE fil
 | Hard stop from entry | 2.50% | `config.HARD_STOP_FROM_ENTRY_PCT` |
 | A stop-out therefore costs | ≈₹3,000 | derived |
 | Stop for the day after losing | ₹12,000 (≈4 stop-outs) | `config.DAILY_MAX_LOSS_RS` |
-| Stop for the day after making | ₹75,000 | `config.DAILY_PROFIT_TARGET_RS` |
+| Day's goal (announced, does NOT stop trading) | ₹75,000 | `config.DAILY_PROFIT_TARGET_RS` |
 | Positions open at once | 3 | `core/rules.py` (engine sizes from the real balance first) |
 | Minimum tradable price | ₹50 | `core/rules.py` |
 
