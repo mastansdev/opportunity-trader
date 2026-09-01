@@ -119,7 +119,15 @@ def test_the_five_loudest_lines_all_use_it():
     ]
     for path, key in checks:
         src = Path(path).read_text(encoding="utf-8")
-        assert f'"{key}"' in src, f"{path} no longer uses when_it_changes({key})"
+        # Prefix, not the whole string. On 1 September the [RANK] key
+        # became f"rank-added-by-reason-{len(movers)}" -- that widener
+        # is called twice a cycle with different mover lists, and one
+        # shared key made the two contexts overwrite each other so the
+        # line alternated 262 / 251 every second and "say it when it
+        # changes" said it every time. A per-caller key is the fix, and
+        # this check has to allow one.
+        assert key in src, f"{path} no longer uses when_it_changes({key})"
+        assert "when_it_changes" in src, f"{path} lost when_it_changes"
 
 
 def test_the_brain_line_stays_on_the_loud_channel():
