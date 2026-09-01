@@ -281,6 +281,31 @@ class TelethonReader:
             # to fill a hole BELOW the newest id. See core/telegram_
             # feed.py's _store() for the run that proved that.
             kwargs["min_id"] = int(since_id)
+            # ---- AND IT MUST WALK FORWARD. 1 September 2026. ----
+            #
+            #     "bot needs to check all channels last time stamp .
+            #      after restart bot needs to fetch after that time
+            #      stamp ... if bot received last data at 22:05 then
+            #      this morning will start fetching from last night
+            #      after 22:05:01"                    -- the operator
+            #
+            # min_id alone was only half of it. Telethon iterates
+            # NEWEST FIRST, so a channel that posted 200 posts overnight
+            # returned the newest 30 above the watermark -- and _store()
+            # then advanced the watermark to the newest of those. The
+            # 170 in between were skipped, permanently, and catch_up()
+            # existed to walk backwards and patch the hole.
+            #
+            # reverse=True makes Telethon iterate ASCENDING from min_id,
+            # so each pass takes the OLDEST 30 he has not seen and the
+            # watermark advances by 30. Repeated passes close the gap in
+            # order and no post is ever stepped over.
+            #
+            # Only with since_id, and never with `before`: `before` is
+            # the backward walk and the two directions cannot both be
+            # true in one call.
+            if not before:
+                kwargs["reverse"] = True
         for message in client.iter_messages(entity, **kwargs):
             text = getattr(message, "message", None) or ""
             photo = getattr(message, "photo", None)

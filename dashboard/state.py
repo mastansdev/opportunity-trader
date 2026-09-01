@@ -6211,8 +6211,19 @@ class DashboardState:
         extra = [row for row in (self._compute_gl_rows() or [])
                  if str(row.get("symbol") or "").upper() in wanted]
         if extra:
+            # ---- TWO CALLERS, ONE MEMORY. 1 September 2026. ----
+            #
+            # This alternated 262 / 251 / 262 / 251 every second, which
+            # made "say it when it changes" say it every time. The
+            # number was not flapping: this widener is called twice per
+            # cycle with DIFFERENT mover lists, so the two contexts were
+            # overwriting each other's last-said value.
+            #
+            # The key carries the input size, so each caller remembers
+            # its own line and both go quiet until their own number
+            # really moves.
             when_it_changes(
-                "rank-added-by-reason",
+                f"rank-added-by-reason-{len(movers)}",
                 f"[RANK] {len(extra)} stock(s) added by reason "
                 f"that the top-50 list would have hidden.")
         return list(movers) + [dict(r) for r in extra]

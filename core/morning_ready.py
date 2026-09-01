@@ -287,13 +287,46 @@ def check(now=None, telegram_db=TELEGRAM_DB, results_db=RESULTS_DB):
                 blocks=False)
 
     # ---- 4. RESULTS CALENDAR ----
+    #
+    # ---- IT BLOCKED ON A DATE STAMP. 1 September 2026. ----
+    #
+    #     "results? do you think everyday throughout year daily
+    #      results ? how many times i need to tell u about results
+    #      season & their timeline"                 -- the operator
+    #
+    # This compared the refresh stamp to today and BLOCKED whenever
+    # they differed. On 1 September it reported "last refreshed
+    # 2026-08-31 -- the bot will not know which stocks report today",
+    # and I relayed that to him as something to act on.
+    #
+    # Nothing reported that day. Q1 ended mid-August -- the newest of
+    # the 8,255 events in this store is 13 August -- and the next
+    # window is late October. So the check would have blocked every
+    # single morning for two months, and he would have learned to
+    # scroll past it. A warning that cries wolf all season is how the
+    # real one gets missed.
+    #
+    # It asks the useful question now: is anything DUE that the bot
+    # does not know about. A stale stamp with nothing reporting is
+    # simply the off-season, and it says so.
     got = _rows(results_db,
                 "select value from results_meta where key = 'last_refresh'")
     stamp = str(got[0][0]) if got and got[0] else None
-    add("results calendar", stamp == today,
-        (f"refreshed today" if stamp == today else
-         f"last refreshed {stamp or 'never'} -- the bot will not know "
-         f"which stocks report today"))
+    due = _rows(results_db,
+                "select count(*) from results_events "
+                "where date(results_date) >= date(?)", (today,))
+    reporting = int(due[0][0]) if due and due[0] else 0
+    if stamp == today:
+        add("results calendar", True, "refreshed today")
+    elif reporting == 0:
+        add("results calendar", True,
+            f"last refreshed {stamp or 'never'} -- and nothing is due. "
+            f"Out of season; the next window is the one to refresh for.",
+            blocks=False)
+    else:
+        add("results calendar", False,
+            f"last refreshed {stamp or 'never'} and {reporting} company"
+            f"(ies) report from today -- the bot will not know which")
 
     blocking = [c for c in checks if c["blocks"]]
     return {"ready": not blocking, "checks": checks,

@@ -190,6 +190,29 @@ def show_holdings(today):
 # become a summary. So every row below states what the code does, and
 # rows that depend on a setting read the setting rather than describing
 # it from memory.
+def _stop_width(config):
+    """---- I READ THE WRONG CONSTANT TWICE. 1 September 2026. ----
+
+    On 1 September I told him the stop was 0.8 x ATR, having read
+    ATR_STOP_MULTIPLIER straight out of config. He said 0.8 was far
+    too narrow and had been changed long ago. He was right: that
+    branch is an `elif` under VOLATILITY_SCALED_STOP, which is True,
+    so it cannot run.
+
+    The branch is NOT dead code and must not be deleted -- it is the
+    fallback if he ever turns the scaling off, and a test pins it.
+    What was missing is a screen that says which one is in force.
+
+    Same order as core/engine._hard_stop_pct chooses them.
+    """
+    if getattr(config, "FIXED_STOP_PCT", None):
+        return f"{float(config.FIXED_STOP_PCT):.2f}% flat"
+    if getattr(config, "VOLATILITY_SCALED_STOP", False):
+        return (f"{config.DAILY_ATR_STOP_MULT}x the stock's own DAILY "
+                f"range")
+    return f"{config.HARD_STOP_FROM_ENTRY_PCT * 100:.1f}% from entry"
+
+
 def _exits(config):
     """The ways out, read from the settings rather than remembered."""
     out = ["buying dries up", "stop"]
@@ -212,6 +235,8 @@ RULES = [
     ("Books profit at (bot's own trades)", None,
      "no target -- it exits on the rules below"),
     ("Books profit at (your BUY click)", "MANUAL_BUY_TARGET_RS", ""),
+    ("Stop is set at", _stop_width,
+     "the width in force -- not the other two in the file"),
     ("How a position ends", _exits, ""),
     ("Holds overnight", _overnight, ""),
     ("Swaps a holding for a better one", "ENABLE_SLOT_ROTATION", ""),
