@@ -192,7 +192,12 @@ def test_the_retired_routes_redirect_to_the_board(route):
     response = client.get(route)
     assert response.status_code in (301, 302, 307, 308), (
         f"{route} still serves a page of its own")
-    assert response.headers.get("location", "").startswith("/board")
+    # /desk since 2 September 2026 -- "make this my real dashboard with
+    # remaining tabs". The rule this test defends is unchanged: these
+    # four routes serve no page of their own, they point at whichever
+    # page is currently his. /board is still served, just no longer the
+    # destination.
+    assert response.headers.get("location", "").startswith("/desk")
 
 
 def test_a_redirect_keeps_the_token():

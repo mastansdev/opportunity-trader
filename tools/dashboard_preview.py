@@ -461,7 +461,7 @@ def _main_replay(date=None):
     # The preview used to advertise /v3, /v2 and /. He would look at one
     # page here and get a different one in the live session, so a layout
     # change he approved in the preview was not the thing he traded on.
-    decision(f"  DASHBOARD :  {base}/board?token={token}")
+    decision(f"  DASHBOARD :  {base}/desk?token={token}")
     decision("=" * 66)
     decision("  This is a REPLAY of a finished session. Nothing is live,")
     decision("  nothing can be bought or sold, and every figure is the")
@@ -608,7 +608,7 @@ def main():
     decision("")
     decision("=" * 66)
     # Same one page as the live session -- see the note above.
-    decision(f"  DASHBOARD :  {base}/board?token={token}")
+    decision(f"  DASHBOARD :  {base}/desk?token={token}")
     decision("=" * 66)
     decision("  Outside market hours the prices are the LAST session's,")
     decision("  not live -- that is Dhan's REST quote doing its job, not")

@@ -581,6 +581,10 @@ class NewsImpact:
         answer for macro news. See remember() for how that is stored.
         """
         needles = _words(text)
+        # The words the story wrote in CAPITALS, case intact -- used to
+        # tell a ticker from an ordinary word that happens to be one.
+        _as_written = {w.strip("#:,.()[]") for w in str(text or "").split()
+                       if w.strip("#:,.()[]").isupper()}
         if not needles:
             return []
         # Words the story uses as NAMES, not merely as words. A rare
@@ -607,8 +611,45 @@ class NewsImpact:
             # handle -- see _is_lone_name(). Two or more name words
             # corroborate each other ("SOUTH INDIAN BANK"), so they are
             # taken at face value.
-            strong_name = bool(named) and (
-                len(named) > 1 or self._is_lone_name(symbol, named[0]))
+            # ---- A GROUP COMPANY COULD NEVER BE NAMED. 2 Sep 2026 ----
+            #
+            #     "BEML, RAYMOND and IIFL all are company names"
+            #
+            # He is right and the matcher disagreed with him. A word
+            # counts as a company's NAME only when exactly ONE company
+            # claims it (UNIQUE_OWNER_LIMIT = 1), and these are shared
+            # with a sibling listing:
+            #
+            #     BEML     claimed by  BEML, BLAL       (Land Assets)
+            #     RAYMOND  claimed by  RAYMOND, RAYMONDLSL
+            #     IIFL     claimed by  IIFL, IIFLCAPS
+            #
+            # So "#BEML" scored 3 against a bar of 6, matched nobody,
+            # and was filed MACRO -- and MACRO reaches no stock at all:
+            # 0 of 1,865 macro items on record have ever produced a
+            # single impact row. Every headline about a demerged group
+            # was thrown away silently, and those are the large names
+            # most likely to be in the news in the first place.
+            #
+            # THE TIE-BREAK. When several companies claim a word and one
+            # of them has that word as its actual TICKER, that is the
+            # one being talked about. "BEML" is BEML's handle whether or
+            # not BLAL also lists it as an identity word.
+            #
+            # Narrow on purpose: the word must BE a listed symbol, not
+            # merely resemble one. It cannot invent a match where no
+            # ticker exists.
+            # AS IT IS WRITTEN, not merely as it tokenises. WEALTH,
+            # METAL and VALUE are real tickers AND ordinary words, and
+            # the first pass matched "for India to achieve true wealth"
+            # to WEALTH and "Indian equities rallied" to METAL. A ticker
+            # in news is written in CAPITALS or behind a hash; a common
+            # word in a sentence is not. Checked against the raw text,
+            # which still has its case at this point.
+            own_ticker = symbol in id_hits and (
+                f"#{symbol}" in text or symbol in _as_written)
+            strong_name = (own_ticker or (bool(named) and (
+                len(named) > 1 or self._is_lone_name(symbol, named[0]))))
             if not strong_name and score < min_score:
                 continue
             scored.append((score + (self.IDENTITY_WEIGHT if strong_name else 0),

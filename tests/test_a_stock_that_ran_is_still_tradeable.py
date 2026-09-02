@@ -47,10 +47,27 @@ def test_ashoka_is_planned_not_refused():
                symbol="ASHOKA", margin_pct=0.3336)
     assert got["ok"] is True, got.get("why")
     assert got["qty"] == 711
-    assert got["risk_rs"] == pytest.approx(2500.0, abs=1.0)
-    # 2.78% below entry -- the stop the margin branch derives, not the
-    # 10.5% one the day low happened to sit at.
-    assert 0.02 < (126.46 - got["stop"]) / 126.46 < 0.04
+    # ---- THE RUPEES ARE NO LONGER PINNED. 2 September 2026. ----
+    #
+    #     "to be realistic i'll trade based on qty in my real trading.
+    #      not based on risk per trade"          -- the operator
+    #
+    # This asserted risk == Rs 2,500 and a 2.78% stop, both of which
+    # were true only because the width was back-solved from the risk
+    # budget. With config.STOP_FROM_RISK_AND_SIZE off the width comes
+    # from ASHOKA's own daily range and the rupees follow.
+    #
+    # WHAT THIS TEST IS ACTUALLY FOR is unchanged and still asserted:
+    # the trade is PLANNED, not refused for a 10.5% day low, and the
+    # stop comes off the stock's volatility rather than off wherever
+    # the session low happened to land.
+    assert got["risk_rs"] == pytest.approx(
+        got["qty"] * (126.46 - got["stop"]), abs=1.0)
+    pct = (126.46 - got["stop"]) / 126.46 * 100.0
+    assert pct <= MAX_STOP_DISTANCE_PCT, "the ceiling was breached"
+    assert pct < 10.5, (
+        "the stop fell back to the day low -- the whole point of this "
+        "file is that a stock which RAN is not refused for having run")
 
 
 def test_the_far_low_is_replaced_not_obeyed():
@@ -96,10 +113,22 @@ def test_too_close_still_widens():
 
 
 def test_the_risk_per_trade_is_unchanged():
-    """Widening the gate must not widen the loss. Every planned trade
-    still stakes the same fixed amount."""
+    """Widening the gate must not widen the loss.
+
+    ---- WHAT "UNCHANGED" MEANS NOW. 2 September 2026. ----
+
+    It used to mean a fixed Rs 2,500. He turned that off: size comes
+    from the margin, the stop from the stock. So the loss is no longer
+    a constant -- but it must still be the SAME for this stock however
+    far away the day's low happens to be, which is the thing this test
+    was really guarding. A session low at 112.92 and one at 124.0 must
+    plan the identical trade.
+    """
+    seen = set()
     for low in (112.92, 100.0, 124.0):
         got = plan(entry=126.46, side="BUY", day_low=low, day_high=129.0,
                    symbol="ASHOKA", margin_pct=0.3336)
         assert got["ok"]
-        assert got["risk_rs"] == pytest.approx(2500.0, abs=1.0)
+        seen.add((got["qty"], got["stop"]))
+    assert len(seen) == 1, (
+        f"the day low still moves the trade: {seen}")

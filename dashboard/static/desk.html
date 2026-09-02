@@ -274,6 +274,33 @@ function rowsOf(x){
   if (Array.isArray(x.rows)) return x.rows;
   return [];
 }
+
+/* ---- THE BOARD MUST BE THE BOT'S OWN LIST. 2 September 2026. ----
+ *
+ *     "does bot's dashboard is used to buy or not?"
+ *
+ * It is, and this page was reading the wrong key. main.py hands
+ * auto_entry.take() snapshot["ranked"].rows PLUS snapshot["early"].rows.
+ * This page drew snapshot["shortlist"] -- a third, different list. So
+ * the bot could buy a stock the screen never showed, which is exactly
+ * how JINDRILL and SPORTKING were bought at 09:16 and 09:20 on
+ * 2 September having never appeared on any board at all.
+ *
+ * Same two lists the bot uses, in the same order, with the early lane
+ * marked so he can see which door a name came through. */
+function boardRows(d){
+  var ranked = rowsOf(d.ranked);
+  var early  = rowsOf(d.early).map(function(r){
+    var c = {}; for (var k in r) c[k] = r[k];
+    c._early = true; return c;
+  });
+  var all = ranked.concat(early);
+  /* Fall back to the old key only if the bot's own lists are absent,
+     so a half-built snapshot still draws something rather than
+     nothing. Never merged in -- that would show rows the bot cannot
+     act on beside rows it can. */
+  return all.length ? all : rowsOf(d.shortlist);
+}
 function mins(v){
   var n = num(v); if (n === null) return "—";
   if (n < 60) return Math.round(n) + " min";
@@ -304,7 +331,7 @@ function drawStrip(d){
   var realized = num(cap.realized_pnl);
   if (realized === null) realized = num(perf.realized_pnl);
   var adv = num(d.advances), dec = num(d.declines), uni = num(d.universe_size);
-  var short = rowsOf(d.shortlist);
+  var short = boardRows(d);
 
   var cells = [
     ["Capital free", free === null ? "—" : inr(free),
@@ -353,7 +380,7 @@ function tagOf(r){
   return ["vol","VOLUME ONLY"];
 }
 function drawList(d){
-  var rows = rowsOf(d.shortlist);
+  var rows = boardRows(d);
   if (!rows.length){
     $("oplist").innerHTML = '<p class="empty">Nothing is moving with volume '+
       'behind it. A quiet day is a correct day.</p>';
@@ -370,6 +397,7 @@ function drawList(d){
       + '<span class="sym">'+esc(r.symbol)
       + '<span class="tag '+tg[0]+'">'+tg[1]+'</span>'
       + (r.cash_only ? '<span class="tag cash">CASH 1x</span>' : '')
+      + (r._early ? '<span class="tag cash">EARLY LANE</span>' : '')
       + (r.held ? '<span class="tag held">HELD</span>' : '')
       + '</span><span></span>'
       + '<span class="px n">'+inr2(r.ltp)+'<br>'
@@ -389,7 +417,7 @@ function drawList(d){
 
 /* ---------------- 3. what would I do ---------------- */
 function drawPlan(d){
-  var rows = rowsOf(d.shortlist);
+  var rows = boardRows(d);
   var r = null;
   for (var i=0;i<rows.length;i++) if (rows[i].symbol === SEL) r = rows[i];
   if (!r){ $("plan").innerHTML = '<p class="empty">Pick a stock.</p>'; return; }

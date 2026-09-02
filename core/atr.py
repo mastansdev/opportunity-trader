@@ -257,3 +257,50 @@ def scaled_stop_pct(symbol, mult, floor_pct, ceiling_pct, fallback_pct,
         return float(fallback_pct)
     wanted = float(mult) * float(daily)
     return max(float(floor_pct), min(float(ceiling_pct), wanted))
+
+
+def entry_stop_pct(symbol):
+    """Where an ENTRY stop sits for this stock, as a PERCENT of price.
+
+    ==========================================================
+    ONE OWNER, BECAUSE TWO OWNERS DISAGREED.  2 September 2026.
+    ==========================================================
+
+        "to be realistic i'll trade based on qty in my real trading.
+         not based on risk per trade"           -- the operator
+
+    Until today core/engine.py and core/position_plan.py derived the
+    entry stop differently and it did not show, because
+    config.STOP_FROM_RISK_AND_SIZE overwrote BOTH of them with
+    RISK_PER_TRADE_RS / qty. Turning that off to give him the
+    qty-driven sizing he asked for uncovered the disagreement:
+
+        engine   this stock's daily range, HARD_STOP_FROM_ENTRY_PCT
+                 when the range cannot be measured
+        card     the TIGHTER of the day's low and a passed-in ATR
+
+    On a Rs 3,000 share those give 2,925 and 2,940. The card would
+    have printed one stop and the trade taken another -- the TCS fault
+    of 29 August, which the flag had been quietly papering over.
+
+    So both call this. It is the engine's derivation, because the
+    trade is the thing that happens and a card exists to describe it.
+    Bounded by core/rules at both ends; falls back to a flat width
+    rather than inventing one from a volatility nobody measured.
+    """
+    from config import (FIXED_STOP_PCT, VOLATILITY_SCALED_STOP,
+                        HARD_STOP_FROM_ENTRY_PCT, DAILY_ATR_STOP_MULT)
+    from core.rules import MIN_STOP_DISTANCE_PCT, MAX_STOP_DISTANCE_PCT
+
+    if FIXED_STOP_PCT:
+        return float(FIXED_STOP_PCT)
+    # HARD_STOP_FROM_ENTRY_PCT is a FRACTION (0.025); this returns a
+    # PERCENT. The two constants named *_STOP_*_PCT in this repo
+    # disagree on units and have caused a 75%-of-price stop once
+    # already -- see engine._hard_stop_pct's note.
+    flat = float(HARD_STOP_FROM_ENTRY_PCT) * 100.0
+    if not VOLATILITY_SCALED_STOP:
+        return flat
+    return scaled_stop_pct(symbol, DAILY_ATR_STOP_MULT,
+                           MIN_STOP_DISTANCE_PCT, MAX_STOP_DISTANCE_PCT,
+                           flat)

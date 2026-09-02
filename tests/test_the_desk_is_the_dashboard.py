@@ -95,3 +95,56 @@ def test_the_desk_never_500s_on_a_half_built_snapshot():
     client = _client(snapshot={"ready": False})
     assert client.get("/desk").status_code == 200
     assert client.get("/api/snapshot").status_code == 200
+
+
+# ==========================================================
+# THE BOARD IS THE BOT'S OWN LIST
+# ==========================================================
+#
+#     "does bot's dashboard is used to buy or not?"
+#                                     -- operator, 2 September 2026
+#
+# It is. main.py hands core.auto_entry.take() exactly
+# snapshot["ranked"].rows + snapshot["early"].rows, so those two lists
+# ARE the bot's shopping list -- if a stock is not on them, the bot
+# cannot buy it.
+#
+# The first version of this page drew snapshot["shortlist"], a third
+# and different key. That is a screen showing one thing while the bot
+# acts on another, and 2 September has the proof: JINDRILL and
+# SPORTKING were bought at 09:16 and 09:20 and appear in the picks
+# table zero times all day. COALINDIA was bought at 09:17 and first
+# reached the ranked board at 09:18 -- a minute AFTER the order.
+#
+# These tests read desk.html as text, on purpose. The failure they
+# guard against is a key name, and a key name is exactly what a
+# mocked payload would let me get wrong twice.
+
+def _desk():
+    return _client().get("/desk").text
+
+
+def test_the_board_reads_the_two_lists_the_bot_buys_from():
+    body = _desk()
+    assert 'rowsOf(d.ranked)' in body, (
+        "the board does not read snapshot['ranked'] -- the list "
+        "main.py hands to auto_entry.take()")
+    assert 'rowsOf(d.early)' in body, (
+        "the board does not read snapshot['early'] -- the 09:15-09:30 "
+        "lane, which bought 3 of 6 trades on 2 September")
+
+
+def test_the_board_does_not_draw_the_shortlist_instead():
+    """shortlist is a different key and the bot never sees it. It may
+    only stand in when the bot's own lists are absent."""
+    body = _desk()
+    assert body.count("rowsOf(d.shortlist)") <= 1, (
+        "shortlist is being drawn as the board in more than the one "
+        "fallback position")
+    assert "boardRows(d)" in body, "the board is not built by boardRows()"
+
+
+def test_the_early_lane_is_marked_on_the_row():
+    """Two doors, and he must be able to see which one a name came
+    through -- the early lane has its own gates and its own record."""
+    assert "EARLY LANE" in _desk()

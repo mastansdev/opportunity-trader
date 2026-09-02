@@ -1635,10 +1635,50 @@ TARGET_REWARD_BY_REGIME = {}
 #
 # He chose it knowing that, after seeing the 10-share alternative.
 #
-# OFF restores _cap_by_risk and the volatility-scaled width whole --
-# every measurement behind those is still in the code and still tested
+# OFF restores the volatility-scaled width whole -- every measurement
+# behind it is still in the code and still tested
 # (tests/test_the_stop_fits_the_stock.py, tests/test_engine.py).
-STOP_FROM_RISK_AND_SIZE = True
+#
+# ==========================================================
+# HE CHOSE THE THIRD ONE.  2 September 2026.
+# ==========================================================
+#
+#     "to be realistic i'll trade based on qty in my real trading.
+#      not based on risk per trade & i'll book profits once
+#      orderflow shows the momentum exhuasted"     -- the operator
+#
+# Neither of the two options above is that. Both exist to hold the
+# rupee loss fixed at RISK_PER_TRADE_RS, and he has just said the
+# rupee loss is not what he trades on. What he wants is the pair he
+# has described from the start:
+#
+#     SIZE   from the MTF margin -- the qty he can actually buy
+#     STOP   from the stock's own daily range, 2.0 ATR
+#     EXIT   when order flow says the buying is finished
+#
+# That combination is this flag OFF. It is not the 7 August rule
+# either: _cap_by_risk() shrank the margin size back down to fit the
+# stop, and every live call site already passes cap_by_risk=False, so
+# turning this off does NOT bring the shrink back. Size stays the
+# margin size. Only the stop stops being derived from the risk budget.
+#
+# THE COST, SAID PLAINLY, because it is his money:
+#
+#   The rupee loss per trade is no longer fixed and is usually
+#   LARGER. TBZ on 2 September -- 5.71% ATR stop, about 327 shares off
+#   a Rs 30,000 slot -- risks about Rs 6,850, not Rs 2,500. A tight
+#   stock like COALINDIA at 1.45% risks about Rs 1,750.
+#
+#   DAILY_MAX_LOSS_RS is still Rs 12,000 and is now the only fixed
+#   number left in the loss column. At Rs 6,850 a trade that is under
+#   two stop-outs, where it used to be nearly five.
+#
+# The refusal at the bounds goes with it. STOP_FROM_RISK_AND_SIZE
+# refused the trade outright when risk/qty landed outside the floor
+# or ceiling -- a stock declined for the width of a stop it was never
+# going to use. The ATR width has its own bounds, applied where the
+# stop is built.
+STOP_FROM_RISK_AND_SIZE = False
 
 
 # ---- ONE EVENT, ONE ROW. 29 August 2026. ----

@@ -154,10 +154,10 @@ def test_the_banner_prints_the_board_with_a_token():
     /board draws no BUY control without a token, so a link without one
     is a read-only screen he then has to fix by hand."""
     block = _banner()
-    assert "/board?token=" in block, (
-        "the startup banner no longer prints /board with a token on it. "
+    assert "/desk?token=" in block, (
+        "the startup banner no longer prints /desk with a token on it. "
         "That is the page he uses -- see the route docstring in "
-        "dashboard/server.py, 'ONE table. 9 August 2026.'")
+        "dashboard/server.py, 'THE DESK IS THE DASHBOARD NOW.'")
 
 
 def test_it_does_not_call_his_dashboard_old():
@@ -186,14 +186,25 @@ def test_it_does_not_send_him_to_a_page_he_has_left():
     -- so counting fields and calling the smaller number worse measured
     the design and marked it a defect.
 
-    The banner must name the page he is actually on.
+    ---- AND THE PAGE HE IS ON CHANGED AGAIN. 2 September 2026 ----
+
+        "this is better than current dashboard"
+        "make this my real dashboard with remaining tabs"
+
+    /desk replaced /board as the dashboard. board.html is still served
+    and still works -- the rule since 6 August is that a new page goes
+    beside the working one, never in place of it -- but it is no longer
+    the one he opens, so it is no longer the one printed.
+
+    The banner must name the page he is actually on. That sentence has
+    outlived three pages now, which is the point of writing it down.
     """
     printed = _banner()
     lines = [l for l in printed.splitlines()
              if "decision(" in l and "{base}" in l]
     assert lines, "the banner prints no dashboard address at all"
-    assert "/board" in lines[0], (
-        "the first address the banner prints is not /board. The first "
+    assert "/desk" in lines[0], (
+        "the first address the banner prints is not /desk. The first "
         "one printed is the one he opens.")
 
 

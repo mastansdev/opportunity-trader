@@ -88,7 +88,10 @@ def _printed(path):
 #: (9 August) -- the newer screen, deliberately one table. The rule
 #: this file enforces is unchanged: ONE address, the same one
 #: everywhere, with the token already on it. Only which address moved.
-THE_PAGE = "/board"
+# /desk as of 2 September 2026 -- "make this my real dashboard with
+# remaining tabs". /board is still served and still works; it is just
+# no longer the page he opens, so it is no longer the page printed.
+THE_PAGE = "/desk"
 
 
 def test_every_printer_prints_the_one_page_with_the_token_on_it():

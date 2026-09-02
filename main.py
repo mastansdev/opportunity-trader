@@ -491,7 +491,7 @@ def main():
             decision("")
             decision("  To review stored data on a non-trading day:")
             decision("      py tools/dashboard_preview.py --no-fetch")
-            decision(f"      http://{_H}:{_P}/board"
+            decision(f"      http://{_H}:{_P}/desk"
                      f"?token={get_or_create_token()}")
             decision("  Brain, Watch and Post work with the market shut.")
             decision("")
@@ -1643,7 +1643,17 @@ def main():
             token = get_or_create_token()
             decision("=" * 66)
             decision("  DASHBOARD")
-            decision(f"      {base}/board?token={token}")
+            # THE LINK HE CLICKS IS THE ONE THAT MATTERS. 2 Sep 2026.
+            # /desk became the dashboard today; a banner still pointing
+            # at /board would have made that change theoretical -- he
+            # would click the link and get the old page.
+            #
+            # ONE arm on the signpost, still. /board is still served
+            # and still works, and it is NOT printed here: a banner
+            # with three arms is why a month went by with him unable
+            # to find his own dashboard. Advertising the fallback
+            # would undo that at the exact moment it matters least.
+            decision(f"      {base}/desk?token={token}")
             decision("=" * 66)
         except Exception as exc:                               # noqa: BLE001
             warn(f"[DASHBOARD] Could not print the link ({exc}). It is "

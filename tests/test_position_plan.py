@@ -190,13 +190,29 @@ def test_the_reported_risk_is_what_it_actually_costs():
 
     The guarantee is unchanged in substance and stronger in form: the
     number on the card is the number the trade actually risks.
+
+    ---- AND THE RUPEE TOTAL IS NO LONGER PINNED. 2 September 2026 ----
+
+        "to be realistic i'll trade based on qty in my real trading.
+         not based on risk per trade"           -- the operator
+
+    config.STOP_FROM_RISK_AND_SIZE is off, so the stop is the stock's
+    own width and the risk is whatever that costs at the margin size.
+    This test asserted risk == RISK_PER_TRADE_RS, which was only ever
+    true BECAUSE the stop was derived from it -- it was checking the
+    arithmetic of a rule, not the promise of the card.
+
+    The promise is the first assert, and it is the one that matters:
+    what the card prints is what the trade costs. It holds either way.
     """
     got = plan(432.0, "BUY", day_low=427.0, margin_pct=0.25,
                budget_rs=20000.0)
     assert got["ok"]
     distance = 432.0 - got["stop"]
     assert got["risk_rs"] == pytest.approx(got["qty"] * distance, abs=1.0)
-    assert got["risk_rs"] == pytest.approx(RISK_PER_TRADE_RS, abs=1.0)
+    assert got["stop"] == 427.0, (
+        "the stop should be the day's low, not a width back-solved "
+        "from the risk budget")
 
 
 # ---------------------------------------------------------------

@@ -18,17 +18,25 @@ it anywhere in the code.
 
 THE ONE IDEA HERE
 -----------------
-Risk a FIXED NUMBER OF RUPEES per trade, and let the quantity fall out
-of where the stop has to be.
+    "to be realistic i'll trade based on qty in my real trading. not
+     based on risk per trade & i'll book profits once orderflow shows
+     the momentum exhuasted"       -- operator, 2 September 2026
 
-    qty = risk budget / (entry - stop)
+SIZE comes from the MTF margin -- the shares a Rs 30,000 slot actually
+buys. The STOP comes from the stock's own daily range. The rupee loss
+is then whatever those two produce, and it is reported honestly rather
+than pinned.
 
-The usual way round -- pick a rupee value, then find a stop -- makes
-the loss whatever the chart happens to give you. A stock with a stop
-3% away and one with a stop 9% away lose wildly different amounts on
-the same position size, and the 9% one will be the one that hurts.
-Sizing off the stop makes every loss the same size, which is the only
-version where "lose small" is a rule rather than a hope.
+This file used to do the opposite: risk a fixed number of rupees and
+let the quantity fall out of the stop. That is still in the code,
+behind config.STOP_FROM_RISK_AND_SIZE, with the full argument for it
+written where the flag is set. He turned it off on 2 September, and
+the note there says plainly what it costs -- the loss per trade is no
+longer fixed and is usually larger.
+
+The cost of the version he left behind was that a Rs 3,000 stock with
+a wide stop got ten shares and had to move +9.4% in a day to be worth
+taking. It never did, and the position drifted to the close.
 
 WHERE THE STOP GOES
 -------------------
@@ -45,9 +53,9 @@ believed.
 
 MTF
 ---
-The share count is then capped by what the margin actually allows.
-Risk-based sizing can ask for more shares than the account can carry;
-the smaller of the two always wins.
+The margin decides the share count outright. Where no margin figure is
+available -- paper, backtests, the preview -- this falls back to the
+risk formula rather than guessing at a size, and says so.
 
 Author : H&M Opportunity Trader
 ==========================================================
@@ -75,7 +83,13 @@ from core.rules import (
 # he changes, not a rule the book is built on. core/engine.py reads
 # the same name for the position it manages -- if these two disagree,
 # the alert and the trade disagree.
-from config import FIXED_STOP_PCT, TARGET_REWARD_BY_REGIME
+from config import (FIXED_STOP_PCT, TARGET_REWARD_BY_REGIME,
+                    # Read by core/engine.py at its own sizing site
+                    # too. One dial, both halves -- see the note
+                    # where it is used below.
+                    STOP_FROM_RISK_AND_SIZE)
+import math
+
 from core.logger import diagnostic
 
 
@@ -375,19 +389,82 @@ def plan(entry, side, day_low=None, day_high=None, atr=None,
         qty = int(budget_rs // per_share) if per_share > 0 else 0
         if qty < 1:
             return {"ok": False, "why": "one share costs more than the budget"}
-        # The stop is whatever puts risk_rs at stake over this many
-        # shares. Recomputed here, then re-checked against the bounds
-        # below -- a width this produces is not exempt from them.
-        distance = risk_rs / qty
-        stop_pct = distance / entry * 100.0
-        stop = round(entry - distance if side == "BUY"
-                     else entry + distance, 2)
-        if stop_pct < MIN_STOP_DISTANCE_PCT:
-            return {"ok": False,
-                    "why": "this size would put the stop inside the noise"}
-        if stop_pct > MAX_STOP_DISTANCE_PCT:
-            return {"ok": False,
-                    "why": "stop too far -- the loss would not be small"}
+        # ---- THE STOP STOPS FOLLOWING THE SIZE. 2 September 2026. ----
+        #
+        #     "to be realistic i'll trade based on qty in my real
+        #      trading. not based on risk per trade & i'll book
+        #      profits once orderflow shows the momentum exhuasted"
+        #
+        # The share count still comes from the MTF margin. The stop no
+        # longer does: it stays the width already computed above from
+        # the stock's own daily range, and the rupee risk becomes
+        # whatever that costs at this size -- reported honestly as
+        # risk_rs below, which has always been qty x distance.
+        #
+        # BOTH HALVES MOVED TOGETHER. core/engine.py reads the same
+        # config flag at its own sizing site. If only one of them
+        # changed, the card would print one stop and the trade would
+        # take another -- the exact fault of 29 August, TCS at 2,937.50
+        # on his phone and 2,859.53 in the book.
+        if STOP_FROM_RISK_AND_SIZE:
+            # The stop is whatever puts risk_rs at stake over this many
+            # shares. Recomputed here, then re-checked against the
+            # bounds below -- a width this produces is not exempt.
+            distance = risk_rs / qty
+            stop_pct = distance / entry * 100.0
+            stop = round(entry - distance if side == "BUY"
+                         else entry + distance, 2)
+            if stop_pct < MIN_STOP_DISTANCE_PCT:
+                return {"ok": False,
+                        "why": "this size would put the stop inside the noise"}
+            if stop_pct > MAX_STOP_DISTANCE_PCT:
+                return {"ok": False,
+                        "why": "stop too far -- the loss would not be small"}
+        elif symbol and not FIXED_STOP_PCT:
+            # THE TRADE'S OWN WIDTH, not this file's. core/engine.py
+            # sizes every live stop from core.atr.entry_stop_pct(); the
+            # card printed the tighter of the day's low and a passed-in
+            # ATR instead, and while the flag above was on nobody could
+            # see the two disagree because it overwrote both.
+            #
+            # On a Rs 3,000 share they give 2,940 and 2,925. A card
+            # that prints a stop the trade will not take is the TCS
+            # fault of 29 August. One owner now -- see the note there.
+            try:
+                from core.atr import entry_stop_pct
+                width = entry_stop_pct(symbol)
+            except Exception:                              # noqa: BLE001
+                width = None
+            if width:
+                stop_pct = float(width)
+                distance = entry * stop_pct / 100.0
+                # ---- ROUND TOWARD ENTRY, NOT TO NEAREST. ----
+                #
+                # round() moves the stop AWAY from entry as often as
+                # toward it, and away means a wider distance than the
+                # width just computed. At the ceiling that breaches it:
+                # ASHOKA at 126.46 on a 6.00% width rounded to 118.87,
+                # which is 6.0019% -- over a bound the whole function
+                # exists to respect. A hair, but a ceiling that can be
+                # crossed is decorative, and this one gates real money.
+                #
+                # Ceiling up for a long, floor down for a short: both
+                # move the stop TOWARD entry, so the realised width is
+                # never more than the intended one.
+                cents = distance * 100.0
+                if side == "BUY":
+                    stop = math.ceil(entry * 100.0 - cents) / 100.0
+                else:
+                    stop = math.floor(entry * 100.0 + cents) / 100.0
+                stop = round(stop, 2)
+                # Re-derive BOTH from the rounded stop. risk_rs is
+                # qty x distance, and a distance left at its
+                # pre-rounding value would report rupees the trade
+                # cannot actually lose -- Rs 5.40 out on ASHOKA, which
+                # is small and is still a number on his card that the
+                # book would never produce.
+                distance = abs(entry - stop)
+                stop_pct = distance / entry * 100.0
     else:
         # No margin figure -- paper, backtests, the preview. Falls back
         # to the risk formula rather than guessing at a size.
