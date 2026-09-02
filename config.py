@@ -1433,7 +1433,52 @@ MIN_STOP_DISTANCE_PCT = 0.01
 #
 # None restores VOLATILITY_SCALED_STOP untouched. Put a number here
 # only after it holds on sessions it was not chosen on.
-FIXED_STOP_PCT = None
+#
+# ==========================================================
+# 3.0%, AND IT HELD OUT OF SAMPLE.  2 September 2026.
+# ==========================================================
+#
+#     "keep 3 % as stop loss after entry"     -- the operator
+#
+# The paragraph above is the bar this had to clear, so it was tested
+# the way that paragraph demands. 454 picks across 18 sessions of
+# minute data, split in half by date and each half scored alone --
+# Rs 1.2 lakh a position, top 13 by volume multiple, book at +2.08%:
+#
+#                    5-19 Aug        20 Aug-2 Sep
+#     2.0%          +Rs 104,175        +Rs 77,222
+#     3.0%           +Rs 97,873        +Rs 73,467
+#     4.0%           +Rs 97,703        +Rs 63,410
+#     6.0% (live)    +Rs 86,484        +Rs 62,263
+#
+# 3% beats the live rule on BOTH halves, by Rs 11,389 and Rs 11,204,
+# and the ordering never flips: tighter is better in each window
+# independently. That is the opposite shape to 29 August, where the
+# winner on the fitted window collapsed on the unseen one.
+#
+# WHY TIGHTER WINS, measured: a wide stop does not lose at the stop,
+# it loses in the drift. At 6%, 261 of 454 trades never resolve and
+# wander to the close for -Rs 291,259. At 2% that bucket is 162
+# trades and -Rs 10,539. The stop width barely changes how often he
+# books -- 177 against 178 -- it only changes what the non-winners
+# cost.
+#
+# 2.0% measured better still, in both halves. He chose 3%, which
+# takes 14 stop-outs against 2%'s 22-26 for about 6% less. His call,
+# and the gap is small.
+#
+# WHAT THIS COSTS: the bot no longer adapts the width to the stock.
+# A quiet name and a violent one both stop at 3%. Rs 1.2 lakh a
+# position makes that Rs 3,600 a stop-out, so DAILY_MAX_LOSS_RS of
+# Rs 12,000 funds 3.3 of them.
+#
+# STILL ONE REGIME. Both halves are the same flat-to-down Aug-Sep
+# tape. This has not been seen in a rising market.
+#
+# Read by core/engine.py _hard_stop_pct(), core/atr.entry_stop_pct()
+# and core/position_plan.py plan(). All three, or the alert and the
+# position disagree.
+FIXED_STOP_PCT = 3.0
 
 # Hard ceiling on notional exposure (qty * entry_price) for any ONE
 # trade, regardless of what the risk/ATR formula computes. Backstop

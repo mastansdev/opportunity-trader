@@ -58,14 +58,38 @@ Author : H&M Opportunity Trader
 ==========================================================
 """
 
+import os
+import re
 import sqlite3
 from datetime import datetime, timedelta
 
 GRADED = "GRADED"
 REPORTING = "REPORTING"
 MOVING = "MOVING"
+# ---- THE THREE DOORS HE NAMED FIRST. 2 September 2026. ----
+#
+#     "create a watchlist each day & add the stocks which ever had
+#      something news/orders/govt scheme/results (during results
+#      season)"                                  -- the operator
+#
+# This file had results (GRADED, REPORTING) and already-moving
+# (MOVING) and nothing else, so a stock only reached the list once
+# the tape had already moved it. On 2 September that cost the whole
+# morning: BEML's Rs 181 crore Vande Bharat order, ANTELOPUS's
+# order at 08:28 and INDOCO's Rs 764 crore land sale were all
+# published before the open and none of them was on any list. Two of
+# those three went on to be the best trades of the day -- ANTELOPUS
+# +20.0% on 181x volume, INDOCO +12.3% on 329x.
+#
+# ORDERED is separate from FILED because he reads it separately: an
+# order has a rupee value and sorts by it, and the ones worth
+# looking at first are the big ones against a small company.
+ORDERED = "ORDERED"
+FILED = "FILED"
 
 ROW_TITLES = {
+    ORDERED: "Orders won -- biggest first",
+    FILED: "News and filings since the last close",
     GRADED: "Excellent / Great results",
     REPORTING: "Reporting today -- watch, do not buy into the print",
     MOVING: "Moving now on real volume",
@@ -117,6 +141,7 @@ from core.rules import (
 )
 
 RESULTS_DB = "data/results_calendar.db"
+EVENTS_DB = "data/stock_events.db"
 
 
 def _upper(value):
@@ -294,6 +319,103 @@ def graded_symbols(hours=36, db_path="data/telegram.db", now=None):
 # ---------------------------------------------------------------
 # ROW 2 -- reporting today
 # ---------------------------------------------------------------
+_MCAP_IN_HEADLINE = re.compile(
+    r"MCAP[^0-9]{0,12}([0-9][0-9,\.]*)\s*(?:CR|CRORE)", re.I)
+
+
+def mcap_from_headline(headline):
+    """The company's size, when the filing states it. Crore.
+
+    ==========================================================
+        "the comparison must show with their own Market cap not
+         with order numbers. what is powergrid market cap & how
+         much % is that order ; same with MCLOUD stock. that will
+         reveal the real magic"
+                                -- operator, 3 September 2026
+    ==========================================================
+
+    He is right and the feeds agree with him -- some of them print the
+    market cap in the same line as the order, precisely because that
+    is the number that matters:
+
+        RMC SWITCHGEARS  order Rs 334 cr   MCAP Rs   313 cr   107%
+        GRANESH INFRA    order Rs 453 cr   MCAP Rs   470 cr    96%
+        SEPC             order Rs 855 cr   MCAP Rs 1,100 cr    78%
+        SAATVIK GREEN    order Rs 476 cr   MCAP Rs 5,600 cr     8%
+
+    Only 19 of 758 order filings carry it (2.5%), so this is a bonus
+    when present and never the ranking key -- see days_of_trading()
+    for what ranks the list. There is no market cap anywhere else in
+    this repo: core/centre.py reads an MCAP_CR column out of
+    master_stocks.csv that has never existed in the file, so it has
+    been returning None for every stock since it was written.
+    """
+    m = _MCAP_IN_HEADLINE.search(str(headline or ""))
+    if not m:
+        return None
+    try:
+        value = float(m.group(1).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    return value or None
+
+
+ORDER_KINDS = ("ORDER",)
+FILED_KINDS = ("NEWS", "RESULT", "REPORTED", "DEAL", "APPROVAL",
+               "FUND_RAISE", "RATING", "CONCALL", "GOVERNANCE")
+
+
+def filed_symbols(hours=24, db_path=EVENTS_DB, now=None):
+    """{symbol: what was published about it} since the last close.
+
+    Reads data/stock_events.db directly rather than through the
+    StockEvents class, for the same reason graded_symbols() reads
+    telegram.db directly: this runs before the engine exists, and a
+    watchlist that needs a live object to build is a watchlist that
+    is not there at 09:08.
+
+    scope='STOCK' only. MARKET-scope rows are the govt schemes, the
+    windfall taxes and the sugar stock limits -- real, and they name
+    no company, so they belong on the screen as sector news rather
+    than pinned to a ticker. See dashboard/state.py's watchlist panel.
+
+    Newest wins per symbol, and an ORDER always outranks a NEWS for
+    the same stock: a Rs 181 crore order is the reason, and "shares
+    in focus" written about it an hour later is not.
+    """
+    out = {}
+    if not os.path.exists(db_path):
+        return out
+    cutoff = ((now or datetime.now()) - timedelta(hours=hours)).isoformat()
+    try:
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT symbol, at, kind, headline, value_cr, grade FROM events "
+            "WHERE scope='STOCK' AND symbol IS NOT NULL AND at >= ? "
+            "ORDER BY at ASC", (cutoff,)).fetchall()
+        con.close()
+    except Exception as exc:                               # noqa: BLE001
+        _broke("filed_symbols", exc)
+        return out
+
+    for r in rows:
+        symbol = _upper(r["symbol"])
+        kind = _upper(r["kind"])
+        if not symbol or kind not in ORDER_KINDS + FILED_KINDS:
+            continue
+        prior = out.get(symbol)
+        # An order is never overwritten by ordinary news about the
+        # same stock, whatever arrived later.
+        if prior and prior["kind"] in ORDER_KINDS and kind not in ORDER_KINDS:
+            continue
+        out[symbol] = {"kind": kind, "at": r["at"],
+                       "headline": (r["headline"] or "").strip(),
+                       "value_cr": r["value_cr"], "grade": r["grade"],
+                       "mcap_cr": mcap_from_headline(r["headline"])}
+    return out
+
+
 def reporting_on(day=None, db_path=RESULTS_DB):
     """{symbol: purpose} for everything filing on `day`.
 
@@ -318,7 +440,7 @@ def reporting_on(day=None, db_path=RESULTS_DB):
 # ---------------------------------------------------------------
 def build(movers=None, adv_of=None, min_liquidity_cr=8.0, blocked=None,
           held=None, day=None, hours=36, db_path="data/telegram.db",
-          min_price=None, price_of=None):
+          min_price=None, price_of=None, filed_hours=24, now=None):
     """Three rows, in his order, deduped, liquidity-filtered.
 
     `movers` is core/ranker.py's row shape -- {symbol, change_pct,
@@ -393,7 +515,27 @@ def build(movers=None, adv_of=None, min_liquidity_cr=8.0, blocked=None,
         of[symbol] = dict(detail, row=key)
         return True
 
-    rows = {GRADED: [], REPORTING: [], MOVING: []}
+    rows = {ORDERED: [], FILED: [], GRADED: [], REPORTING: [], MOVING: []}
+
+    # ORDERS FIRST, biggest rupee value at the top. A stock is on this
+    # list because something was PUBLISHED about it, which is the
+    # whole point -- it does not have to have moved yet, and most of
+    # them never will. That is not waste: knowing at 14:00 that a
+    # morning order got no buying all day is worth as much as the ones
+    # that ran.
+    filed = filed_symbols(hours=filed_hours, now=now) or {}
+    for symbol, detail in sorted(
+            ((k, v) for k, v in filed.items() if v["kind"] in ORDER_KINDS),
+            key=lambda kv: -(kv[1].get("value_cr") or 0.0)):
+        if admit(symbol, ORDERED, detail):
+            rows[ORDERED].append(symbol)
+
+    for symbol, detail in sorted(
+            ((k, v) for k, v in filed.items() if v["kind"] not in ORDER_KINDS),
+            key=lambda kv: kv[1].get("at") or "", reverse=True):
+        if admit(symbol, FILED, detail):
+            rows[FILED].append(symbol)
+
 
     # ---- ROW 1 ----
     for symbol, detail in sorted(
@@ -460,7 +602,10 @@ def build(movers=None, adv_of=None, min_liquidity_cr=8.0, blocked=None,
     return {
         "rows": [{"key": key, "title": ROW_TITLES[key],
                   "symbols": rows[key]}
-                 for key in (GRADED, REPORTING, MOVING)],
+                 # ORDERED and FILED first: they are why a stock is
+                 # on the list before the tape says anything, which is
+                 # the half this builder was missing until 2 September.
+                 for key in (ORDERED, FILED, GRADED, REPORTING, MOVING)],
         "of": of,
         "dropped": dropped,
     }

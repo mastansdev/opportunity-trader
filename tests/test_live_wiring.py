@@ -73,7 +73,10 @@ def _live(monkeypatch):
     patching config itself would be too late. Patching the module's own
     globals is what actually changes the behaviour under test.
     """
-    monkeypatch.setattr(execution_module, "TRADING_MODE", "LIVE")
+    # config is the dial; trading/execution.py reads it at call
+    # time now, so there is no module copy left to patch.
+    import config as config_module
+    monkeypatch.setattr(config_module, "TRADING_MODE", "LIVE")
     monkeypatch.setattr(execution_module,
                         "I_UNDERSTAND_THIS_PLACES_REAL_ORDERS", True)
 
@@ -123,7 +126,10 @@ def test_engine_in_live_mode_still_refuses_without_a_client(monkeypatch):
 def test_live_still_needs_both_switches(monkeypatch):
     """One switch is one typo away from spending money. Two is a
     decision. A client on its own is not consent."""
-    monkeypatch.setattr(execution_module, "TRADING_MODE", "LIVE")
+    # config is the dial; trading/execution.py reads it at call
+    # time now, so there is no module copy left to patch.
+    import config as config_module
+    monkeypatch.setattr(config_module, "TRADING_MODE", "LIVE")
     monkeypatch.setattr(execution_module,
                         "I_UNDERSTAND_THIS_PLACES_REAL_ORDERS", False)
     with pytest.raises(RuntimeError):

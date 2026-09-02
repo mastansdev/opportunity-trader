@@ -41,6 +41,27 @@ from core.position_plan import (MAX_STOP_DISTANCE_PCT, MIN_STOP_DISTANCE_PCT,
                                 plan)
 
 
+# ---- THIS REFUSAL BELONGS TO THE ATR RULE. 2 September 2026. ----
+#
+#     "keep 3 % as stop loss after entry"        -- the operator
+#
+# config.FIXED_STOP_PCT is 3.0 now. A fixed width is not derived from
+# the stock at all, so there is no range to fail to measure and
+# nothing to refuse -- config.py's own note says the structural stop,
+# the widening and this refusal "belong to the ATR-scaled rule and are
+# skipped whole".
+#
+# The protection below is still real and still needed the day he sets
+# FIXED_STOP_PCT back to None, so it is tested against that rule
+# rather than deleted. What guards a no-range stock while the fixed
+# width is on is the LIQUIDITY gate, not the stop.
+
+
+def _atr_rule(monkeypatch):
+    """Run the ATR-scaled rule, whatever the live dial says."""
+    import core.position_plan as pp
+    monkeypatch.setattr(pp, "FIXED_STOP_PCT", None)
+
 def test_ashoka_is_planned_not_refused():
     """Its real numbers from 31 August."""
     got = plan(entry=126.46, side="BUY", day_low=112.92, day_high=129.0,
@@ -82,7 +103,8 @@ def test_the_far_low_is_replaced_not_obeyed():
         "the plan still moves with the day low; it should not")
 
 
-def test_a_stock_with_no_daily_range_still_refuses():
+def test_a_stock_with_no_daily_range_still_refuses(monkeypatch):
+    _atr_rule(monkeypatch)
     """"The loss would not be small" stays true when nothing can be
     said about the stock's own volatility. Only the day-low accident
     was untrue."""

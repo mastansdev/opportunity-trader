@@ -971,6 +971,8 @@ class DashboardState:
             "calendar": self.build_calendar(),
             "results_today": self.build_results_today(),
             "watchlist": self._safe_watchlist(),
+            # The 09:08 list -- see build_morning_watchlist().
+            "morning_watchlist": self._safe_morning_watchlist(),
             # ---- THE TELEGRAM TAB. 30 August 2026. ----
             #
             #     "show me in another tab named Telegram, under this
@@ -5227,12 +5229,36 @@ class DashboardState:
                 ltp = seen.get("LTP") or seen.get("high")
                 if not ltp or not seen.get("close"):
                     continue
+                # ---- I WROTE THE PRODUCER AND NOT THE KEY. 3 Sep 2026 ----
+                #
+                # This said "close": ... with a comment calling it the
+                # previous close, and every consumer of this snapshot
+                # reads "prev_close" -- core/circuit_monitor.py's own
+                # rows have carried that name since it was written.
+                # So a feed-backfilled row was skipped by
+                # _compute_gl_rows as no_prev_close, EVERY TIME, and
+                # this backfill has produced zero usable rows since
+                # the day I added it.
+                #
+                # It hid because it only runs when REST is short, and
+                # REST was mostly fine. Tonight it was not, and the
+                # log said it plainly:
+                #
+                #     1328 symbols in the snapshot but ZERO rows
+                #     produced. Skipped: {'no_prev_close': 1328}
+                #
+                # An empty board is no trades. The backfill exists for
+                # exactly the moment REST is degraded, which is the
+                # one moment it was guaranteed to fail.
+                #
+                # Same key names as the REST row, so nothing
+                # downstream has to know where a row came from.
                 snapshot[sym] = {
                     "last_price": ltp,
                     "open": seen.get("open"),
                     "high": seen.get("high"),
                     "low": seen.get("low"),
-                    "close": seen.get("close"),   # the PREVIOUS close
+                    "prev_close": seen.get("close"),  # Dhan's previous close
                     "volume": None,               # unmeasured, not zero
                     "_from_feed": True,
                 }
@@ -6369,6 +6395,30 @@ class DashboardState:
             cutoff_day = datetime.now().date().isoformat()
             out.update(watchlist_builder.graded_symbols() or {})
             out.update(watchlist_builder.reporting_on(cutoff_day) or {})
+            # ---- AND THE THREE DOORS HE NAMED FIRST. 2 Sep 2026. ----
+            #
+            #     "create a watchlist each day & add the stocks which
+            #      ever had something news/orders/govt scheme/results"
+            #
+            # The two lines above are the RESULTS half. News, orders
+            # and schemes had no line at all, so a stock only reached
+            # the pool once the tape had already moved it -- the exact
+            # "no use of such movement, it already ran" complaint, one
+            # more costume.
+            #
+            # On 2 September that cost the morning. POWERGRID's
+            # Rs 3,244 crore order, SICALLOG's Rs 2,535 crore,
+            # ANTELOPUS at 08:28 and INDOCO's Rs 764 crore land sale
+            # were all published before the open. ANTELOPUS closed
+            # +20.0% on 181x volume and INDOCO +12.3% on 329x, and
+            # neither was in the pool because of its news -- they
+            # fought their way in on the tape, hours later.
+            #
+            # 109 stocks had something published since the last close.
+            # Nothing here TAKES a trade: every gate downstream still
+            # has to be cleared, and most of these will never move.
+            # It only gives them the chance to be judged.
+            out.update(watchlist_builder.filed_symbols() or {})
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[RANK] Could not widen by watchlist: {exc}")
 
@@ -6497,6 +6547,134 @@ class DashboardState:
                  f"unaffected.")
             return {"available": False, "during": [], "after": [],
                     "unknown": [], "mine": [], "note": str(exc)}
+
+    def build_morning_watchlist(self):
+        """The list he reads at 09:08.
+
+        ==========================================================
+            "create a watchlist each day & add the stocks which ever
+             had something news/orders/govt scheme/results (during
+             results season). once pre-open market completed by 09:08
+             . i'll check these watchlist stocks first & all stocks
+             too. + volume also"
+                                    -- operator, 2 September 2026
+        ==========================================================
+
+        Every stock something was published about since the last
+        close, orders first with the biggest rupee value at the top,
+        then news and filings newest first.
+
+        IT STAYS ALL DAY, on his instruction. Most of these never
+        move -- 8 of 83 got any buying on 2 September -- and that is
+        the point: knowing at 14:00 that a morning order got no
+        buying all day is worth as much as the ones that ran.
+
+        `move` and `volume_x` are filled in from the live board as the
+        session runs, so the right-hand column answers "and what did
+        it do" without him opening anything.
+
+        MARKET-scope events -- the govt schemes, the windfall taxes,
+        the sugar stock limits -- name no company and are carried
+        separately as `sector`, because pinning them to a ticker would
+        be inventing a link that is not in the source.
+        """
+        out = {"available": False, "rows": [], "sector": [], "note": ""}
+        try:
+            from core import watchlist_builder
+            filed = watchlist_builder.filed_symbols() or {}
+        except Exception as exc:                           # noqa: BLE001
+            out["note"] = f"could not read the event store ({exc})"
+            return out
+
+        live = {}
+        try:
+            for row in (self._snapshot.get("ranked") or {}).get("rows") or []:
+                sym = str(row.get("symbol") or "").upper()
+                if sym:
+                    live[sym] = (row.get("change_pct"), row.get("volume_x"))
+        except Exception:                                  # noqa: BLE001
+            live = {}
+
+        rows = []
+        for symbol, d in filed.items():
+            move, vx = live.get(symbol, (None, None))
+            # ---- SIZE AGAINST THE STOCK, NOT IN RUPEES. 3 Sep 2026 ----
+            #
+            #     "this is not ideal. the comparison must show with
+            #      their own Market cap not with order numbers ...
+            #      that will reveal the real magic"
+            #
+            # Sorted by rupees, POWERGRID's Rs 3,244 crore order led
+            # the list and GPTINFRA's Rs 484 crore sat fourth. But
+            # POWERGRID trades Rs 202 crore on an ordinary day, so
+            # that order is 16 days of its normal business; GPTINFRA
+            # trades Rs 0.8 crore, so its order is 598 days -- and
+            # GPT's own filing said the company is worth Rs 1,300
+            # crore, making the order 37% of the whole thing.
+            #
+            # days_of_trading is the ranking key because it is known
+            # for nearly every stock. pct_of_mcap is better and is
+            # shown whenever the filing states the market cap, which
+            # is 2.5% of order filings -- there is no other source of
+            # market cap in this repo.
+            adv = _adv(symbol)
+            value = d.get("value_cr")
+            mcap = d.get("mcap_cr")
+            rows.append({
+                "symbol": symbol,
+                "kind": d.get("kind"),
+                "at": (d.get("at") or "")[11:16],
+                "headline": (d.get("headline") or "")[:160],
+                "value_cr": value,
+                "mcap_cr": mcap,
+                "pct_of_mcap": (round(value / mcap * 100.0, 1)
+                                if value and mcap else None),
+                "adv_cr": adv,
+                "days_of_trading": (round(value / adv, 1)
+                                    if value and adv else None),
+                "grade": d.get("grade"),
+                "change_pct": move,
+                "volume_x": vx,
+                "got_buying": move is not None,
+            })
+        # Orders first, biggest value at the top; then everything else
+        # newest first. The same order he reads it in.
+        rows.sort(key=lambda r: (
+            0 if r["kind"] == "ORDER" else 1,
+            -(r["days_of_trading"] or 0.0) if r["kind"] == "ORDER" else 0,
+            r["at"] if r["kind"] == "ORDER" else "",
+        ))
+        rows[len([r for r in rows if r["kind"] == "ORDER"]):] = sorted(
+            [r for r in rows if r["kind"] != "ORDER"],
+            key=lambda r: r["at"], reverse=True)
+
+        try:
+            events = getattr(self.engine, "events", None)
+            ctx = events.market_context(limit=12) if events else []
+            out["sector"] = [{"at": str(e.get("at") or "")[11:16],
+                              "headline": str(e.get("headline") or "")[:160]}
+                             for e in (ctx or [])]
+        except Exception:                                  # noqa: BLE001
+            out["sector"] = []
+
+        out["available"] = True
+        out["rows"] = rows
+        out["moved"] = sum(1 for r in rows if r["got_buying"])
+        out["note"] = (f"{len(rows)} stocks had something published since the "
+                       f"last close. {out['moved']} have had buying today.")
+        return out
+
+    def _safe_morning_watchlist(self):
+        """One panel must never be able to kill the snapshot -- the
+        same guard every sibling build_* carries. 4 August 2026:
+        build_watchlist() raised on a method I had invented and took
+        the WHOLE refresh with it, and main.py died with it."""
+        try:
+            return self.build_morning_watchlist()
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[WATCHLIST] The morning list could not be built: {exc}")
+            return {"available": False, "rows": [], "sector": [],
+                    "note": f"could not be built ({exc})"}
 
     def build_watchlist(self):
         """Results today, split by when -- plus whatever he added.

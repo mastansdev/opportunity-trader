@@ -214,3 +214,75 @@ def test_one_cleaner_for_headlines_everywhere():
     tail. Two copies of the trimming drifted once already and left a
     star in the popup while the board row was clean."""
     assert "function clean(" in _desk()
+
+
+# ==========================================================
+# THE SEARCH BOX
+# ==========================================================
+#
+#     "where is the search bar to check the stocks & recent event
+#      info as i used to check in old dashboard"
+#                                    -- operator, 2 September 2026
+#
+# /api/symbols has carried the docstring "for the header search box"
+# since it was written, and the desk shipped without the box. 1,945
+# symbols with name and sector, identity only -- no prices, no
+# positions, nothing that could place or close anything.
+
+def test_the_search_box_is_on_the_page():
+    body = _desk()
+    assert 'id="q"' in body, "there is no search input"
+    assert "/api/symbols" in body, "the search reads no symbol index"
+
+
+def test_search_reaches_stocks_that_are_not_on_the_board():
+    """The whole point. The board is what qualified TODAY; he needs to
+    look up a name that did not -- which is most of the 1,945."""
+    body = _desk()
+    assert "function runSearch(" in body
+    assert "boardRows" not in body.split("function runSearch(")[1][:800], (
+        "the search is filtering the board instead of the universe")
+
+
+def test_a_search_hit_opens_the_same_popup():
+    """One card, one code path. A second, thinner card for searched
+    stocks is how the two drift until they disagree."""
+    body = _desk()
+    tail = body.split("function pickHit(")[1][:300]
+    assert "openStock(" in tail, "a search hit does not open the stock card"
+
+
+def test_the_search_says_how_many_it_knows_when_it_finds_nothing():
+    """An empty dropdown reads as a broken box. Naming the count says
+    the search worked and the name is genuinely not there."""
+    assert "It watches" in _desk()
+
+
+# ==========================================================
+# THE 3% STOP
+# ==========================================================
+
+def test_the_stop_is_three_percent_on_every_path():
+    """     "keep 3 % as stop loss after entry"
+
+    Three files derive an entry stop. If they disagree the alert and
+    the position disagree -- the TCS fault of 29 August. One dial.
+    """
+    from config import FIXED_STOP_PCT
+    from core.atr import entry_stop_pct
+    from core.position_plan import plan
+
+    assert FIXED_STOP_PCT == 3.0
+    assert entry_stop_pct("ANY") == 3.0
+    got = plan(1000.0, "BUY", day_low=900.0, margin_pct=0.25, symbol="ANY")
+    assert got["ok"], got
+    assert got["stop"] == 970.0, got["stop"]
+    assert got["stop_pct"] == 3.0
+
+
+def test_a_fixed_width_still_obeys_the_bounds():
+    """3.0 sits inside MIN/MAX, but a badly chosen number must still be
+    caught by the same guards as everything else."""
+    from core.rules import MIN_STOP_DISTANCE_PCT, MAX_STOP_DISTANCE_PCT
+    from config import FIXED_STOP_PCT
+    assert MIN_STOP_DISTANCE_PCT <= FIXED_STOP_PCT <= MAX_STOP_DISTANCE_PCT

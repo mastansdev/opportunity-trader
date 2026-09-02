@@ -208,7 +208,10 @@ def test_a_fill_reports_the_real_traded_price_not_the_intent():
 def test_live_mode_refuses_to_start_without_the_second_switch(monkeypatch):
     """One switch is one typo away from spending money by accident."""
     import trading.execution as ex_mod
-    monkeypatch.setattr(ex_mod, "TRADING_MODE", "LIVE")
+    # config is the dial. trading/execution.py reads it at call
+    # time now, so there is no module copy left to patch.
+    import config as config_module
+    monkeypatch.setattr(config_module, "TRADING_MODE", "LIVE")
     monkeypatch.setattr(ex_mod, "I_UNDERSTAND_THIS_PLACES_REAL_ORDERS", False)
     with pytest.raises(RuntimeError, match="I_UNDERSTAND"):
         ex_mod.Execution(dhan_client=FakeDhan())
@@ -217,7 +220,10 @@ def test_live_mode_refuses_to_start_without_the_second_switch(monkeypatch):
 def test_live_mode_refuses_to_start_without_a_client(monkeypatch):
     """It must NOT quietly paper-trade a session believed to be real."""
     import trading.execution as ex_mod
-    monkeypatch.setattr(ex_mod, "TRADING_MODE", "LIVE")
+    # config is the dial. trading/execution.py reads it at call
+    # time now, so there is no module copy left to patch.
+    import config as config_module
+    monkeypatch.setattr(config_module, "TRADING_MODE", "LIVE")
     monkeypatch.setattr(ex_mod, "I_UNDERSTAND_THIS_PLACES_REAL_ORDERS", True)
     with pytest.raises(RuntimeError, match="no Dhan client"):
         ex_mod.Execution(dhan_client=None)

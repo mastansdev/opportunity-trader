@@ -78,7 +78,28 @@ def test_it_takes_the_newest_minute_not_just_any_row(tmp_path, monkeypatch,
 
 def test_the_dashboard_still_wins_when_it_is_up(tmp_path, monkeypatch):
     """It is the freshest price, and it is the number he is looking at.
-    The store is a fallback, not a replacement."""
+    The store is a fallback, not a replacement.
+
+    ---- IT PASSED BY DAY AND FAILED BY NIGHT. 3 Sep 2026. ----
+
+    last_prices() only asks the dashboard when the wall clock is past
+    09:15 -- correctly, since before the open the snapshot holds
+    yesterday. This test never pinned the clock, so it asserted the
+    dashboard wins while running at 01:00, when the code had quite
+    rightly not called it, and read the store's 148.25 instead.
+
+    Green all day and red all night is worse than red: it fails in the
+    hours nobody is watching and gets written off as flaky. The clock
+    is an input, so the test sets it.
+    """
+    import datetime as _dt
+
+    class _Noon(_dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 2, 12, 0, 0)
+
+    monkeypatch.setattr(fc, "datetime", _Noon)
     db = tmp_path / "candles.db"
     _candles(db, [("2026-08-31", "NCC", "2026-08-31T15:29", 148.25)])
     monkeypatch.setattr(fc, "CANDLES_DB", str(db))

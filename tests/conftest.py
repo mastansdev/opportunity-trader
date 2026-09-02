@@ -205,9 +205,16 @@ def _tests_run_in_paper(monkeypatch):
     test_live_wiring.py, which patches this same name inside the test
     body and therefore wins over this fixture.
     """
-    import trading.execution as execution_module
+    # ---- PATCH THE DIAL, NOT A COPY OF IT. 3 September 2026. ----
+    #
+    # This set trading.execution.TRADING_MODE, a module-level binding
+    # that no longer exists: that file now reads the value at call
+    # time, because a binding cannot follow a dial that moves. Setting
+    # config is what every reader sees, including the eight that were
+    # already reading it live.
+    import config as config_module
 
-    monkeypatch.setattr(execution_module, "TRADING_MODE", "PAPER")
+    monkeypatch.setattr(config_module, "TRADING_MODE", "PAPER")
 
 
 @pytest.fixture(autouse=True)

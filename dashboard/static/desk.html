@@ -163,6 +163,22 @@ tr.hand td{background:var(--sunk)}
 .gate{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;
   padding:3px 0;color:var(--mid)}
 .gate i{font-style:normal;width:14px;flex:none;text-align:center}
+/* ---- search ---- */
+.srch{position:relative}
+.srch input{font:inherit;font-size:13px;padding:6px 10px;width:190px;
+  border:1px solid var(--line);border-radius:6px;background:var(--panel);
+  color:var(--ink)}
+.srch input:focus{outline:0;border-color:var(--accent)}
+.hits{position:absolute;top:34px;left:0;width:290px;z-index:60;
+  background:var(--panel);border:1px solid var(--line);border-radius:7px;
+  max-height:320px;overflow-y:auto}
+.hits[hidden]{display:none!important}
+.hit{padding:7px 11px;cursor:pointer;border-bottom:1px solid var(--hair);
+  font-size:12.5px}
+.hit:last-child{border-bottom:0}
+.hit:hover,.hit.on{background:var(--sunk)}
+.hit b{font-size:13px}
+.hit span{color:var(--dim);display:block;font-size:11px}
 .xbtn{margin-left:auto;background:none;border:0;color:var(--dim);
   font-size:20px;cursor:pointer;line-height:1;padding:0 4px}
 </style></head><body>
@@ -174,6 +190,11 @@ tr.hand td{background:var(--sunk)}
   <div class="top">
     <h1>Opportunity Trader</h1>
     <span class="clock" id="clock">connecting&hellip;</span>
+    <div class="srch">
+      <input id="q" type="search" autocomplete="off" spellcheck="false"
+             placeholder="Search any stock&hellip;" aria-label="Search stocks">
+      <div class="hits" id="hits" hidden></div>
+    </div>
     <div class="sw">
       <span id="switchwhy"></span>
       <span class="dim" style="font-size:11px" id="modelab"></span>
@@ -252,8 +273,20 @@ tr.hand td{background:var(--sunk)}
   </div>
 
   <div class="pane" id="watch-pane" style="display:none">
-    <div class="card"><div class="hd"><b>Watchlist</b></div>
-      <div class="scroll" id="watch"></div></div>
+    <div class="card">
+      <div class="hd"><b>This morning</b>
+        <span class="sub" id="wl-note">everything published since the last close</span></div>
+      <div class="scroll" id="morning"></div>
+    </div>
+    <div class="card">
+      <div class="hd"><b>Sector and scheme news</b>
+        <span class="sub">names no single company &mdash; read it, do not click it</span></div>
+      <div class="scroll" id="sector"></div>
+    </div>
+    <div class="card">
+      <div class="hd"><b>Yours</b><span class="sub">what you added by hand</span></div>
+      <div class="scroll" id="watch"></div>
+    </div>
   </div>
 
   <div class="pane" id="brain-pane" style="display:none">
@@ -395,6 +428,22 @@ function clean(t){
   t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE0F}\u{2028}]/gu, "");
   return t.replace(/#\w+/g, "").replace(/\s{2,}/g, " ")
           .replace(/^[\s\u2014\u2013-]+/, "").trim();
+}
+/* The feeds append a chart caption to the headline -- "...NAME
+ * -21EMA -50SMA Weekly context : Close 276.3 ..." -- which is longer
+ * than the news and says nothing. One line per row, so the caption
+ * goes and the sentence stays. */
+function headlineOf(t0){
+  var t = clean(t0).split(/—\s*\d+\s*(EMA|SMA)/)[0];
+  t = t.split("Weekly context")[0].split("Daily execution")[0];
+  t = t.replace(/\s{2,}/g, " ").trim();
+  // If the caption WAS the whole headline, cutting it leaves the bare
+  // ticker and the row says nothing. INDOCO read exactly that. Keep
+  // the original in that case -- noisy beats empty.
+  var full = clean(t0);
+  if (t.length < 14) t = full;
+  if (t.length > 96) t = t.slice(0, 93).replace(/\s\S*$/, "") + "…";
+  return t;
 }
 function reasonOf(r){
   var t = String(r.why || r.reason || r.mechanism || "");
@@ -900,7 +949,75 @@ function drawRest(d){
     ["Stock","symbol"], ["Why it never reached the board","reason"]
   ], "Every stock that moved reached the board — or the recorder has not run yet.");
 
-  /* --- Watch --- */
+  /* ---- THE 09:08 LIST. 2 September 2026. ----
+   *
+   *     "create a watchlist each day & add the stocks which ever had
+   *      something news/orders/govt scheme/results ... i'll check
+   *      these watchlist stocks first & all stocks too. + volume also"
+   *
+   * Orders first with the biggest rupee value at the top, then news
+   * newest first -- the order he reads it in. It STAYS ALL DAY: most
+   * of these never move, and knowing at 14:00 that a morning order
+   * got no buying is worth as much as the ones that ran.
+   *
+   * The name opens the same stock card as the board, so the reason,
+   * the order flow and the gate verdict are one click away. */
+  var mw = d.morning_watchlist || {};
+  var mrows = rowsOf(mw);
+  $("wl-note").textContent = mw.note || "";
+  if (!mrows.length){
+    $("morning").innerHTML = '<p class="empty">Nothing has been published '
+      + 'since the last close.</p>';
+  } else {
+    $("morning").innerHTML = '<table><thead><tr>'
+      + '<th class="num">At</th><th>Stock</th><th>What happened</th>'
+      + '<th class="num">Order</th><th class="num">Size of it</th>'
+      + '<th class="num">Today</th>'
+      + '</tr></thead><tbody>'
+      + mrows.map(function(r){
+          var chg = num(r.change_pct), vx = num(r.volume_x);
+          return '<tr>'
+            + '<td class="num dim">' + esc(r.at || "") + '</td>'
+            + '<td><b data-open="' + esc(r.symbol) + '" style="cursor:pointer;'
+            + 'border-bottom:1px dotted var(--dim)">' + esc(r.symbol) + '</b>'
+            + (r.kind === "ORDER"
+               ? '<span class="tag held">ORDER</span>' : '')
+            + (r.grade ? '<span class="tag news">' + esc(r.grade) + '</span>' : '')
+            + '</td>'
+            + '<td style="color:var(--mid)">' + esc(headlineOf(r.headline)) + '</td>'
+            + '<td class="num">' + (num(r.value_cr) == null ? ""
+                : "\u20b9" + inr(r.value_cr) + " cr") + '</td>'
+            /* HOW BIG IS IT FOR THIS STOCK -- the column he asked for.
+             * Percent of market cap when the filing states it, days of
+             * ordinary trading otherwise. Rupees alone put POWERGRID's
+             * Rs 3,244 cr above GPTINFRA's Rs 484 cr, which is
+             * backwards: POWERGRID trades Rs 202 cr a day so that is
+             * 16 days of business, GPTINFRA trades Rs 0.8 cr so it is
+             * 598 days -- and 37% of the whole company. */
+            + '<td class="num">' + (num(r.pct_of_mcap) != null
+                ? '<b>' + r.pct_of_mcap.toFixed(0) + '% of the company</b>'
+                : (num(r.days_of_trading) != null
+                   ? '<span class="dim">' + inr(r.days_of_trading)
+                     + ' days of trading</span>' : '')) + '</td>'
+            + '<td class="num">' + (chg == null
+                ? '<span class="dim">no buying</span>'
+                : '<span class="' + (chg >= 0 ? "up" : "down") + '">'
+                  + (chg >= 0 ? "+" : "") + chg.toFixed(1) + '%</span>'
+                  + (vx == null ? "" : '<span class="dim"> \u00b7 '
+                     + vx.toFixed(1) + '\u00d7</span>'))
+            + '</td></tr>';
+        }).join("") + '</tbody></table>';
+    Array.prototype.forEach.call(
+      $("morning").querySelectorAll("[data-open]"), function(el){
+        el.addEventListener("click", function(){ openStock(el.dataset.open); });
+      });
+  }
+
+  simple("sector", mw.sector || [], [
+    ["At", "at"], ["What was said", function(r){ return esc(clean(r.headline)); }]
+  ], "No sector or scheme news since the last close.");
+
+  /* --- Watch: his own --- */
   simple("watch", rowsOf(d.watchlist), [
     ["Stock","symbol"], ["Price", function(r){ return inr2(r.ltp); }, 1],
     ["Change", function(r){ var n=num(r.change_pct); return n===null?"—":
@@ -961,6 +1078,101 @@ async function setMode(state){
 }
 $("btn-on").addEventListener("click", function(){ setMode("on"); });
 $("btn-off").addEventListener("click", function(){ setMode("off"); });
+
+/* ==========================================================
+   THE SEARCH BOX
+   ==========================================================
+ *     "where is the search bar to check the stocks & recent event
+ *      info as i used to check in old dashboard"
+ *
+ * /api/symbols exists for exactly this -- its docstring has said "for
+ * the header search box" since it was written, and the desk shipped
+ * without one. Identity only: no prices, no positions, nothing that
+ * could place or close anything.
+ *
+ * ANY stock the bot knows, not just today's board. That is the point
+ * of it: the board is what qualified today, and he needs to be able
+ * to look up a name that did not. Selecting one opens the same popup
+ * the board rows open, so recent events, order flow and the gate
+ * verdict come with it. */
+var SYMS = null;
+var HITI = -1;
+
+function loadSyms(){
+  if (SYMS) return Promise.resolve(SYMS);
+  return fetch("/api/symbols").then(function(r){ return r.json(); })
+    .then(function(j){ SYMS = (j && j.symbols) || []; return SYMS; })
+    .catch(function(){ SYMS = []; return SYMS; });
+}
+
+function hideHits(){ $("hits").hidden = true; HITI = -1; }
+
+function runSearch(){
+  var q = $("q").value.trim().toUpperCase();
+  if (q.length < 1){ hideHits(); return; }
+  loadSyms().then(function(all){
+    if ($("q").value.trim().toUpperCase() !== q) return;
+    var starts = [], holds = [];
+    for (var i = 0; i < all.length; i++){
+      var r = all[i];
+      var sym = String(r.symbol || "").toUpperCase();
+      var nm = String(r.name || "").toUpperCase();
+      if (sym.indexOf(q) === 0) starts.push(r);
+      else if (sym.indexOf(q) > 0 || nm.indexOf(q) >= 0) holds.push(r);
+      if (starts.length >= 12) break;
+    }
+    var hits = starts.concat(holds).slice(0, 12);
+    var el = $("hits");
+    if (!hits.length){
+      el.hidden = false;
+      el.innerHTML = '<div class="hit dim">Nothing the bot knows by that '
+        + 'name. It watches ' + (all.length ? inr(all.length) : "?")
+        + ' symbols.</div>';
+      return;
+    }
+    HITI = -1;
+    el.hidden = false;
+    el.innerHTML = hits.map(function(r, i){
+      return '<div class="hit" data-i="' + i + '" data-s="' + esc(r.symbol) + '">'
+        + '<b>' + esc(r.symbol) + '</b>'
+        + (r.tradeable === false
+           ? ' <span class="tag vol" style="margin:0 0 0 4px">BLOCKED</span>' : '')
+        + '<span>' + esc([r.name, r.sector].filter(Boolean).join(" \u00b7 "))
+        + '</span></div>';
+    }).join("");
+    Array.prototype.forEach.call(el.querySelectorAll(".hit"), function(h){
+      if (!h.dataset.s) return;
+      h.addEventListener("click", function(){ pickHit(h.dataset.s); });
+    });
+  });
+}
+
+function pickHit(sym){
+  $("q").value = "";
+  hideHits();
+  openStock(sym);
+}
+
+$("q").addEventListener("input", runSearch);
+$("q").addEventListener("keydown", function(e){
+  var hits = $("hits").querySelectorAll(".hit[data-s]");
+  if (e.key === "Escape"){ hideHits(); $("q").blur(); return; }
+  if (!hits.length) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp"){
+    e.preventDefault();
+    HITI += (e.key === "ArrowDown" ? 1 : -1);
+    if (HITI < 0) HITI = hits.length - 1;
+    if (HITI >= hits.length) HITI = 0;
+    Array.prototype.forEach.call(hits, function(h, i){
+      h.classList.toggle("on", i === HITI); });
+  } else if (e.key === "Enter"){
+    e.preventDefault();
+    pickHit((HITI >= 0 ? hits[HITI] : hits[0]).dataset.s);
+  }
+});
+document.addEventListener("click", function(e){
+  if (!e.target.closest(".srch")) hideHits();
+});
 
 /* ---------------- the poll ---------------- */
 function draw(d){

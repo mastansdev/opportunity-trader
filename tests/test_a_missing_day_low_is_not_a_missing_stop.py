@@ -67,6 +67,27 @@ def _has_range(symbol):
 
 # ------------------------------------------------- the refusal was wrong
 
+# ---- THIS REFUSAL BELONGS TO THE ATR RULE. 2 September 2026. ----
+#
+#     "keep 3 % as stop loss after entry"        -- the operator
+#
+# config.FIXED_STOP_PCT is 3.0 now. A fixed width is not derived from
+# the stock at all, so there is no range to fail to measure and
+# nothing to refuse -- config.py's own note says the structural stop,
+# the widening and this refusal "belong to the ATR-scaled rule and are
+# skipped whole".
+#
+# The protection below is still real and still needed the day he sets
+# FIXED_STOP_PCT back to None, so it is tested against that rule
+# rather than deleted. What guards a no-range stock while the fixed
+# width is on is the LIQUIDITY gate, not the stop.
+
+
+def _atr_rule(monkeypatch):
+    """Run the ATR-scaled rule, whatever the live dial says."""
+    import core.position_plan as pp
+    monkeypatch.setattr(pp, "FIXED_STOP_PCT", None)
+
 def test_a_missing_day_low_no_longer_refuses_the_trade():
     """NORTHARC at 49.2x its normal volume, never evaluated."""
     for symbol in REAL:
@@ -89,7 +110,8 @@ def test_a_stock_sitting_at_its_own_low_is_also_planned():
 
 # ------------------------------------------- and it is not a made-up stop
 
-def test_a_stock_with_no_daily_range_still_refuses():
+def test_a_stock_with_no_daily_range_still_refuses(monkeypatch):
+    _atr_rule(monkeypatch)
     """THE TRAP. The first version of this fix copied the widening
     call's fallback_pct and handed an unknown symbol a 0.75% stop and
     3,333 shares. An invented stop is worse than none -- it will be
@@ -99,7 +121,8 @@ def test_a_stock_with_no_daily_range_still_refuses():
     assert "no level to stop behind" in got.get("why", ""), got
 
 
-def test_no_symbol_still_refuses():
+def test_no_symbol_still_refuses(monkeypatch):
+    _atr_rule(monkeypatch)
     """Nothing to look the range up with."""
     got = plan(100.0, "BUY", day_low=None)
     assert got.get("ok") is not True, got

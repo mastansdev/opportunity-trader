@@ -23,9 +23,14 @@ THE ONE IDEA HERE
      the momentum exhuasted"       -- operator, 2 September 2026
 
 SIZE comes from the MTF margin -- the shares a Rs 30,000 slot actually
-buys. The STOP comes from the stock's own daily range. The rupee loss
-is then whatever those two produce, and it is reported honestly rather
-than pinned.
+buys. The STOP is a flat 3% below entry (config.FIXED_STOP_PCT, set
+2 September on his instruction and tested on both halves of the record
+before it went in). The rupee loss is whatever those two produce --
+about Rs 3,600 -- and it is reported honestly rather than pinned.
+
+With FIXED_STOP_PCT set back to None the width comes from the stock own
+daily range instead, and every branch below that reads day_low, the ATR
+and the widening belongs to that rule.
 
 This file used to do the opposite: risk a fixed number of rupees and
 let the quantity fall out of the stop. That is still in the code,
@@ -168,8 +173,20 @@ def plan(entry, side, day_low=None, day_high=None, atr=None,
     if FIXED_STOP_PCT:
         stop_pct = float(FIXED_STOP_PCT)
         distance = entry * stop_pct / 100.0
-        stop = round(entry - distance if side == "BUY"
-                     else entry + distance, 2)
+        # Round TOWARD entry and re-derive, for the same reason the
+        # ATR branch below does: rounding to nearest moves the stop
+        # away from entry as often as toward it, which widens the real
+        # distance past the width just set, and risk_rs computed off
+        # the pre-rounding distance then reports rupees the trade
+        # cannot lose. ASHOKA at 126.46 read Rs 2,697.39 against a
+        # true Rs 2,694.69.
+        cents = distance * 100.0
+        if side == "BUY":
+            stop = round(math.ceil(entry * 100.0 - cents) / 100.0, 2)
+        else:
+            stop = round(math.floor(entry * 100.0 + cents) / 100.0, 2)
+        distance = abs(entry - stop)
+        stop_pct = distance / entry * 100.0
     else:
         stop = stop_for(entry, side, day_low, day_high, atr)
 

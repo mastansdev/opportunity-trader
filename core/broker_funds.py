@@ -51,13 +51,42 @@ Author : H&M Opportunity Trader
 
 from datetime import datetime
 
-from config import PAPER_STARTING_CAPITAL, TRADING_MODE
+from config import PAPER_STARTING_CAPITAL
+# TRADING_MODE is deliberately NOT imported here. See _mode().
 from core.logger import decision, warn
 
 # In Dhan's order of preference. availabelBalance is what the live API
 # actually returns today; the correctly-spelled key is read too in case
 # they ever fix it, and sodLimit last as the start-of-day figure.
 BALANCE_KEYS = ("availabelBalance", "availableBalance", "sodLimit")
+
+
+def _mode():
+    """TRADING_MODE, read at CALL time, never bound at import.
+
+    ---- ONE DIAL, READ THE SAME WAY EVERYWHERE. 3 Sep 2026. ----
+
+        "the switch ON- REAL & OFF-PAPER both needed to reverify"
+                                            -- the operator
+
+    core/broker_sync.py._is_live() already says this in its own
+    docstring, and says why: "a value captured at import told him the
+    bot was placing REAL orders while TRADING_MODE said PAPER." Eight
+    call sites read it live; this file and main.py were the two that
+    did not.
+
+    HONESTLY: both of this file's reads happen once, during startup,
+    before any switch could be flipped -- so this was never the bug I
+    first said it was. It is still the right shape. A module-level
+    binding is a value that CANNOT follow the dial, and the day the
+    switch does move TRADING_MODE, nobody should have to remember
+    which files were special.
+    """
+    try:
+        import config
+        return getattr(config, "TRADING_MODE", "PAPER")
+    except Exception:                                      # noqa: BLE001
+        return "PAPER"
 
 
 def _num(value):
@@ -183,7 +212,7 @@ def starting_capital(dhan_client=None, mode=None):
     config figure, and SAYING so, because a paper session that refuses
     to start over an expired token helps nobody.
     """
-    live = str(mode if mode is not None else TRADING_MODE).upper() == "LIVE"
+    live = str(mode if mode is not None else _mode()).upper() == "LIVE"
 
     if not live:
         balance = refresh(dhan_client)

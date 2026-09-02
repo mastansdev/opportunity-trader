@@ -21,7 +21,11 @@ he would sit watching fills that never happened.
 Same for a missing client: LIVE without a Dhan client refuses to start.
 """
 
-from config import TRADING_MODE, I_UNDERSTAND_THIS_PLACES_REAL_ORDERS
+from config import I_UNDERSTAND_THIS_PLACES_REAL_ORDERS
+# TRADING_MODE is NOT imported here. _route() below never reads it
+# -- the switch alone decides paper or Dhan -- and the one place
+# that does check it reads it at call time, so a module binding
+# could only ever be a stale copy of a dial that moves.
 
 # ---- THE THIRD MODE IS GONE. 31 August 2026. ----
 #
@@ -119,7 +123,8 @@ class Execution:
         # is chosen per order, by the switch, and the switch begins
         # OFF -- so the ordinary path now starts on paper and stays
         # there until he presses ON.
-        if TRADING_MODE.upper() == "LIVE" and self._live is None:
+        from config import TRADING_MODE as _mode   # at call time
+        if str(_mode).upper() == "LIVE" and self._live is None:
             raise RuntimeError(
                 "TRADING_MODE is LIVE but this process cannot place real "
                 "orders (%s). Refusing to start -- a bot you believe is "

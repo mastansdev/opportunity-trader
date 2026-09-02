@@ -323,6 +323,23 @@ def classify_impact(headline):
     return None
 
 
+_CAMEL_TAG = re.compile(r"#([A-Za-z][A-Za-z0-9]*)")
+_HAS_CAMEL = re.compile(r"#[A-Za-z]*[a-z][A-Z]")
+
+
+def expand_hashtags(headline):
+    """#PersistentSystems -> " Persistent Systems ".
+
+    The feeds write the company as one camelCase word behind a hash.
+    match_symbols() strips the hash and is left with a single token no
+    index key can equal, so the stock is named in plain sight and the
+    event is stored with no ticker at all.
+    """
+    return _CAMEL_TAG.sub(
+        lambda m: " " + re.sub(r"(?<=[a-z])(?=[A-Z])", " ", m.group(1)) + " ",
+        str(headline or ""))
+
+
 def match_symbols(headline, index, limit=3):
     """Symbols named in a headline. Longest phrases first so 'TATA POWER'
     beats 'TATA'.
@@ -330,6 +347,41 @@ def match_symbols(headline, index, limit=3):
     Keys that are already UPPERCASE are matched case-SENSITIVELY -- they
     are short tickers that double as English words (ROUTE, AXIS, TRENT).
     See build_name_index() for why.
+
+    ==========================================================
+    CAMELCASE HASHTAGS.  2 September 2026.
+    ==========================================================
+
+        "fix the ticker matching first"          -- the operator
+
+    4,389 of 18,134 stored events carry no ticker. Most of that is
+    correct -- Trump, the Strait of Hormuz, the RBI governor, a
+    windfall-tax cut -- news with no single listed company in it.
+
+    But the feeds also write "#EicherMotorsRE", "#AurobindoPharma",
+    "#GardenReachShipbuilders", and those ARE the company. Stripping
+    the hash leaves one token that equals no index key, so the stock
+    is named in plain sight and stored as unmatched.
+
+    MEASURED BEFORE IT WAS WRITTEN, across all 4,389:
+
+        70 headlines gain a match from the expansion
+        69 of them resolve to exactly ONE symbol -- all correct on
+           inspection: EICHERMOT, AUROPHARMA, GRSE, BAJAJ-AUTO,
+           NORTHARC, MFSL, FINOPB, APOLLOPIPE, CGCL, PARKHOSPS...
+         1 resolves to two, and that one is the false positive:
+           "#KalyanJewellers Gets #TamilNadu Contract" matched
+           KALYANKJIL and TNPL -- Tamil Nadu Newsprint, a state name
+           read as a company
+
+    So the expansion is trusted ONLY when it names exactly one stock.
+    That takes the 69 and drops the 1, and the error rate is a
+    measurement rather than a hope -- which is what was missing from
+    the last attempt at this.
+
+    A headline that already matched is untouched: the expansion only
+    runs when the ordinary pass found nothing, so nothing that works
+    today can change.
     """
     raw = " " + re.sub(r"[^A-Za-z0-9&\s]", " ", str(headline or "")) + " "
     text = raw.lower()
@@ -359,6 +411,13 @@ def match_symbols(headline, index, limit=3):
             used.append(phrase)
         if len(hits) >= limit:
             break
+
+    if not hits and _HAS_CAMEL.search(str(headline or "")):
+        widened = match_symbols(expand_hashtags(headline), index, limit=limit)
+        # Exactly one, or not at all. See the note above: the only
+        # multi-match in 4,389 events was the only wrong one.
+        if len(widened) == 1:
+            return widened
     return hits
 
 

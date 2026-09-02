@@ -1357,25 +1357,61 @@ def build_app(dashboard_state, trade_controller, master_loader,
             # _bot_trading_now() already follows: a value captured at
             # import once told him the opposite lie, that a LIVE
             # session was PAPER.
-            try:
-                from config import TRADING_MODE as _MODE
-                _live = str(_MODE).upper() == "LIVE"
-            except Exception:                              # noqa: BLE001
-                _live = True        # cannot tell -> say the scarier thing
+            # ---- SAY WHAT THE ROUTER WILL DO. 3 September 2026. ----
+            #
+            #     "the switch ON- REAL & OFF-PAPER both needed to
+            #      reverify again ... but our work is not this i
+            #      believe"                        -- the operator
+            #
+            # He is right, and it was worse than a wrong label. This
+            # read config.TRADING_MODE and announced "nothing reaches
+            # Dhan" on the strength of it. trading/execution._route()
+            # NEVER READS TRADING_MODE:
+            #
+            #     switch OFF  ->  paper. Nothing reaches Dhan.
+            #     switch ON   ->  Dhan, if this process has a live
+            #                     executor at all.
+            #
+            # So with a Dhan client present and TRADING_MODE left at
+            # PAPER -- which is exactly this machine -- pressing ON
+            # routes REAL ORDERS while the terminal says fills are
+            # simulated. The screen was telling him the opposite of
+            # what the money was doing.
+            #
+            # /api/mode has always asked the right question. This now
+            # asks the same one: not what the config says, but whether
+            # this process can actually reach the exchange.
+            _live = getattr(execution, "_live", None) is not None
             decision("=" * 62)
             if _live:
                 decision("  BOT TRADING IS ON. Orders placed from here "
                          "are REAL.")
             else:
-                decision("  BOT TRADING IS ON -- PAPER. Fills are "
-                         "simulated; nothing reaches Dhan.")
+                decision("  BOT TRADING IS ON -- PAPER. This process has "
+                         "no live executor, so nothing reaches Dhan.")
             decision("  Switched from the dashboard. A restart returns to "
                      "watching.")
             decision("=" * 62)
         else:
-            decision(f"[DASHBOARD] Bot trading OFF -- no new entries. "
-                     f"{held} open position(s) keep their stops and "
-                     f"trails.")
+            # ---- THE WORDS WERE THE OLD RULE. 3 September 2026. ----
+            #
+            #     "bot opens with Default OFF = paper trade , after
+            #      clicking ON = real trade mode . is this working
+            #      right now or not"           -- the operator
+            #
+            # It IS working. engine.alert_only is set False in both
+            # positions a few lines above, so the bot trades either
+            # way, and execution.live picks whose money. This line
+            # still described the rule that was removed on 31 August
+            # -- "no new entries" -- and it is the reason he doubted a
+            # switch that was doing exactly what he asked.
+            #
+            # A message that contradicts the code teaches him not to
+            # trust the screen, which costs more than the bug would.
+            decision(f"[DASHBOARD] Bot trading OFF -- PAPER. The bot "
+                     f"keeps trading; fills are simulated and nothing "
+                     f"reaches Dhan. {held} open position(s) keep "
+                     f"their stops and trails.")
         trade_controller.note_action(
             True, f"Bot trading {'ON' if want_trading else 'OFF'}")
         return {"success": True, "trading": want_trading,

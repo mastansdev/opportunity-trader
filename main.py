@@ -72,7 +72,9 @@ from config import EARNINGS_CALENDAR
 # For the startup banner only. The order path reads this itself in
 # trading/execution.py -- this must never become a second place that
 # DECIDES the mode, only a place that reports it.
-from config import TRADING_MODE
+# TRADING_MODE is read through config at each use, never bound
+# here -- see core/broker_funds._mode() for why.
+import config as _cfg
 from core import broker_funds
 # Orders leave via the static IP; everything else stays on the home
 # connection. See core/order_route.py for why that split exists.
@@ -294,7 +296,7 @@ def main():
     # The word at the top of the screen is the one glanced at all day.
     # It must be the truth, not a leftover.
     decision(f"Opportunity Trader -- Layer 1 "
-             f"({str(TRADING_MODE).upper()}, equity only)")
+             f"({str(_cfg.TRADING_MODE).upper()}, equity only)")
     # Say WHERE this process is writing. One file per pid now, so there
     # must never be a question of which log to read -- the 2026-07-28
     # audit read a file three processes were tearing into and got three
@@ -728,7 +730,7 @@ def main():
         # Restoring a saved BALANCE is only correct in PAPER, where the
         # file is the only record there is. In LIVE the broker is the
         # record and the file is a stale copy of it.
-        if str(TRADING_MODE).upper() == "LIVE":
+        if str(_cfg.TRADING_MODE).upper() == "LIVE":
             keep = {"starting_capital": portfolio.starting_capital,
                     "available_capital": portfolio.starting_capital,
                     "realized_pnl": 0.0}
