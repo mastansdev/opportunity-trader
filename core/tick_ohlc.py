@@ -173,6 +173,18 @@ def of(symbol):
     return _latest.get(str(symbol or "").upper())
 
 
+def symbols():
+    """Every symbol the FEED has priced today.
+
+    The board is built from the REST snapshot, which arrives in
+    batches and loses one whenever a call drops -- 382 stocks, 99% of
+    every session on 2 September. The feed is a single persistent
+    connection and lost nothing that day. This is how the board finds
+    the stocks the snapshot forgot.
+    """
+    return list(_latest)
+
+
 def prev_close(symbol):
     """The exchange's own previous close, straight off the tick."""
     row = of(symbol)

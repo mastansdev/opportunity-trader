@@ -5193,6 +5193,52 @@ class DashboardState:
 
         snapshot = self.engine.get_circuit_snapshot()
 
+        # ---- A DROPPED CALL MADE 382 STOCKS CEASE TO EXIST. 2 Sep ----
+        #
+        # The snapshot is a REST poll in batches of 900. When a batch
+        # failed -- 843 of 854 cycles that day -- the stocks in it were
+        # not refused, not scored, not counted anywhere. They were
+        # ABSENT, every skip counter read zero, and the market simply
+        # looked emptier than it was. Five of the day's eleven biggest
+        # movers were subscribed and invisible.
+        #
+        # The FEED had them the whole time. One persistent connection,
+        # zero drops that day, carrying the exchange's own open / high /
+        # low / previous close on every packet. Measured against Dhan's
+        # own minute store over 404,638 minutes: median price difference
+        # 0.000%, p90 0.00%. Prices off the tick are not an
+        # approximation.
+        #
+        # VOLUME IS NOT BORROWED. The same measurement put volume at a
+        # 4.5% median and 66% at p90, and the packet's cumulative volume
+        # has never been checked at all -- so a recovered stock carries
+        # NO volume rather than a guessed one. core/ranker.py already
+        # sorts unmeasured volume last and never scores it as zero, so
+        # the stock is visible and simply cannot win a seat on volume
+        # until a real poll returns.
+        #
+        # Absent -> present but unranked. That is the whole change.
+        try:
+            from core import tick_ohlc
+            for sym in tick_ohlc.symbols():
+                if sym in snapshot:
+                    continue
+                seen = tick_ohlc.of(sym) or {}
+                ltp = seen.get("LTP") or seen.get("high")
+                if not ltp or not seen.get("close"):
+                    continue
+                snapshot[sym] = {
+                    "last_price": ltp,
+                    "open": seen.get("open"),
+                    "high": seen.get("high"),
+                    "low": seen.get("low"),
+                    "close": seen.get("close"),   # the PREVIOUS close
+                    "volume": None,               # unmeasured, not zero
+                    "_from_feed": True,
+                }
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[GL] Could not backfill from the feed: {exc}")
+
         # Instrumentation, 2026-07-28. Three panels went silent live --
         # Gainers/Losers, Sector Heatmap and Shortlist, the only three
         # that share this method -- while Breadth counted all 668. Rather
