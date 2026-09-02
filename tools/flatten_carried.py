@@ -69,13 +69,34 @@ def last_prices(symbols=()):
     fallback, and it is on disk whether anything is running or not.
     """
     out = {}
-    try:
-        snap = json.load(urllib.request.urlopen(SNAPSHOT, timeout=5))
-        out = {p["symbol"]: p.get("last_price") or p.get("cmp")
-               for p in snap.get("open_positions", [])
-               if p.get("last_price") or p.get("cmp")}
-    except Exception:                                      # noqa: BLE001
-        pass
+
+    # ---- BEFORE THE OPEN THE DASHBOARD HAS NO PRICE. 2 Sep 2026. ----
+    #
+    #     "why at opening time i need to do them in hurry?"
+    #
+    # He wanted a clean book before the session and ran this at 09:00.
+    # With no ticks yet the snapshot reports each position's ENTRY price
+    # as its last price -- a placeholder, not a reading -- so all three
+    # carried positions showed Rs +0.00 and would have closed at exactly
+    # what they cost. INTELLECT, RAINBOW and CAPLIPOINT were down
+    # Rs 3,232 at the previous close; that loss would have been written
+    # off to zero and vanished from the record.
+    #
+    # Before 09:15 the last real price is the previous session's close,
+    # which is on disk in the candle store and needs nothing running.
+    # So the snapshot is only trusted once the market is actually open,
+    # and the tool says which price it used either way.
+    from datetime import time as _time
+    market_open = datetime.now().time() >= _time(9, 15)
+
+    if market_open:
+        try:
+            snap = json.load(urllib.request.urlopen(SNAPSHOT, timeout=5))
+            out = {p["symbol"]: p.get("last_price") or p.get("cmp")
+                   for p in snap.get("open_positions", [])
+                   if p.get("last_price") or p.get("cmp")}
+        except Exception:                                  # noqa: BLE001
+            pass
 
     missing = [s for s in symbols if s not in out]
     if not missing or not os.path.exists(CANDLES_DB):
@@ -105,6 +126,38 @@ def carried(state, today):
     return out
 
 
+def the_bot_is_running():
+    """Is a live main.py holding the book in memory right now?
+
+    ---- IT EDITED A FILE THE BOT WAS NOT READING. 2 Sep 2026. ----
+
+    He asked for an empty book before the open, ran this at 09:04 with
+    main.py already up since 08:56, and it reported three positions
+    closed. They were not. This tool edits data/session_state.json; the
+    RUNNING bot holds its own book in memory and writes that file back
+    on save, so the edit was silently overwritten.
+
+    What actually happened: the bot still held all three, sold
+    INTELLECT and RAINBOW itself on trailing stops at 09:16 and 09:20,
+    and carried CAPLIPOINT into the day occupying a seat. NUVAMA
+    arrived at 10:38 on 26.65x its normal volume and was refused for
+    "book full". A real trade, lost to a maintenance tool that should
+    never have been runnable in that state.
+
+    It also wrote three trades into core/trade_memory.py that never
+    happened, so the same two positions are recorded twice -- once as
+    the real trailing-stop exit and once as a phantom.
+
+    The dashboard's SELL button is the correct path while the bot is
+    up: it goes to the running process, which owns the book.
+    """
+    try:
+        json.load(urllib.request.urlopen(SNAPSHOT, timeout=3))
+        return True
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser(description="Close carried positions.")
     ap.add_argument("--close", action="store_true",
@@ -115,6 +168,24 @@ def main():
     if not os.path.exists(STATE):
         print("  no session state to read")
         return 0
+    if the_bot_is_running():
+        print("  REFUSING: main.py is running and owns the book.")
+        print()
+        print("  This tool edits data/session_state.json. A running bot")
+        print("  holds its positions in MEMORY and writes that file back")
+        print("  on save, so anything changed here is overwritten and the")
+        print("  positions stay open -- while the trades get written to")
+        print("  trade memory as though they had closed.")
+        print()
+        print("  To close a position while the bot is up, use the SELL")
+        print("  button on the dashboard's Trade tab. That reaches the")
+        print("  running process, which is the only thing that can")
+        print("  actually close it.")
+        print()
+        print("  This tool is for a stopped bot -- before the session or")
+        print("  after it.")
+        return 1
+
     state = json.load(open(STATE, encoding="utf-8"))
     rows = carried(state, args.date)
     if not rows:
@@ -123,7 +194,11 @@ def main():
         return 0
 
     prices = last_prices([symbol for symbol, _, _ in rows])
-    print(f"  {len(rows)} position(s) carried from an earlier session:")
+    from datetime import time as _t
+    _source = ("the live price" if datetime.now().time() >= _t(9, 15)
+               else "the previous close -- the market is not open yet")
+    print(f"  {len(rows)} position(s) carried from an earlier session, "
+          f"priced at {_source}:")
     plan = []
     for symbol, pos, opened in rows:
         price = prices.get(symbol)

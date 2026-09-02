@@ -170,12 +170,52 @@ def rows_for(date):
     return trades
 
 
+#: Exits that are NOT the bot deciding. A position carried in from an
+#: earlier session and closed by hand is somebody clearing the book, and
+#: its P&L was earned on the day it was OPENED.
+NOT_THE_BOTS_DOING = ("CARRIED_OVERNIGHT_CLOSED_BY_HAND", "MANUAL_EXIT",
+                      "MANUAL_PARTIAL")
+
+
 def render(date, trades):
+    """---- YESTERDAY'S LOSS LANDED ON TODAY'S CARD. 2 Sep 2026. ----
+
+        "close them, i want clean start."
+        "can't we distinguish them?"
+
+    He closed three positions carried from 1 September before the open
+    on the 2nd, to start the day with an empty book. They were filed
+    under the 2nd -- so the first clean measurement of the new rules
+    would have opened -Rs 3,794 down on trades it never made, taken on
+    rules that no longer exist.
+
+    They are not hidden: hiding a real loss is worse than mixing it in.
+    They are SEPARATED, with their own total, and the bot's own trades
+    are totalled on their own so the day can be read for what it is.
+    """
+    bots = [t for t in trades
+            if (t.get("exit_reason") or "") not in NOT_THE_BOTS_DOING]
+    carried = [t for t in trades if t not in bots]
+
     out = []
     add = out.append
     add("=" * 78)
     add(f"  EVERY TRADE ON {date}")
     add("=" * 78)
+
+    if carried:
+        add("")
+        add(f"  FIRST -- {len(carried)} position(s) closed by hand, not by "
+            f"the bot.")
+        for t in carried:
+            opened = str(t.get("entry_time") or "")[:10]
+            add(f"    {t.get('symbol'):<11} opened {opened}, closed by hand"
+                f"   Rs {t.get('pnl') or 0:+,.0f}   "
+                f"{t.get('exit_reason') or ''}")
+        add(f"    Their Rs {sum(t.get('pnl') or 0 for t in carried):+,.0f} "
+            f"was earned on the day they were OPENED and is kept out of "
+            f"the bot's total below.")
+        trades = bots
 
     if not trades:
         add("")
