@@ -3250,6 +3250,24 @@ class DashboardState:
             refusals = dict(got.get("refusals") or {})
             refusals.update(got.get("refused_by_symbol") or {})
             self._decisions.record_refusals(refusals)
+
+            # ---- 89 STOCKS, NO NAMES. 2 September 2026. ----
+            #
+            # "no event -- not evaluated" is the biggest refusal of most
+            # sessions and the only one that names nobody: a stock that
+            # never reached the pool was never refused, so it leaves no
+            # trace. On 1 September SAKAR (+11.9%), IZMO (+10.0%),
+            # JAYKAY, YATRA and TNPL were all missing from the record
+            # before 11:38 for exactly that reason.
+            #
+            # Recorded WITH THE NUMBER: how close each moving stock came
+            # to the volume bar it needed. "6.4x, bar 10x" is an
+            # argument; "no reason" is not.
+            try:
+                self._decisions.record_pool_misses(
+                    self._pool_misses(movers))
+            except Exception as exc:                       # noqa: BLE001
+                diagnostic(f"[RANK] Could not record pool misses: {exc}")
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[RANK] Could not record: {exc}")
 
@@ -6339,6 +6357,45 @@ class DashboardState:
                         out.add(symbol)
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[RANK] Could not seed by volume surge: {exc}")
+        return out
+
+    def _pool_misses(self, movers):
+        """{symbol: why it never entered the pool}, for MOVING stocks.
+
+        Only stocks already up MIN_MOVE_FROM_PREV_CLOSE_PCT -- the same
+        floor the ranker uses -- because a quiet stock outside the pool
+        is not a missed opportunity and 1,300 of them would bury the
+        ones that are. On 1 September that floor left 78 names, not
+        1,300.
+
+        The reason always carries the stock's ACTUAL volume multiple
+        against the bar, so the record can be argued with.
+        """
+        try:
+            from core.rules import (MIN_MOVE_FROM_PREV_CLOSE_PCT,
+                                    SURGE_REASON_MIN_RATIO)
+        except Exception:                                  # noqa: BLE001
+            return {}
+        inside = {str(r.get("symbol") or "").upper() for r in (movers or [])}
+        surging = self._surging_now() or {}
+        out = {}
+        for row in (self._compute_gl_rows() or []):
+            symbol = str(row.get("symbol") or "").upper()
+            if not symbol or symbol in inside:
+                continue
+            try:
+                move = float(row.get("change_pct") or 0)
+            except (TypeError, ValueError):
+                continue
+            if move < MIN_MOVE_FROM_PREV_CLOSE_PCT:
+                continue
+            ratio = surging.get(symbol)
+            if ratio is None:
+                seen = "volume unmeasured"
+            else:
+                seen = f"volume {ratio:.1f}x (bar {SURGE_REASON_MIN_RATIO:.0f}x)"
+            out[symbol] = (f"up {move:.1f}% and never in the pool: "
+                           f"nothing published, {seen}")
         return out
 
     def _surging_now(self):

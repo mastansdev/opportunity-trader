@@ -61,7 +61,7 @@ import threading
 from config import CIRCUIT_PROXIMITY_PCT, CIRCUIT_POLL_INTERVAL_SECONDS
 import datetime as _dt
 
-from core.logger import diagnostic, warn
+from core.logger import decision, diagnostic, warn, when_it_changes
 
 UPPER = "UPPER"
 LOWER = "LOWER"
@@ -232,16 +232,50 @@ class CircuitMonitor:
         # tomorrow does not land exactly on the edge. The poll interval
         # already spaces the cycles; two batches cost one extra request
         # per cycle and keep circuit protection alive.
+        # ---- A HALF-EMPTY SNAPSHOT LOOKED COMPLETE. 2 Sep 2026. ----
+        #
+        # The universe is 1,282 and goes out in two batches, 900 + 382.
+        # This loop used to BREAK when a batch failed, then report
+        # status "success" -- because status had already been set by the
+        # first batch. So a failed SECOND call silently produced a
+        # 900-stock board while every counter said it was whole:
+        #
+        #     [CIRCUIT_MONITOR] 1282 symbols checked, 1282 rows cached
+        #     [GL] 900 rows from 900 symbols. Skipped: all zero
+        #
+        # Measured over two sessions: the board ran on ~900 for 843 of
+        # 854 cycles on 2 September and 596 of 618 on the 1st. THIRTY
+        # PERCENT OF THE UNIVERSE, invisible, all day, both days -- and
+        # the bot cannot refuse a stock it has never been shown. Five of
+        # that day's eleven biggest movers were subscribed and simply
+        # absent: ANTELOPUS, INDOCO, XPROINDIA, BODALCHEM, MOREPENLAB.
+        #
+        # The batches are INDEPENDENT. One failing says nothing about
+        # the next, and stopping at the first failure is what threw away
+        # the last 382 stocks on every cycle.
         merged = {}
         status = None
+        asked = len(security_ids)
+        failed_batches = 0
         for start in range(0, len(security_ids), QUOTE_BATCH_SIZE):
             batch = security_ids[start:start + QUOTE_BATCH_SIZE]
-            response = self._quote_fn(
-                {self._exchange_segment: [int(sid) for sid in batch]}
-            )
+            # ONE RETRY. The failures on record are transient -- an
+            # aborted connection, a reset, a DNS blip resolving
+            # api.dhan.co -- not a refusal. Losing 382 stocks for a
+            # whole cycle because one packet dropped is not a trade-off
+            # worth taking, and a second attempt costs one request.
+            response = None
+            for attempt in (1, 2):
+                response = self._quote_fn(
+                    {self._exchange_segment: [int(sid) for sid in batch]}
+                )
+                if isinstance(response, dict) \
+                        and response.get("status") == "success":
+                    break
             if not isinstance(response, dict) \
                     or response.get("status") != "success":
-                break
+                failed_batches += 1
+                continue
             status = "success"
             piece = response.get("data", {})
             if isinstance(piece, dict) and "data" in piece:
@@ -253,6 +287,30 @@ class CircuitMonitor:
         if status == "success":
             response = {"status": "success",
                         "data": {self._exchange_segment: merged}}
+            # ---- SAY IT WHEN THE BOARD IS SHORT. ----
+            #
+            # A partial snapshot is not an error the bot can see: the
+            # missing stocks simply do not exist, every skip counter
+            # reads zero, and the market looks like it had nothing in
+            # it. Said when it CHANGES rather than every three seconds,
+            # so a chronic shortfall is loud once and a recovery is
+            # loud too.
+            got = len(merged)
+            if got < asked:
+                when_it_changes(
+                    "snapshot-short",
+                    f"[CIRCUIT_MONITOR] THE BOARD IS SHORT: {got:,} of "
+                    f"{asked:,} stocks, {asked - got:,} missing "
+                    f"({failed_batches} batch(es) failed). Those stocks "
+                    f"are not refused -- they are absent, and cannot be "
+                    f"ranked or traded until the quote call recovers.",
+                    how=warn)
+            else:
+                when_it_changes(
+                    "snapshot-short",
+                    f"[CIRCUIT_MONITOR] Board complete again: all "
+                    f"{asked:,} stocks present.",
+                    how=decision)
 
         if not isinstance(response, dict) or response.get("status") != "success":
             # ---- IT PRINTED THE WRONG FIELD. 5 August 2026. ----

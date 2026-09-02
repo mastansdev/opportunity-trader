@@ -165,6 +165,14 @@ class DecisionLog:
             # instead -- about 1,100 rows a day, and `n` counts how
             # many cycles it was refused for that reason.
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS pool_misses (
+                    date TEXT NOT NULL, symbol TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    first_at TEXT NOT NULL, last_at TEXT NOT NULL,
+                    n INTEGER NOT NULL DEFAULT 1,
+                    UNIQUE (date, symbol, reason)
+                )""")
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS refused_symbols (
                     date TEXT NOT NULL, symbol TEXT NOT NULL,
                     reason TEXT NOT NULL,
@@ -244,6 +252,76 @@ class DecisionLog:
             diagnostic(f"[DECISIONS] Could not write: {exc}")
             return 0
         return len(payload)
+
+    def record_pool_misses(self, misses, when=None):
+        """Stocks that were MOVING and never entered the candidate pool.
+
+        ---- 89 STOCKS, NO NAMES. 2 September 2026. ----
+
+            "no event -- not evaluated x89"
+
+        That line is the largest refusal of most sessions and it is the
+        only one that names nobody. A stock reaches the pool through
+        one of a few doors -- a filing, a news item, a results grade,
+        reporting today, or trading at SURGE_REASON_MIN_RATIO times its
+        own normal volume. Miss all of them and it is never scored, so
+        there is no refusal to record and the stock leaves no trace at
+        all.
+
+        On 1 September the market offered 37 stocks up 3%+ on three
+        times their normal volume. SAKAR (+11.9%), IZMO (+10.0%),
+        JAYKAY (+8.3%), YATRA (+7.0%) and TNPL (+6.0%) were all missing
+        from the record before 11:38, because they were not refused --
+        they were never looked at.
+
+        WHAT THIS RECORDS, AND WHY THE NUMBER MATTERS. Not "it had no
+        reason" but HOW CLOSE IT CAME: the volume multiple it actually
+        reached against the bar it needed. If a day's best movers sit
+        at 6-9x against a 10x bar, that is an argument to move the bar
+        with evidence behind it. If they sit at 1.5x, the bar is right
+        and the answer is somewhere else. Those two look identical
+        today.
+
+            "i want your complete understanding & guidance . never
+             average or assume"
+
+        So this stores one row per stock per distinct reason, with its
+        own first and last time and a count -- never a total, never an
+        average. Same shape as refused_symbols beside it.
+
+        Only stocks that are actually MOVING are recorded. A market of
+        1,300 quiet stocks is not a missed opportunity and writing them
+        down would bury the ones that are.
+        """
+        if not misses:
+            return 0
+        now = when or datetime.now()
+        day = now.strftime("%Y-%m-%d")
+        at = now.strftime("%Y-%m-%d %H:%M:%S")
+        rows = []
+        for symbol, reason in dict(misses).items():
+            name = str(symbol or "").strip().upper()
+            why = str(reason or "").strip()
+            if name and why:
+                rows.append((day, name, why, at, at))
+        if not rows:
+            return 0
+        try:
+            with self._lock:
+                conn = self._connect()
+                conn.executemany(
+                    "INSERT INTO pool_misses "
+                    "(date, symbol, reason, first_at, last_at, n) "
+                    "VALUES (?,?,?,?,?,1) "
+                    "ON CONFLICT (date, symbol, reason) DO UPDATE SET "
+                    "last_at = excluded.last_at, n = pool_misses.n + 1",
+                    rows)
+                conn.commit()
+            return len(rows)
+        except Exception as exc:                           # noqa: BLE001
+            from core.logger import diagnostic
+            diagnostic(f"[DECISIONS] Could not record pool misses: {exc}")
+            return 0
 
     def record_refusals(self, counts, when=None):
         """Why candidates were turned away, and how many of each.
