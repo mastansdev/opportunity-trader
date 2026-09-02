@@ -636,6 +636,12 @@ def _alert_lines(row, plan):
     lev = _num(row.get("mtf_leverage"))
     if lev is not None:
         room.append(f"MTF {lev:.1f}x")
+    elif row.get("cash_only"):
+        # Dhan margins nothing here, so this one costs full cash. Said
+        # out loud because the ranker no longer refuses it -- see the
+        # note at the mtf check in core/ranker.py. He asked for the
+        # trade to be offered; he should still see what it will cost.
+        room.append("no MTF -- full cash, 1x")
     adv = _num(row.get("adv_cr"))
     if adv is not None:
         room.append(f"Rs {adv:.1f}cr traded on a normal day")

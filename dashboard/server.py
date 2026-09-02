@@ -321,12 +321,47 @@ def build_app(dashboard_state, trade_controller, master_loader,
     # neither, so every route they held now lands on the board. The
     # token is carried through: dropping it turns a working screen into
     # a read-only one, which is how "the switch does nothing" starts.
+    # ==========================================================
+    # THE DESK IS THE DASHBOARD NOW.  2 September 2026.
+    # ==========================================================
+    #
+    #     "this is better than current dashboard"
+    #     "make this my real dashboard with remaining tabs"
+    #
+    # /desk answers the five questions a trader actually asks, in the
+    # order they are asked -- where am I, what is moving, what would I
+    # do about it, what am I holding, what have I done -- and keeps the
+    # other seven tabs as reference behind it.
+    #
+    # /board IS STILL THERE, unchanged, and this file still serves it.
+    # The rule this project has followed since 6 August stands: a new
+    # page goes BESIDE the working one, never in place of it, because a
+    # mistake here costs a session. He asked for the desk to be the
+    # dashboard, so "/" points at it -- but if anything is wrong at
+    # 09:15 the old board is one word away, with the same token.
+    @app.get("/desk", response_class=HTMLResponse)
+    def desk(token: str = ""):
+        path = os.path.join(os.path.dirname(INDEX_PATH), "desk.html")
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                html = handle.read()
+        except OSError as exc:                             # noqa: BLE001
+            return f"<pre>dashboard/static/desk.html unreadable: {exc}</pre>"
+        # Same replacement, same placeholder, same rule as /board:
+        # without the operator link the string stays empty and the page
+        # draws no BUY control at all.
+        if _token_matches(token):
+            html = html.replace(
+                _TOKEN_PLACEHOLDER,
+                f'window.__OPERATOR_TOKEN__ = "{operator_token or ""}";')
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
     @app.get("/screen")
     @app.get("/old")
     @app.get("/")
     @app.get("/app")
     def _to_the_board(token: str = ""):
-        where = "/board" + (f"?token={token}" if token else "")
+        where = "/desk" + (f"?token={token}" if token else "")
         return RedirectResponse(where, status_code=307)
 
     @app.post("/api/refresh_gainers_losers")

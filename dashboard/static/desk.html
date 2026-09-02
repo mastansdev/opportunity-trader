@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Opportunity Trader &mdash; Desk</title>
+<style>
+/* ============================================================
+   THE DESK. 2 September 2026.
+
+       "this is better than current dashboard"
+       "make this my real dashboard with remaining tabs"
+
+   Five questions, in the order a trader asks them: where am I,
+   what is moving, what would I do about it, what am I holding,
+   what have I done. The other seven tabs are unchanged in
+   purpose -- they are reference, not the trading surface.
+   ============================================================ */
+:root{
+  --ground:#EEF1F5; --panel:#FFF; --sunk:#E4E9EF; --line:#CFD8E3;
+  --hair:#E2E8F0; --ink:#111821; --mid:#4A5A6B; --dim:#7A8A9B;
+  --up:#0E8F4C; --up-bg:#DCF2E6; --down:#C03028; --down-bg:#FAE2E0;
+  --accent:#33417A; --accent-bg:#E3E7F5; --warn:#8A5A05; --warn-bg:#FAEEDA;
+}
+@media (prefers-color-scheme:dark){:root{
+  --ground:#0C1117; --panel:#141B23; --sunk:#0F161D; --line:#26313D;
+  --hair:#1D2731; --ink:#E5EDF5; --mid:#9AACBD; --dim:#6C7E90;
+  --up:#3CC97E; --up-bg:#0E2E1F; --down:#EE7168; --down-bg:#33191A;
+  --accent:#93A4E4; --accent-bg:#1A2140; --warn:#E0AE55; --warn-bg:#2F2411;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-size:14px;
+  line-height:1.5;-webkit-font-smoothing:antialiased;
+  font-family:"Segoe UI",system-ui,-apple-system,sans-serif}
+.n{font-variant-numeric:tabular-nums;
+  font-family:"Cascadia Mono",Consolas,ui-monospace,monospace}
+.up{color:var(--up)} .down{color:var(--down)} .dim{color:var(--dim)}
+.wrap{max-width:1400px;margin:0 auto;padding:14px 16px 60px;
+  display:flex;flex-direction:column;gap:14px}
+
+/* ---- top bar ---- */
+.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+h1{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em}
+.clock{font-size:12px;color:var(--dim)}
+.sw{margin-left:auto;display:flex;align-items:center;gap:8px}
+.sw button{font:inherit;font-weight:700;font-size:12px;letter-spacing:.06em;
+  padding:7px 16px;border-radius:6px;border:1px solid var(--line);
+  background:var(--panel);color:var(--mid);cursor:pointer}
+.sw button.on{background:var(--up);border-color:var(--up);color:#fff}
+.sw button.off{background:var(--down);border-color:var(--down);color:#fff}
+#switchwhy{font-size:11.5px;color:var(--warn);display:none}
+
+/* ---- tabs ---- */
+.tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.tab{font:inherit;font-size:13px;font-weight:600;padding:8px 15px;border:0;
+  border-bottom:2px solid transparent;background:none;color:var(--dim);
+  cursor:pointer;margin-bottom:-1px}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* ---- context strip ---- */
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+  background:var(--panel);border:1px solid var(--line);border-radius:7px;
+  overflow:hidden}
+.strip>div{padding:9px 13px;border-right:1px solid var(--hair);
+  display:flex;flex-direction:column;gap:1px;min-width:0}
+.strip>div:last-child{border-right:0}
+.strip .k{font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--dim)}
+.strip .v{font-size:18px;font-weight:700;line-height:1.25}
+.strip .s{font-size:10.5px;color:var(--mid)}
+
+/* ---- panels ---- */
+.cols{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;align-items:start}
+@media(max-width:960px){.cols{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:7px;
+  overflow:hidden}
+.hd{padding:10px 14px;border-bottom:1px solid var(--hair);display:flex;
+  align-items:baseline;gap:9px;flex-wrap:wrap}
+.hd b{font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.hd .sub{font-size:11.5px;color:var(--dim)}
+.scroll{overflow-x:auto}
+.list{max-height:560px;overflow-y:auto}
+
+/* ---- opportunity rows ---- */
+.op{display:grid;grid-template-columns:auto 1fr auto;gap:2px 12px;
+  padding:10px 14px;border-bottom:1px solid var(--hair);cursor:pointer;
+  border-left:3px solid transparent}
+.op:last-child{border-bottom:0}
+.op:hover{background:var(--sunk)}
+.op.sel{border-left-color:var(--accent);background:var(--sunk)}
+.op .sym{font-weight:700;font-size:15px}
+.op .px{text-align:right;white-space:nowrap;font-size:12.5px}
+.op .why{grid-column:1/3;font-size:12px;color:var(--mid)}
+.op .sig{grid-column:3;text-align:right;font-size:10.5px;color:var(--dim);
+  white-space:nowrap}
+.tag{display:inline-block;font-size:9px;letter-spacing:.05em;padding:1px 6px;
+  border-radius:3px;margin-left:5px;vertical-align:1.5px;font-weight:600}
+.tag.news{background:var(--accent-bg);color:var(--accent)}
+.tag.vol{background:var(--warn-bg);color:var(--warn)}
+.tag.cash{background:var(--warn-bg);color:var(--warn)}
+.tag.held{background:var(--up-bg);color:var(--up)}
+
+/* ---- plan ---- */
+.plan{padding:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--hair);
+  border:1px solid var(--hair);border-radius:6px;overflow:hidden;margin-top:12px}
+.grid>div{background:var(--panel);padding:9px 11px;display:flex;
+  flex-direction:column;gap:1px}
+.grid .k{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.grid .v{font-size:15px;font-weight:600}
+.bar{height:7px;border-radius:4px;background:var(--sunk);overflow:hidden;
+  display:flex;margin-top:12px}
+.bar i{display:block;height:100%}
+.barlab{display:flex;justify-content:space-between;font-size:10.5px;
+  color:var(--dim);margin-top:4px}
+.act{display:flex;gap:8px;margin-top:13px}
+.act button{font:inherit;font-weight:700;font-size:13px;letter-spacing:.04em;
+  text-transform:uppercase;padding:9px 0;border-radius:6px;
+  border:1px solid transparent;cursor:pointer;flex:1}
+.buy{background:var(--up);color:#fff}
+.skip{background:transparent;color:var(--mid);border-color:var(--line)}
+.note{margin-top:12px;font-size:12px;color:var(--mid);
+  border-left:3px solid var(--line);padding-left:10px}
+.note.flag{border-left-color:var(--warn)}
+
+/* ---- tables ---- */
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+  text-align:left;font-weight:600;padding:8px 14px;
+  border-bottom:1px solid var(--hair);white-space:nowrap}
+td{padding:9px 14px;border-bottom:1px solid var(--hair);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;
+  font-family:"Cascadia Mono",Consolas,ui-monospace,monospace}
+tr.hand td{background:var(--sunk)}
+.foot td{font-weight:700;border-top:2px solid var(--line)}
+.empty{padding:20px 14px;color:var(--dim);font-size:12.5px;margin:0}
+.stopbar{height:4px;background:var(--sunk);border-radius:3px;overflow:hidden;
+  min-width:56px;margin-top:3px}
+.stopbar i{display:block;height:100%;background:var(--down)}
+.pane{display:flex;flex-direction:column;gap:14px}
+</style></head><body>
+
+<div class="wrap">
+
+  <div class="top">
+    <h1>Opportunity Trader</h1>
+    <span class="clock" id="clock">connecting&hellip;</span>
+    <div class="sw">
+      <span id="switchwhy"></span>
+      <span class="dim" style="font-size:11px" id="modelab"></span>
+      <button id="btn-on">ON &mdash; real</button>
+      <button id="btn-off">OFF &mdash; paper</button>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab on" data-tab="live">Live</button>
+    <button class="tab" data-tab="pre">Pre</button>
+    <button class="tab" data-tab="trade">Trade</button>
+    <button class="tab" data-tab="post">Post</button>
+    <button class="tab" data-tab="watch">Watch</button>
+    <button class="tab" data-tab="brain">Brain</button>
+    <button class="tab" data-tab="tg">Telegram</button>
+    <button class="tab" data-tab="refused">Blocked</button>
+  </div>
+
+  <div class="strip" id="strip"></div>
+
+  <!-- ================= LIVE ================= -->
+  <div class="pane" id="live-pane">
+    <div class="cols">
+      <div class="card">
+        <div class="hd"><b>What is moving, and why</b>
+          <span class="sub">ranked by how unusual the volume is</span></div>
+        <div class="list" id="oplist"></div>
+      </div>
+      <div class="card">
+        <div class="hd"><b>The trade</b><span class="sub">before you press anything</span></div>
+        <div class="plan" id="plan"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="hd"><b>Open now</b>
+        <span class="sub">the only thing that can still hurt you</span></div>
+      <div class="scroll" id="open"></div>
+    </div>
+
+    <div class="card">
+      <div class="hd"><b>Closed today</b>
+        <span class="sub">shaded rows were closed by hand, not by the bot</span></div>
+      <div class="scroll" id="closed"></div>
+    </div>
+  </div>
+
+  <!-- ================= OTHER TABS ================= -->
+  <div class="pane" id="pre-pane" style="display:none">
+    <div class="card"><div class="hd"><b>Pre-open</b>
+      <span class="sub">where the day started</span></div>
+      <div class="scroll" id="pre"></div></div>
+    <div class="card"><div class="hd"><b>Results due today</b></div>
+      <div class="scroll" id="results"></div></div>
+  </div>
+
+  <div class="pane" id="trade-pane" style="display:none">
+    <div class="card"><div class="hd"><b>Paper trades</b>
+      <span class="sub">the switch is OFF</span></div>
+      <div class="scroll" id="paper"></div></div>
+    <div class="card"><div class="hd"><b>Real trades</b>
+      <span class="sub">the switch is ON &mdash; the bot's own orders</span></div>
+      <div class="scroll" id="real"></div></div>
+    <div class="card"><div class="hd"><b>Your own Dhan trades</b>
+      <span class="sub">yours, not the bot's &mdash; shown, never managed</span></div>
+      <div class="scroll" id="mine"></div></div>
+  </div>
+
+  <div class="pane" id="post-pane" style="display:none">
+    <div class="card"><div class="hd"><b>How the day went</b></div>
+      <div class="scroll" id="perf"></div></div>
+    <div class="card"><div class="hd"><b>Stocks that moved and never reached the board</b>
+      <span class="sub">what the pool missed, and why</span></div>
+      <div class="scroll" id="misses"></div></div>
+  </div>
+
+  <div class="pane" id="watch-pane" style="display:none">
+    <div class="card"><div class="hd"><b>Watchlist</b></div>
+      <div class="scroll" id="watch"></div></div>
+  </div>
+
+  <div class="pane" id="brain-pane" style="display:none">
+    <div class="card"><div class="hd"><b>What the bot has learned</b></div>
+      <div class="scroll" id="brain"></div></div>
+    <div class="card"><div class="hd"><b>System health</b>
+      <span class="sub">a short board must never look like a quiet market</span></div>
+      <div class="scroll" id="health"></div></div>
+  </div>
+
+  <div class="pane" id="tg-pane" style="display:none">
+    <div class="card"><div class="hd"><b>Telegram channels</b></div>
+      <div class="scroll" id="tg"></div></div>
+    <div class="card"><div class="hd"><b>News and filings today</b></div>
+      <div class="scroll" id="news"></div></div>
+  </div>
+
+  <div class="pane" id="refused-pane" style="display:none">
+    <div class="card"><div class="hd"><b>Refused today</b>
+      <span class="sub">every stock the bot turned away, and the reason</span></div>
+      <div class="scroll" id="refused"></div></div>
+  </div>
+
+</div>
+
+<script>
+window.__OPERATOR_TOKEN__ = "";
+var IS_OPERATOR = window.__OPERATOR_TOKEN__ !== "";
+var SEL = null, LAST = null, LAST_OK = Date.now(), STALE = false;
+
+function $(id){ return document.getElementById(id); }
+function num(v){ var n = parseFloat(v); return isFinite(n) ? n : null; }
+function inr(v){ var n = num(v); return n === null ? "—"
+  : n.toLocaleString("en-IN",{maximumFractionDigits:0}); }
+function inr2(v){ var n = num(v); return n === null ? "—"
+  : n.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function esc(s){ return String(s === null || s === undefined ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;"); }
+function pnl(v){ var n = num(v); if (n === null) return '<span class="dim">—</span>';
+  return '<span class="'+(n>=0?"up":"down")+'">'+(n>=0?"+":"−")+inr(Math.abs(n))+'</span>'; }
+/* A payload section may be a list, or {rows:[...]}, or absent. */
+function rowsOf(x){
+  if (!x) return [];
+  if (Array.isArray(x)) return x;
+  if (Array.isArray(x.rows)) return x.rows;
+  return [];
+}
+function mins(v){
+  var n = num(v); if (n === null) return "—";
+  if (n < 60) return Math.round(n) + " min";
+  var h = Math.floor(n/60), m = Math.round(n%60);
+  return h + "h " + (m<10?"0":"") + m + "m";
+}
+
+/* ---------------- tabs ---------------- */
+var PANES = ["live","pre","trade","post","watch","brain","tg","refused"];
+Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(b){
+  b.addEventListener("click", function(){
+    Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(x){
+      x.classList.remove("on"); });
+    b.classList.add("on");
+    PANES.forEach(function(p){
+      $(p + "-pane").style.display = (p === b.dataset.tab) ? "" : "none"; });
+  });
+});
+
+/* ---------------- 1. where am I ---------------- */
+function drawStrip(d){
+  var cap = d.capital || {};
+  var perf = d.performance || {};
+  var open = rowsOf(d.open_positions);
+  var closed = rowsOf(d.closed_positions);
+  var free = num(cap.available_capital);
+  if (free === null) free = num(cap.available);
+  var realized = num(cap.realized_pnl);
+  if (realized === null) realized = num(perf.realized_pnl);
+  var adv = num(d.advances), dec = num(d.declines), uni = num(d.universe_size);
+  var short = rowsOf(d.shortlist);
+
+  var cells = [
+    ["Capital free", free === null ? "—" : inr(free),
+     (open.length||0) + " open"],
+    ["Today", realized === null ? "—" :
+      '<span class="'+(realized>=0?"up":"down")+'">'+
+      (realized>=0?"+":"−")+inr(Math.abs(realized))+'</span>',
+     closed.length + " closed"],
+    ["Advancing", adv === null ? "—" : inr(adv),
+     dec === null ? "" : inr(dec) + " falling"],
+    ["On the board", inr(short.length),
+     uni === null ? "" : "of " + inr(uni) + " watched"],
+    ["Updated", esc(d.updated_at || "—"),
+     d.session_ended ? "session ended" : "live"]
+  ];
+  $("strip").innerHTML = cells.map(function(c){
+    return '<div><span class="k">'+c[0]+'</span><span class="v n">'+c[1]+
+           '</span><span class="s">'+c[2]+'</span></div>'; }).join("");
+}
+
+/* ---------------- 2. what is moving ---------------- */
+/* Reasons arrive from three places -- the ranker's own sentence, a
+   filing headline, and Telegram -- and the last two carry emoji, a
+   "#SYMBOL" prefix and 300 characters of "Recent Events:" tail. The
+   row has one line to say why, so this keeps the first clause and
+   throws the decoration away. */
+function reasonOf(r){
+  var t = String(r.why || r.reason || r.mechanism || "");
+  t = t.split("•")[0].split("Recent Events")[0];
+  t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE0F}\u{2028}]/gu, "");
+  t = t.replace(/#\w+/g, "").replace(/\s{2,}/g, " ").replace(/^[\s—–-]+/, "").trim();
+  if (t.length > 110) t = t.slice(0, 107).replace(/\s\S*$/, "") + "…";
+  return t || "nothing published — the tape only";
+}
+/* WORD BOUNDARIES, NOT SUBSTRINGS. WINDLAS was tagged ORDER because
+   "Windlas" contains "win" -- a label that lies about why a stock is
+   on the board is worse than no label. */
+function tagOf(r){
+  var kind = String(r.event_kind || r.filing_kind || r.news_kind || "").toUpperCase();
+  if (/ORDER/.test(kind)) return ["order","ORDER"];
+  if (kind) return ["news","NEWS"];
+  var t = String(r.why || r.mechanism || "");
+  if (/\b(order|contract|awarded|bags|wins)\b/i.test(t)) return ["order","ORDER"];
+  if (/\b(result|results|news|filing|approval|deal|fund|raise|scheme|rating)\b/i.test(t))
+    return ["news","NEWS"];
+  return ["vol","VOLUME ONLY"];
+}
+function drawList(d){
+  var rows = rowsOf(d.shortlist);
+  if (!rows.length){
+    $("oplist").innerHTML = '<p class="empty">Nothing is moving with volume '+
+      'behind it. A quiet day is a correct day.</p>';
+    $("plan").innerHTML = '<p class="empty">Pick a stock on the left.</p>';
+    return;
+  }
+  if (SEL === null || !rows.some(function(r){ return r.symbol === SEL; }))
+    SEL = rows[0].symbol;
+
+  $("oplist").innerHTML = rows.map(function(r){
+    var tg = tagOf(r), vx = num(r.volume_x), adv = num(r.adv_cr);
+    var chg = num(r.change_pct);
+    return '<div class="op'+(r.symbol===SEL?" sel":"")+'" data-s="'+esc(r.symbol)+'">'
+      + '<span class="sym">'+esc(r.symbol)
+      + '<span class="tag '+tg[0]+'">'+tg[1]+'</span>'
+      + (r.cash_only ? '<span class="tag cash">CASH 1x</span>' : '')
+      + (r.held ? '<span class="tag held">HELD</span>' : '')
+      + '</span><span></span>'
+      + '<span class="px n">'+inr2(r.ltp)+'<br>'
+      + (chg===null?'' : '<span class="'+(chg>=0?"up":"down")+'">'
+         +(chg>=0?"+":"")+chg.toFixed(1)+'%</span>')+'</span>'
+      + '<span class="why">'+esc(reasonOf(r))+'</span>'
+      + '<span class="sig n">'+(vx===null?"volume unmeasured":vx.toFixed(1)+"× normal")
+      + (adv===null?"":" · ₹"+adv.toFixed(1)+" cr/day")+'</span></div>';
+  }).join("");
+
+  Array.prototype.forEach.call($("oplist").querySelectorAll(".op"), function(el){
+    el.addEventListener("click", function(){
+      SEL = el.dataset.s; drawList(LAST); drawPlan(LAST); });
+  });
+  drawPlan(d);
+}
+
+/* ---------------- 3. what would I do ---------------- */
+function drawPlan(d){
+  var rows = rowsOf(d.shortlist);
+  var r = null;
+  for (var i=0;i<rows.length;i++) if (rows[i].symbol === SEL) r = rows[i];
+  if (!r){ $("plan").innerHTML = '<p class="empty">Pick a stock.</p>'; return; }
+
+  var p = r.plan || {};
+  var px = num(r.ltp), stop = num(p.stop), qty = num(p.qty);
+  if (!p.ok || stop === null || !qty){
+    $("plan").innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:baseline">'
+      + '<span style="font-size:22px;font-weight:700">'+esc(r.symbol)+'</span>'
+      + '<span class="n dim">'+inr2(px)+'</span></div>'
+      + '<div class="note flag">No trade can be sized here: '
+      + esc(p.why || "no level to stop behind yet") + '. '
+      + 'An invented stop is worse than none, because it will be believed.</div>';
+    return;
+  }
+  var risk = px - stop;
+  var book = 2500 / qty;                 /* "book atleast 2500 rs" */
+  var total = risk + book;
+  var val = num(p.value_rs);
+  $("plan").innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:baseline">'
+    + '<span style="font-size:22px;font-weight:700">'+esc(r.symbol)+'</span>'
+    + '<span class="n dim">'+inr2(px)+'</span></div>'
+    + '<div class="grid">'
+    + '<div><span class="k">Buy</span><span class="v n">'+inr2(px)+'</span></div>'
+    + '<div><span class="k">Quantity</span><span class="v n">'+qty+'</span></div>'
+    + '<div><span class="k">Stop loss</span><span class="v n down">'+inr2(stop)+'</span></div>'
+    + '<div><span class="k">Book at</span><span class="v n up">'+inr2(px+book)+'</span></div>'
+    + '<div><span class="k">You risk</span><span class="v n down">₹'+inr(p.risk_rs)+'</span></div>'
+    + '<div><span class="k">Stop is</span><span class="v n">'+(num(p.stop_pct)||0).toFixed(2)+'% away</span></div>'
+    + '</div>'
+    + '<div class="bar"><i style="width:'+(risk/total*100)+'%;background:var(--down)"></i>'
+    + '<i style="width:'+(book/total*100)+'%;background:var(--up)"></i></div>'
+    + '<div class="barlab n"><span>risk '+inr2(risk)+'</span>'
+    + '<span>1 : '+(book/risk).toFixed(2)+'</span>'
+    + '<span>book '+inr2(book)+'</span></div>'
+    + (r.cash_only ? '<div class="note flag">Dhan margins nothing here, so this '
+        + 'one costs full cash at 1x. That is a price, not a refusal.</div>' : '')
+    + (r.refused ? '<div class="note flag">'+esc(r.refused)+'</div>' : '')
+    + '<div class="act">'
+    + (IS_OPERATOR
+       ? '<button class="buy" id="dobuy">Buy '+qty+'</button>'
+         + '<button class="skip" id="doskip">Skip</button>'
+       : '<button class="skip" disabled>view only — no operator link</button>')
+    + '</div>'
+    + '<p class="dim" style="margin:10px 0 0;font-size:11.5px">Order value ₹'
+    + inr(val) + '.</p>';
+
+  if (IS_OPERATOR && $("dobuy"))
+    $("dobuy").addEventListener("click", function(){ doBuy(r.symbol, qty); });
+  if ($("doskip")) $("doskip").addEventListener("click", function(){
+    SEL = null; drawList(LAST); });
+}
+
+async function doBuy(sym, qty){
+  if (!confirm("BUY " + sym + " — " + qty + " shares?")) return;
+  var url = "/api/buy/" + encodeURIComponent(sym) + "?qty=" + encodeURIComponent(qty);
+  try{
+    var res = await fetch(url, {method:"POST",
+      headers:{"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+    var j = await res.json();
+    alert(j.success ? ("Sent: " + sym) : ("Refused: " + (j.error || "unknown")));
+  }catch(e){ alert("The request never arrived: " + e); }
+}
+async function doSell(sym){
+  if (!confirm("SELL " + sym + "?")) return;
+  try{
+    var res = await fetch("/api/sell/" + encodeURIComponent(sym), {method:"POST",
+      headers:{"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+    var j = await res.json();
+    alert(j.success ? ("Sent: " + sym) : ("Refused: " + (j.error || "unknown")));
+  }catch(e){ alert("The request never arrived: " + e); }
+}
+
+/* ---------------- 4. what am I holding ---------------- */
+function drawOpen(d){
+  var rows = rowsOf(d.open_positions);
+  if (!rows.length){
+    $("open").innerHTML = '<p class="empty">Nothing open.</p>'; return; }
+  $("open").innerHTML = '<table><thead><tr><th>Stock</th>'
+    + '<th class="num">Qty</th><th class="num">Bought</th><th class="num">Now</th>'
+    + '<th class="num">P&amp;L</th><th>Stop &mdash; how close</th><th>Why you own it</th>'
+    + (IS_OPERATOR ? '<th></th>' : '') + '</tr></thead><tbody>'
+    + rows.map(function(r){
+      var px = num(r.ltp || r.current_price), entry = num(r.entry_price);
+      var stop = num(r.stop || r.trailing_stop || r.initial_stop);
+      var near = (px && stop && px > stop) ? Math.max(0, Math.min(100,
+        100 - ((px - stop) / px * 100) * 12)) : 0;
+      return '<tr><td><b>'+esc(r.symbol)+'</b></td>'
+        + '<td class="num">'+esc(r.qty)+'</td>'
+        + '<td class="num">'+inr2(entry)+'</td>'
+        + '<td class="num">'+inr2(px)+'</td>'
+        + '<td class="num">'+pnl(r.pnl)+'</td>'
+        + '<td class="n" style="font-size:11.5px">'
+        + (stop===null ? '<span class="down">no stop</span>'
+           : inr2(stop) + (px ? ' · '+((px-stop)/px*100).toFixed(1)+'% away' : '')
+             + '<div class="stopbar"><i style="width:'+near+'%"></i></div>')
+        + '</td>'
+        + '<td class="dim" style="font-size:11.5px">'+esc(r.entry_reason||r.reason_summary||"")+'</td>'
+        + (IS_OPERATOR ? '<td><button class="skip" style="padding:4px 10px;'
+            + 'font-size:11px" onclick="doSell(\''+esc(r.symbol)+'\')">Sell</button></td>' : '')
+        + '</tr>';
+    }).join("") + '</tbody></table>';
+}
+
+/* ---------------- 5. what have I done ---------------- */
+var HAND = /MANUAL|BY_HAND|CARRIED_OVERNIGHT_CLOSED_BY_HAND/i;
+function drawClosed(d){
+  var rows = rowsOf(d.closed_positions);
+  if (!rows.length){
+    $("closed").innerHTML = '<p class="empty">No trade has closed today.</p>'; return; }
+  var bot = 0, hand = 0;
+  var body = rows.map(function(r){
+    var byHand = HAND.test(String(r.exit_reason || ""));
+    var p = num(r.pnl) || 0;
+    if (byHand) hand += p; else bot += p;
+    return '<tr class="'+(byHand?"hand":"")+'"><td><b>'+esc(r.symbol)+'</b></td>'
+      + '<td class="num">'+inr2(r.entry_price)+'</td>'
+      + '<td class="num">'+inr2(r.exit_price)+'</td>'
+      + '<td class="num">'+esc(r.qty)+'</td>'
+      + '<td class="num">'+pnl(r.pnl)+'</td>'
+      + '<td class="num dim">'+mins(r.holding_minutes !== undefined
+          ? r.holding_minutes : (num(r.holding_seconds)/60))+'</td>'
+      + '<td class="dim">'+esc(String(r.exit_reason||"").replace(/_/g," ").toLowerCase())+'</td></tr>';
+  }).join("");
+  $("closed").innerHTML = '<table><thead><tr><th>Stock</th><th class="num">In</th>'
+    + '<th class="num">Out</th><th class="num">Qty</th><th class="num">P&amp;L</th>'
+    + '<th class="num">Held</th><th>Why it ended</th></tr></thead><tbody>'
+    + body
+    + '<tr class="foot"><td colspan="4">The bot’s own trades</td>'
+    + '<td class="num">'+pnl(bot)+'</td><td colspan="2"></td></tr>'
+    + '<tr class="foot"><td colspan="4">Closed by hand</td>'
+    + '<td class="num">'+pnl(hand)+'</td><td colspan="2"></td></tr>'
+    + '<tr class="foot"><td colspan="4">Day</td>'
+    + '<td class="num">'+pnl(bot+hand)+'</td><td colspan="2"></td></tr>'
+    + '</tbody></table>';
+}
+
+/* ---------------- generic table for the reference tabs ---------------- */
+function simple(el, rows, cols, emptyMsg){
+  if (!rows || !rows.length){
+    $(el).innerHTML = '<p class="empty">'+esc(emptyMsg||"Nothing here yet.")+'</p>';
+    return; }
+  $(el).innerHTML = '<table><thead><tr>'
+    + cols.map(function(c){ return '<th'+(c[2]?' class="num"':'')+'>'+esc(c[0])+'</th>'; }).join("")
+    + '</tr></thead><tbody>'
+    + rows.map(function(r){
+        return '<tr>' + cols.map(function(c){
+          var v = typeof c[1] === "function" ? c[1](r) : r[c[1]];
+          return '<td'+(c[2]?' class="num"':'')+'>'+
+            (typeof c[1]==="function" ? v : esc(v===undefined||v===null?"—":v))+'</td>';
+        }).join("") + '</tr>'; }).join("")
+    + '</tbody></table>';
+}
+
+function drawRest(d){
+  /* --- Pre --- */
+  simple("pre", rowsOf(d.premarket).slice(0,60), [
+    ["Stock","symbol"], ["Price", function(r){ return inr2(r.ltp||r.price); }, 1],
+    ["Change", function(r){ var n=num(r.change_pct); return n===null?"—":
+      '<span class="'+(n>=0?"up":"down")+'">'+(n>=0?"+":"")+n.toFixed(2)+'%</span>'; }, 1],
+    ["Why","reason"]
+  ], "No pre-open data was fetched for today.");
+
+  simple("results", rowsOf(d.results_today), [
+    ["Stock","symbol"], ["When","when"], ["Grade","grade"]
+  ], "No results are due today.");
+
+  /* --- Trade: paper / real / his own --- */
+  var closed = rowsOf(d.closed_positions);
+  var tradeCols = [
+    ["Stock","symbol"], ["In", function(r){ return inr2(r.entry_price); }, 1],
+    ["Out", function(r){ return inr2(r.exit_price); }, 1],
+    ["Qty","qty",1], ["P&L", function(r){ return pnl(r.pnl); }, 1],
+    ["Why it ended", function(r){
+      return esc(String(r.exit_reason||"").replace(/_/g," ").toLowerCase()); }]
+  ];
+  var isReal = !!d.bot_trading;
+  simple("paper", isReal ? [] : closed.filter(function(r){
+    return !HAND.test(String(r.exit_reason||"")); }), tradeCols,
+    isReal ? "The switch is ON — today's trades are real, and are in the next table."
+           : "No paper trade has closed today.");
+  simple("real", isReal ? closed.filter(function(r){
+    return !HAND.test(String(r.exit_reason||"")); }) : [], tradeCols,
+    isReal ? "No real trade has closed today."
+           : "The switch is OFF — nothing real was traded today.");
+  simple("mine", closed.filter(function(r){
+    return HAND.test(String(r.exit_reason||"")); }), tradeCols,
+    "You have not closed anything by hand today.");
+
+  /* --- Post --- */
+  var perf = d.performance || {};
+  simple("perf", Object.keys(perf).map(function(k){
+    return {k: k.replace(/_/g," "), v: perf[k]}; }), [
+    ["Measure","k"], ["Value", function(r){
+      return typeof r.v === "number" ? inr2(r.v) : esc(r.v); }, 1]
+  ], "Nothing measured yet today.");
+
+  simple("misses", rowsOf(d.pool_misses), [
+    ["Stock","symbol"], ["Why it never reached the board","reason"]
+  ], "Every stock that moved reached the board — or the recorder has not run yet.");
+
+  /* --- Watch --- */
+  simple("watch", rowsOf(d.watchlist), [
+    ["Stock","symbol"], ["Price", function(r){ return inr2(r.ltp); }, 1],
+    ["Change", function(r){ var n=num(r.change_pct); return n===null?"—":
+      '<span class="'+(n>=0?"up":"down")+'">'+(n>=0?"+":"")+n.toFixed(2)+'%</span>'; }, 1]
+  ], "Your watchlist is empty.");
+
+  /* --- Brain --- */
+  var mi = d.market_intelligence || {};
+  simple("brain", rowsOf(mi), [
+    ["What","label"], ["Reading","value"]
+  ], "The brain has nothing to report this session.");
+
+  var h = d.system_health || {};
+  simple("health", rowsOf(h.problems || h), [
+    ["Part","store"], ["Verdict","verdict"], ["Detail","note"]
+  ], "Every store answered. Nothing is stale, nothing is short.");
+
+  /* --- Telegram --- */
+  simple("tg", rowsOf(d.telegram_channels), [
+    ["Channel","name"], ["Last message","last"], ["Messages","n",1]
+  ], "No channel has reported in.");
+
+  simple("news", rowsOf(d.news_table).slice(0,80), [
+    ["At","at"], ["Stock","symbol"], ["Kind","kind"], ["Headline","headline"]
+  ], "No news or filing has arrived today.");
+
+  /* --- Blocked --- */
+  var ref = d.refused_today || {};
+  var rrows = rowsOf(ref);
+  if (!rrows.length && ref.by_reason){
+    rrows = Object.keys(ref.by_reason).map(function(k){
+      return {reason: k, n: ref.by_reason[k]}; });
+    simple("refused", rrows, [
+      ["Reason","reason"], ["Stocks","n",1]
+    ], "Nothing was refused today.");
+  } else {
+    simple("refused", rrows, [
+      ["Stock","symbol"], ["Reason","reason"], ["Times","n",1]
+    ], "Nothing was refused today.");
+  }
+}
+
+/* ---------------- the switch ---------------- */
+function drawSwitch(d){
+  var on = !!d.bot_trading;
+  $("btn-on").className = on ? "on" : "";
+  $("btn-off").className = on ? "" : "off";
+  $("modelab").textContent = on ? "real money" : "paper";
+}
+async function setMode(state){
+  if (!IS_OPERATOR) return alert("View only — no operator link.");
+  if (state === "on" && !confirm("Switch to REAL TRADES with real money?")) return;
+  try{
+    await fetch("/api/bot_trading/" + state, {method:"POST",
+      headers:{"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+  }catch(e){ alert("The switch did not reach the bot: " + e); }
+  tick();
+}
+$("btn-on").addEventListener("click", function(){ setMode("on"); });
+$("btn-off").addEventListener("click", function(){ setMode("off"); });
+
+/* ---------------- the poll ---------------- */
+function draw(d){
+  LAST = d;
+  $("clock").textContent = (d.updated_at || "") +
+    (d.session_ended ? " · session ended" : "");
+  drawSwitch(d); drawStrip(d); drawList(d);
+  drawOpen(d); drawClosed(d); drawRest(d);
+}
+
+async function tick(){
+  try{
+    var res = await fetch("/api/snapshot", {cache:"no-store"});
+    if (res.ok){
+      LAST_OK = Date.now();
+      if (STALE){ STALE = false; $("switchwhy").style.display = "none"; }
+      draw(await res.json());
+      return;
+    }
+  }catch(e){ /* a dead fetch must never blank the board */ }
+  /* Nothing came back. The prices stay -- the last known price is still
+     the last known price -- but the SWITCH must stop pretending. */
+  if (Date.now() - LAST_OK > 7000 && !STALE){
+    STALE = true;
+    $("switchwhy").textContent =
+      "the bot is not answering — is main.py still running?";
+    $("switchwhy").style.display = "";
+  }
+}
+tick(); setInterval(tick, 3000);
+</script>
+</body></html>

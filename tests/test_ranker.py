@@ -267,9 +267,22 @@ def test_a_genuinely_thin_stock_is_refused_even_on_a_perfect_setup():
     still be refused however good the setup looks, because getting out
     of it costs more than getting in. Only the number that counts as
     "nobody trades it" moved. Rs 50 lakh a day is thin at any size.
+
+    ---- AND THE AVERAGE IS NOT THE DAY. 2 September 2026 ----
+
+        "too thin to trade our size is not correct that too on its
+         best moving day"                          -- the operator
+
+    adv_of() is a 20-session average, and on the one day a stock is
+    worth trading it is not trading its average. So the refusal now
+    needs the stock to be thin TODAY as well: a Rs 0.5 crore name
+    doing Rs 30 crore this session has all the money we need in it,
+    whatever last month says. Thin on BOTH counts is still refused --
+    that is the case below, and the case the gate was built for.
     """
-    rows = [mover("THIN", 12.0, "IT")] + [mover(f"P{i}", 1.0, "IT")
-                                          for i in range(4)]
+    thin_today = dict(volume=1_000, ltp=100.0)      # Rs 0.01 cr traded
+    rows = [mover("THIN", 12.0, "IT", **thin_today)] + [
+        mover(f"P{i}", 1.0, "IT", **thin_today) for i in range(4)]
     assert run(rows, adv=0.5)["rows"] == []
     assert ranker.MIN_LIQUIDITY_CR >= 1.0, (
         "the size gate has been opened far enough to stop being one")
@@ -430,13 +443,42 @@ def test_an_unmeasured_stock_is_not_demoted():
 # 9. HE TRADES MTF. A CASH-ONLY NAME IS NOT A CANDIDATE.
 # ---------------------------------------------------------------
 #     "only trade in best set of stocks in MTF"
-def test_a_stock_dhan_will_not_margin_is_refused():
+def test_a_stock_dhan_will_not_margin_is_offered_as_cash_only():
+    """---- CASH IS NOT A REFUSAL. 2 September 2026 ----
+
+        "no MTF doesn't meaning to be blocked. bot can use the
+         available capital to buy"                 -- the operator
+
+    This gate used to refuse, and on 2 September it cost the best move
+    of the day: TBZ was turned away 1,256 times between 08:57 and the
+    close for "no MTF -- cash only" and closed +20.0% on 23.4x its
+    normal volume, the largest gain on the board. SAKAR, +11.9%, went
+    the same way. There was Rs 4,02,064 of his own capital free the
+    whole session and core/mtf_margin.py already sizes a non-MTF name
+    on cash. The order was placeable all day; it was simply never
+    offered.
+
+    So leverage is a property of the candidate now, not a gate on it.
+    """
     rows = [live("BASF", 9.0, 0.9, high=100.1, ltp=100.0),
             live("STYRENIX", 12.0, 0.9, high=100.2, ltp=100.0)]
     got = run(rows + quiet(), adv=10.0, mech=strong,
               mtf_of=lambda s, r: {"eligible": s != "BASF",
                                    "leverage": 4.0 if s != "BASF" else None})
-    assert "BASF" not in [c["symbol"] for c in got["rows"]]
+    picked = {c["symbol"]: c for c in got["rows"]}
+    assert "BASF" in picked, "a cash-only stock is still a candidate"
+    assert picked["BASF"]["cash_only"] is True, (
+        "the board must say plainly that this one costs full cash")
+    assert picked["STYRENIX"]["cash_only"] is False
+
+
+def test_not_asking_about_mtf_never_marks_a_stock_cash_only():
+    """Paper mode and backtests pass no mtf_of. An unasked question
+    must not read as a failed one -- flagging every row cash-only
+    would put a warning on a screen that has nothing to warn about."""
+    rows = [live("STYRENIX", 12.0, 0.9, high=100.2, ltp=100.0)]
+    got = run(rows + quiet(), adv=10.0, mech=strong)
+    assert got["rows"][0]["cash_only"] is False
 
 
 def test_the_leverage_reaches_the_row():

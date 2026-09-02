@@ -788,8 +788,44 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
             # reason: at Rs 1.2 lakh of MTF buying power a stock doing
             # Rs 3 crore a day means the operator IS the volume, and
             # getting out costs more than getting in.
-            refuse(symbol, "too thin to trade our size")
-            continue
+            #
+            # ---- BUT ADV IS LAST MONTH. THE MOVE IS TODAY. ----
+            #      2 September 2026.
+            #
+            #     "too thin to trade our size is not correct that too
+            #      on its best moving day"          -- the operator
+            #
+            # adv_of() is a 20-session average. On the one day a stock
+            # is worth trading it is not trading its average -- SOTL
+            # did 75x its normal today against a Rs 17 crore ADV, so
+            # the money actually in the book was orders of magnitude
+            # past what the average implied. Refusing on the average
+            # refuses precisely the days the gate was never aimed at.
+            #
+            # So the gate now asks the question it always meant to ask
+            # -- is there enough money in this stock TODAY to get our
+            # size in and back out -- and today's own turnover answers
+            # it whenever it is known. The average is the fallback,
+            # not the verdict. A stock thin on BOTH counts is still
+            # refused, which is the case the gate was built for.
+            #
+            # ONLY WHEN THE AVERAGE IS KNOWN. adv 0 does not mean a
+            # thin stock, it means NO DATA -- the exact symptom of the
+            # frozen liquidity store this gate's own comment describes
+            # above. A stock we cannot measure stays refused, because
+            # a store broken enough to lose the average is not a store
+            # to trust the day's volume from either. That refusal is
+            # test_a_stock_with_no_measurement_is_never_a_candidate,
+            # and letting today's turnover override it was a bug I put
+            # in while fixing the surge-day one.
+            traded_cr = None
+            if adv > 0:
+                _v, _p = _num(row.get("volume")), _num(row.get("ltp"))
+                if _v and _p:
+                    traded_cr = _v * _p / 1e7
+            if not traded_cr or traded_cr < MIN_LIQUIDITY_CR:
+                refuse(symbol, "too thin to trade our size")
+                continue
 
         # VOLUME IS READ HERE, NOT 60 LINES DOWN. It used to be
         # computed after the mechanism check, which was fine while a
@@ -930,10 +966,29 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
         # No mtf_of supplied -- paper mode, backtests, the preview --
         # means the question was not asked, and an unasked question
         # must never read as a failed one.
+        # ---- CASH IS NOT A REFUSAL. 2 September 2026. ----
+        #
+        #     "no MTF doesn't meaning to be blocked. bot can use the
+        #      available capital to buy"            -- the operator
+        #
+        # This refused, and it cost the best move of the day. TBZ was
+        # turned away 1,256 times between 08:57 and the close for
+        # "no MTF -- cash only" and closed +20.0% on 23.4x its normal
+        # volume -- the largest gain on the whole board. SAKAR, +11.9%,
+        # went the same way.
+        #
+        # The refusal assumed no leverage means no trade. It does not:
+        # there was Rs 4,02,064 of his own capital free all day, and
+        # core/mtf_margin.py already sizes a non-MTF name on cash
+        # (margin_pct 1.0, "Rs 1 lakh buys Rs 1 lakh"). The order was
+        # placeable the whole time. The ranker simply never offered it.
+        #
+        # So leverage is now a PROPERTY of the candidate, not a gate on
+        # it. The row carries cash_only so the board can say plainly
+        # what buying it will cost, and the sizing layer -- which has
+        # always handled this correctly -- does the rest.
         mtf = mtf_of(symbol, row) if mtf_of else None
-        if mtf is not None and not mtf.get("eligible"):
-            refuse(symbol, "no MTF -- cash only")
-            continue
+        cash_only = bool(mtf is not None and not mtf.get("eligible"))
 
         # ---- IS THE MOVE STILL HAPPENING? ----
         #      "some stocks will rally in opening 1/2 mins & sit in top
@@ -1024,6 +1079,11 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
             "commodity_tilt": None if tilt == 1.0 else round(tilt, 3),
             "commodity_tilt_why": tilt_why,
             "change_pct": move,
+
+            # Dhan quotes no MTF margin on this one, so it is bought
+            # with his own cash at 1x. A fact about the trade, not a
+            # reason to withhold it -- see the note at the mtf check.
+            "cash_only": cash_only,
 
             # ---- THE PRICES HE ASKED FOR. 9 August 2026. ----
             #
