@@ -139,7 +139,35 @@ tr.hand td{background:var(--sunk)}
   min-width:56px;margin-top:3px}
 .stopbar i{display:block;height:100%;background:var(--down)}
 .pane{display:flex;flex-direction:column;gap:14px}
+
+/* ---- stock popup ---- */
+.op .sym b{cursor:pointer;border-bottom:1px dotted var(--dim)}
+.op .sym b:hover{color:var(--accent);border-bottom-color:var(--accent)}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:50;
+  display:flex;align-items:flex-start;justify-content:center;padding:28px 14px;
+  overflow-y:auto}
+#modal[hidden]{display:none!important}
+.sheet{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  width:100%;max-width:640px}
+.sheet h3{margin:0;font-size:17px;font-weight:700}
+.shd{padding:12px 15px;border-bottom:1px solid var(--hair);display:flex;
+  align-items:center;gap:10px}
+.sec{padding:12px 15px;border-bottom:1px solid var(--hair)}
+.sec:last-child{border-bottom:0}
+.sec h4{margin:0 0 7px;font-size:9.5px;letter-spacing:.11em;font-weight:600;
+  text-transform:uppercase;color:var(--dim)}
+.px6{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px 12px}
+.px6 .k{font-size:10px;color:var(--dim)}
+.px6 .v{font-family:"Cascadia Mono",Consolas,monospace;font-size:13px}
+.pbar{height:8px;border-radius:4px;overflow:hidden;display:flex;margin:0 0 6px}
+.gate{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;
+  padding:3px 0;color:var(--mid)}
+.gate i{font-style:normal;width:14px;flex:none;text-align:center}
+.xbtn{margin-left:auto;background:none;border:0;color:var(--dim);
+  font-size:20px;cursor:pointer;line-height:1;padding:0 4px}
 </style></head><body>
+
+<div id="modal" hidden></div>
 
 <div class="wrap">
 
@@ -358,6 +386,16 @@ function drawStrip(d){
    "#SYMBOL" prefix and 300 characters of "Recent Events:" tail. The
    row has one line to say why, so this keeps the first clause and
    throws the decoration away. */
+/* Headlines arrive from Telegram and filings carrying emoji, a
+ * #SYMBOL prefix and a long tail. The board row and the popup both
+ * need them trimmed, so it is one function -- two copies drifted
+ * once already and left a star in the popup. */
+function clean(t){
+  t = String(t == null ? "" : t);
+  t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE0F}\u{2028}]/gu, "");
+  return t.replace(/#\w+/g, "").replace(/\s{2,}/g, " ")
+          .replace(/^[\s\u2014\u2013-]+/, "").trim();
+}
 function reasonOf(r){
   var t = String(r.why || r.reason || r.mechanism || "");
   t = t.split("•")[0].split("Recent Events")[0];
@@ -394,7 +432,8 @@ function drawList(d){
     var tg = tagOf(r), vx = num(r.volume_x), adv = num(r.adv_cr);
     var chg = num(r.change_pct);
     return '<div class="op'+(r.symbol===SEL?" sel":"")+'" data-s="'+esc(r.symbol)+'">'
-      + '<span class="sym">'+esc(r.symbol)
+      + '<span class="sym"><b data-open="'+esc(r.symbol)+'">'
+      + esc(r.symbol)+'</b>'
       + '<span class="tag '+tg[0]+'">'+tg[1]+'</span>'
       + (r.cash_only ? '<span class="tag cash">CASH 1x</span>' : '')
       + (r._early ? '<span class="tag cash">EARLY LANE</span>' : '')
@@ -409,13 +448,252 @@ function drawList(d){
   }).join("");
 
   Array.prototype.forEach.call($("oplist").querySelectorAll(".op"), function(el){
-    el.addEventListener("click", function(){
+    el.addEventListener("click", function(e){
+      // The NAME opens the stock; anywhere else on the row picks it
+      // for the trade panel. Two jobs, one row -- so the name stops
+      // the event rather than doing both at once.
+      var name = e.target.closest("[data-open]");
+      if (name){ e.stopPropagation(); openStock(name.dataset.open); return; }
       SEL = el.dataset.s; drawList(LAST); drawPlan(LAST); });
   });
   drawPlan(d);
 }
 
 /* ---------------- 3. what would I do ---------------- */
+/* ---- THE PRICES HE ASKED FOR. 2 September 2026. ----
+ *
+ *     "there is no data of stock price details prev.close open high
+ *      low cmp show them on THE TRADE PANEL"
+ *
+ * open/high/low/ltp ride on the board row already. prev_close does
+ * NOT, so it is fetched with the card and cached here rather than
+ * back-computed from change_pct -- that arithmetic would put a number
+ * on screen the exchange never printed. */
+var PREV = {};
+
+/* prev_close is not on the board row, so it is fetched once per
+ * symbol the first time the panel draws it. Without this the cell
+ * sat empty until he happened to open the popup -- a blank that
+ * looks like missing data rather than an unfetched one. */
+var PREV_ASKED = {};
+function needPrev(sym){
+  if (!sym || PREV[sym] !== undefined || PREV_ASKED[sym]) return;
+  PREV_ASKED[sym] = true;
+  fetch("/api/stock/" + encodeURIComponent(sym))
+    .then(function(r){ return r.json(); })
+    .then(function(c){
+      PREV[sym] = (c && c.prev_close != null) ? num(c.prev_close) : null;
+      if (SEL === sym && LAST) drawPlan(LAST);
+    })
+    .catch(function(){ PREV[sym] = null; });
+}
+function priceRow(r){
+  needPrev(r.symbol);
+  var prev = PREV[r.symbol];
+  var cells = [
+    ["Prev close", prev == null ? "—" : inr2(prev), ""],
+    ["Open",  inr2(r.open), ""],
+    ["High",  inr2(r.high), "up"],
+    ["Low",   inr2(r.low),  "down"],
+    ["CMP",   inr2(r.ltp),  "cmp"]
+  ];
+  return '<div class="grid" style="grid-template-columns:repeat(5,minmax(0,1fr))">'
+    + cells.map(function(c){
+        var style = c[2] === "cmp" ? ' style="background:var(--accent-bg)"' : '';
+        var cls = (c[2] === "up" || c[2] === "down") ? " " + c[2] : "";
+        return '<div' + style + '><span class="k">' + c[0] + '</span>'
+             + '<span class="v n' + cls + '">' + c[1] + '</span></div>';
+      }).join("")
+    + '</div>';
+}
+
+/* ==========================================================
+   THE STOCK POPUP
+   ==========================================================
+ *     "no link to check about stock details as old dashboard had.
+ *      on clicking on stock name pop shows the data of the stock
+ *      with orderflow - buying pressure. & remaining details"
+ *     "fold why & history into popup, drop the links. add results too"
+ *
+ * Four reads, on click only, never on the 3-second poll: a session is
+ * up to 375 minutes and carrying that flow series for every row would
+ * put tens of thousands of points through the socket once a second to
+ * draw a chart nobody has opened.
+ *
+ *     /api/stock    prices, circuits, sector, results, the event
+ *     /api/flow     cumulative delta -- the buying pressure
+ *     /api/why      the gates, one line each, pass or fail
+ *     /api/history  his own record in this name, and what was filed
+ *
+ * The links the old page carried are gone, on his instruction. A link
+ * that leaves the screen mid-session is a link he does not click. */
+function openStock(sym){
+  var m = $("modal");
+  m.hidden = false;
+  m.innerHTML = '<div class="sheet"><div class="shd"><h3>' + esc(sym) + '</h3>'
+    + '<button class="xbtn" id="xclose">&times;</button></div>'
+    + '<p class="empty">Reading&hellip;</p></div>';
+  $("xclose").addEventListener("click", closeStock);
+
+  var q = encodeURIComponent(sym);
+  function get(path){
+    return fetch(path).then(function(r){ return r.json(); })
+                      .catch(function(){ return {}; });
+  }
+  Promise.all([get("/api/stock/" + q), get("/api/flow/" + q),
+               get("/api/why/" + q), get("/api/history/" + q)])
+  .then(function(all){
+    if (m.hidden) return;
+    if (all[0] && all[0].prev_close != null){
+      PREV[sym] = num(all[0].prev_close);
+      if (SEL === sym && LAST) drawPlan(LAST);
+    }
+    renderStock(sym, all[0] || {}, all[1] || {}, all[2] || {}, all[3] || {});
+  });
+}
+
+function closeStock(){ var m = $("modal"); m.hidden = true; m.innerHTML = ""; }
+
+function flowSection(f){
+  var now = f.now || {};
+  var bought = num(now.bought), sold = num(now.sold), delta = num(now.delta);
+  var read = num(now.classified_pct);
+  if (read == null) read = num(now.book_pct);
+  var series = Array.isArray(f.series) ? f.series : [];
+
+  /* ---- A THIN BOOK IS NOT A QUIET ONE. ----
+   * core/order_flow.still_buying() returns None below FLOW_MIN_BOOK_PCT
+   * because "a guess must not overrule a gate". The screen keeps the
+   * same discipline: a confident green bar drawn off 30% of the book
+   * is the same lie, in colour. */
+  if (bought == null || sold == null || (bought + sold) <= 0){
+    return '<div class="sec"><h4>Buying pressure</h4>'
+      + '<p class="dim" style="margin:0;font-size:12.5px">No order flow '
+      + 'measured for this stock yet — that is nothing read, not no '
+      + 'buyers. The bot will not let an unread book overrule a gate '
+      + 'either.</p></div>';
+  }
+  var tot = bought + sold, bpct = bought / tot * 100.0;
+  var thin = (read != null && read < 60);
+  var line = "";
+  if (series.length > 1){
+    var cums = series.map(function(x){ return num(x.cum) || 0; });
+    var lo = Math.min.apply(null, cums), hi = Math.max.apply(null, cums);
+    var span = (hi - lo) || 1;
+    var pts = cums.map(function(c, i){
+      return (i / (cums.length - 1) * 520).toFixed(1) + ","
+           + (58 - (c - lo) / span * 50).toFixed(1);
+    }).join(" ");
+    line = '<svg viewBox="0 0 520 64" style="width:100%;height:60px" '
+      + 'role="img" aria-label="cumulative delta through the session">'
+      + '<polyline points="' + pts + '" fill="none" stroke="var(--up)" '
+      + 'stroke-width="2"/></svg>';
+  }
+  return '<div class="sec"><h4>Buying pressure — order flow</h4>'
+    + '<div class="pbar"><i style="width:' + bpct.toFixed(1)
+    + '%;background:var(--up)"></i><i style="width:' + (100 - bpct).toFixed(1)
+    + '%;background:var(--down)"></i></div>'
+    + '<div class="n dim" style="display:flex;justify-content:space-between;'
+    + 'font-size:11px"><span class="up">bought ' + bpct.toFixed(0) + '%</span>'
+    + '<span>' + (delta == null ? "" : "delta " + inr(delta)) + '</span>'
+    + '<span class="down">sold ' + (100 - bpct).toFixed(0) + '%</span></div>'
+    + line
+    + (read == null ? "" :
+       '<p class="dim" style="margin:6px 0 0;font-size:11.5px">'
+       + read.toFixed(0) + '% of the book classified'
+       + (thin ? ' — under the 60% bar, so the bot treats this as '
+                 + 'unmeasured and will not act on it' : '') + '</p>')
+    + (f.diverged ? '<p style="margin:6px 0 0;font-size:12px;color:var(--warn)">'
+       + 'Price kept making highs after the buying stopped.</p>' : '')
+    + '</div>';
+}
+
+function resultsSection(c){
+  var r = c.results || c;
+  var f = [
+    ["Sales QoQ", r.sales_qoq], ["Sales YoY", r.sales_yoy],
+    ["PAT QoQ", r.pat_qoq], ["PAT YoY", r.pat_yoy],
+    ["Margin QoQ", r.opm_bps_qoq]
+  ].filter(function(x){ return num(x[1]) != null; });
+  if (!f.length) return "";
+  return '<div class="sec"><h4>Results'
+    + (r.period ? ' — ' + esc(r.period) : '')
+    + (r.grade ? ' — ' + esc(r.grade) : '') + '</h4><div class="px6">'
+    + f.map(function(x){
+        var v = num(x[1]);
+        var bps = /Margin/.test(x[0]);
+        return '<div><span class="k">' + x[0] + '</span><span class="v '
+          + (v >= 0 ? "up" : "down") + '">' + (v >= 0 ? "+" : "")
+          + v.toFixed(bps ? 0 : 1) + (bps ? " bps" : "%") + '</span></div>';
+      }).join("") + '</div></div>';
+}
+
+function renderStock(sym, c, f, w, h){
+  var px = [
+    ["Prev close", c.prev_close], ["Open", c.open], ["CMP", c.last || c.ltp],
+    ["High", c.high], ["Low", c.low], ["Upper circuit", c.upper_circuit]
+  ];
+  var checks = Array.isArray(w.checks) ? w.checks : [];
+  var events = Array.isArray(h.events) ? h.events.slice(0, 6) : [];
+  var rec = h.summary || {};
+
+  $("modal").innerHTML = '<div class="sheet">'
+    + '<div class="shd"><div><h3>' + esc(sym) + '</h3>'
+    + '<div class="dim" style="font-size:12px">'
+    + esc([c.name, c.sector, c.industry].filter(Boolean).join(" · "))
+    + '</div></div><button class="xbtn" id="xclose">&times;</button></div>'
+
+    + '<div class="sec"><h4>Price</h4><div class="px6">'
+    + px.map(function(x){
+        return '<div><span class="k">' + x[0] + '</span><span class="v">'
+          + (num(x[1]) == null ? "—" : inr2(x[1])) + '</span></div>';
+      }).join("") + '</div></div>'
+
+    + flowSection(f)
+    + resultsSection(c)
+
+    + (checks.length ? '<div class="sec"><h4>Why it is on the board</h4>'
+        + checks.map(function(g){
+            return '<div class="gate"><i class="' + (g.ok ? "up" : "down") + '">'
+              + (g.ok ? "✓" : "✗") + '</i><span><b>' + esc(g.gate)
+              + '</b>' + (g.detail ? ' — '
+                          + esc(String(g.detail).slice(0, 120)) : '')
+              + '</span></div>';
+          }).join("")
+        + (w.verdict ? '<p style="margin:7px 0 0;font-size:12.5px">'
+            + esc(w.verdict) + '</p>' : '') + '</div>' : "")
+
+    + (rec.trades ? '<div class="sec"><h4>Your record in this stock</h4>'
+        + '<div class="px6">'
+        + '<div><span class="k">Trades</span><span class="v">'
+        + esc(rec.trades) + '</span></div>'
+        + '<div><span class="k">Won</span><span class="v">'
+        + esc(rec.wins == null ? 0 : rec.wins) + '</span></div>'
+        + '<div><span class="k">Avg P&amp;L</span><span class="v '
+        + ((num(rec.avg_pnl) || 0) >= 0 ? "up" : "down") + '">'
+        + (num(rec.avg_pnl) == null ? "—" : inr(rec.avg_pnl))
+        + '</span></div></div></div>' : "")
+
+    + (events.length ? '<div class="sec"><h4>What has been published</h4>'
+        + events.map(function(e){
+            return '<div style="display:flex;gap:8px;padding:3px 0;'
+              + 'font-size:12.5px"><span class="dim n" style="flex:none">'
+              + esc(String(e.at || "").slice(0, 16)) + '</span><span>'
+              + esc(clean(e.headline || e.kind).slice(0, 110))
+              + '</span></div>';
+          }).join("") + '</div>' : "")
+
+    + '</div>';
+  $("xclose").addEventListener("click", closeStock);
+}
+
+$("modal").addEventListener("click", function(e){
+  if (e.target.id === "modal") closeStock();
+});
+document.addEventListener("keydown", function(e){
+  if (e.key === "Escape") closeStock();
+});
+
 function drawPlan(d){
   var rows = boardRows(d);
   var r = null;
@@ -442,6 +720,7 @@ function drawPlan(d){
     '<div style="display:flex;justify-content:space-between;align-items:baseline">'
     + '<span style="font-size:22px;font-weight:700">'+esc(r.symbol)+'</span>'
     + '<span class="n dim">'+inr2(px)+'</span></div>'
+    + priceRow(r)
     + '<div class="grid">'
     + '<div><span class="k">Buy</span><span class="v n">'+inr2(px)+'</span></div>'
     + '<div><span class="k">Quantity</span><span class="v n">'+qty+'</span></div>'

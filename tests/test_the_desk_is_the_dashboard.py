@@ -148,3 +148,69 @@ def test_the_early_lane_is_marked_on_the_row():
     """Two doors, and he must be able to see which one a name came
     through -- the early lane has its own gates and its own record."""
     assert "EARLY LANE" in _desk()
+
+
+# ==========================================================
+# THE STOCK POPUP
+# ==========================================================
+#
+#     "no link to check about stock details as old dashboard had. on
+#      clicking on stock name pop shows the data of the stock with
+#      orderflow - buying pressure. & remaining details"
+#     "fold why & history into popup, drop the links. add results too"
+#                                    -- operator, 2 September 2026
+
+def test_the_popup_reads_all_four_endpoints():
+    """One click, four reads. Fetched on open and never on the
+    3-second poll: a session is 375 minutes and carrying the flow
+    series for every row would put tens of thousands of points through
+    the socket once a second to draw a chart nobody has opened."""
+    body = _desk()
+    for path in ("/api/stock/", "/api/flow/", "/api/why/", "/api/history/"):
+        assert path in body, f"the popup never reads {path}"
+
+
+def test_the_price_row_is_on_the_trade_panel():
+    """     "there is no data of stock price details prev.close open
+             high low cmp show them on THE TRADE PANEL" """
+    body = _desk()
+    assert "function priceRow(" in body
+    for label in ("Prev close", "Open", "High", "Low", "CMP"):
+        assert label in body, f"the trade panel does not show {label}"
+
+
+def test_prev_close_is_fetched_not_computed():
+    """It is not on the board row. Deriving it from change_pct would
+    put a number on screen the exchange never printed -- and it must
+    not wait for the popup either, or the cell reads as missing data
+    rather than unfetched."""
+    body = _desk()
+    assert "function needPrev(" in body, (
+        "prev close is not fetched when the panel draws")
+    assert "prev_close" in body
+
+
+def test_a_thin_book_is_not_drawn_as_a_confident_reading():
+    """core/order_flow.still_buying() returns None below
+    FLOW_MIN_BOOK_PCT because "a guess must not overrule a gate". A
+    green bar drawn off 30% of the book is the same lie, in colour."""
+    body = _desk()
+    assert "classified" in body, "the popup never says how much was read"
+    assert "60" in body, "the 60% bar is not named anywhere on the page"
+
+
+def test_the_external_links_are_gone():
+    """     "fold why & history into popup, drop the links."
+
+    A link that leaves the screen mid-session is a link he does not
+    click. /api/links and /api/tag were the old page's way out."""
+    body = _desk()
+    assert "/api/links" not in body
+    assert "/api/tag" not in body
+
+
+def test_one_cleaner_for_headlines_everywhere():
+    """Telegram and filings carry emoji, a #SYMBOL prefix and a long
+    tail. Two copies of the trimming drifted once already and left a
+    star in the popup while the board row was clean."""
+    assert "function clean(" in _desk()
