@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS signals (
     orb_high     REAL,
     orb_low      REAL,
     taken        INTEGER DEFAULT 0,
-    refused_why  TEXT,
+    refused_why  TEXT,          -- the LAST one; see pick_reasons
     fired_count  INTEGER DEFAULT 1,
     open_positions_at_signal INTEGER,
     -- The three confirmations the operator asked for, 29 July 2026:
@@ -101,6 +101,8 @@ class SignalJournal:
         self._lock = threading.Lock()
         self._ready = False
         self._pending = {}
+        # Every distinct refusal, not just the last one.
+        self._reasons = {}
 
     # ------------------------------------------------------------
 
@@ -111,6 +113,7 @@ class SignalJournal:
         conn = sqlite3.connect(self.db_path, timeout=5)
         if not self._ready:
             conn.executescript(SCHEMA)
+            conn.executescript(self.REASONS_DDL)
             # CREATE TABLE IF NOT EXISTS does nothing to a table that
             # is already there, so a store written before 19 August
             # needs the column added explicitly. Wrapped because the
@@ -124,6 +127,38 @@ class SignalJournal:
         return conn
 
     # ------------------------------------------------------------
+
+    #: ---- ONE REASON PER STOCK PER DAY WAS NOT ENOUGH. 2 Sep 2026 ----
+    #:
+    #:     "yes fix the journal to keep every reason with timestamp"
+    #:
+    #: `signals.refused_why` keeps the LAST reason of the day, so a
+    #: stock refused all morning for one thing and at 15:20 for another
+    #: reads as though only the second ever happened. On 1 September
+    #: SSWL, DYCL, GODREJAGRO and VTL all showed "after 15:15 -- too
+    #: late", which is what the record said at 15:30 and tells you
+    #: nothing about why they were refused at 10:00 while they were
+    #: actually moving.
+    #:
+    #: That made the only question worth asking unanswerable: the
+    #: market offered 37 stocks up 3%+ on 3x volume that day, the bot
+    #: saw 35 of them, and the record could not say what stopped each
+    #: one AT THE MOMENT IT MATTERED.
+    #:
+    #: core/decision_log.py already does this correctly for the RANKER
+    #: -- UNIQUE(date, symbol, reason) with first_at, last_at and a
+    #: count. This is the same shape for the ROUTING side.
+    REASONS_DDL = """
+    CREATE TABLE IF NOT EXISTS pick_reasons (
+        trade_date TEXT NOT NULL,
+        symbol     TEXT NOT NULL,
+        direction  TEXT NOT NULL,
+        reason     TEXT NOT NULL,
+        first_at   TEXT NOT NULL,
+        last_at    TEXT NOT NULL,
+        n          INTEGER NOT NULL DEFAULT 1,
+        UNIQUE (trade_date, symbol, direction, reason)
+    )"""
 
     def record(self, symbol, direction, break_price=None, orb_high=None,
                orb_low=None, taken=False, refused_why=None,
@@ -195,6 +230,23 @@ class SignalJournal:
                     row["refused_why"] = None
                 elif refused_why and not row["taken"]:
                     row["refused_why"] = refused_why
+                if refused_why:
+                    # EVERY reason, not just the last. Keyed by the
+                    # reason itself so the same one all morning is one
+                    # row with a count, and a different one at 15:20 is
+                    # its own row with its own clock.
+                    key = (row["trade_date"], symbol, direction,
+                           str(refused_why))
+                    seen = self._reasons.get(key)
+                    stamp = when.strftime("%Y-%m-%d %H:%M:%S")
+                    if seen is None:
+                        self._reasons[key] = {
+                            "trade_date": key[0], "symbol": key[1],
+                            "direction": key[2], "reason": key[3],
+                            "first_at": stamp, "last_at": stamp, "n": 1}
+                    else:
+                        seen["last_at"] = stamp
+                        seen["n"] += 1
         except Exception:                                  # noqa: BLE001
             pass
 
@@ -207,7 +259,23 @@ class SignalJournal:
                 rows = list(self._pending.values())
             if not rows:
                 return 0
+            with self._lock:
+                reasons = list(self._reasons.values())
+                self._reasons = {}
             conn = self._connect()
+            if reasons:
+                # Same shape core/decision_log.py uses for the ranker's
+                # refusals: one row per distinct reason, its own clock,
+                # its own count.
+                conn.executemany(
+                    "INSERT INTO pick_reasons (trade_date, symbol, "
+                    "direction, reason, first_at, last_at, n) VALUES "
+                    "(:trade_date, :symbol, :direction, :reason, "
+                    ":first_at, :last_at, :n) "
+                    "ON CONFLICT(trade_date, symbol, direction, reason) "
+                    "DO UPDATE SET last_at=excluded.last_at, "
+                    "n=pick_reasons.n+excluded.n",
+                    reasons)
             conn.executemany(
                 "INSERT INTO signals (trade_date, symbol, direction, "
                 "first_seen, last_seen, break_price, orb_high, orb_low, "
