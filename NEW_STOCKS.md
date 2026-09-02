@@ -1,6 +1,6 @@
 # New Stocks -- awaiting classification
 
-Generated 2026-09-02 15:34 by `py tools/morning_universe.py`.
+Generated 2026-09-02 16:15 by `py tools/morning_universe.py`.
 
 These passed every market test (EQ series, Rs 200-10,000, 
 liquid, not a fund) but have no SECTOR in `data/master_stocks.csv`,
