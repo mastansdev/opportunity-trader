@@ -23,9 +23,14 @@ WHAT IT COSTS. If a stock runs again after the bot is out, the bot
 misses it. He weighed that against paying the spread twice and chose
 this.
 
-WHAT IT IS NOT. Not a block on stocks HE sells by hand, and not a block
-on a stock the bot never closed. Only the bot's own completed trades
-count.
+A MANUAL SELL COUNTS TOO. Confirmed 2 September:
+
+    "my manual sell should lock the bot out. no change required."
+
+He closed four positions by hand at 11:15 that day and IFCI, JINDRILL
+and SPORTKING were locked for the rest of the session -- IFCI after 87
+seconds. He was shown that and kept it. So every closed position counts
+however it was closed; only a stock the bot never held is untouched.
 """
 
 from datetime import datetime, timedelta
@@ -157,8 +162,15 @@ def test_rubbish_does_not_take_the_loop_down():
 # --------------------------------------------------- the churn, replayed
 
 def test_the_vtl_round_trip_cannot_happen_again():
-    """The actual sequence, with its real timestamps."""
-    sold_at = datetime(2026, 9, 1, 15, 2, 16)
+    """The actual sequence, at its real time of day.
+
+    The date is TODAY'S, not 1 September's. Pinned to the real date it
+    passed on 1 September and failed on the 2nd -- the rule is per day,
+    so a hardcoded yesterday is correctly reported as not-traded-today.
+    A test that only passes on the day it was written proves nothing
+    the day after."""
+    sold_at = datetime.now().replace(hour=15, minute=2, second=16,
+                                     microsecond=0)
     engine = _engine_with([_closed("VTL", sold_at)])
     # ...and two seconds later the ranker offers it back.
     assert "VTL" in engine.symbols_traded_today()
@@ -166,3 +178,24 @@ def test_the_vtl_round_trip_cannot_happen_again():
         ROW, _Engine(), held=set(), max_positions=3,
         traded_today={"VTL"})
     assert got and "one trade a day" in got
+
+
+def test_a_position_he_closed_by_hand_also_locks_the_stock():
+    """His call, 2 September. He closed four by hand at 11:15 and was
+    shown the cost -- three names locked with four seats free and
+    Rs 2,642 of further move -- and kept the rule."""
+    now = datetime.now()
+    closed = [{"symbol": "IFCI", "direction": "LONG",
+               "exit_reason": "MANUAL_EXIT", "exit_time": now,
+               "entry_time": now}]
+    assert "IFCI" in _engine_with(closed).symbols_traded_today()
+
+
+def test_the_docstring_does_not_contradict_the_code():
+    """It did, until he read it. A comment saying a hand sale does NOT
+    lock the bot out, over code that always has, is how a correct rule
+    gets "fixed" into a wrong one."""
+    from core.engine import Engine
+
+    doc = Engine.symbols_traded_today.__doc__ or ""
+    assert "MANUAL SELL LOCKS THE BOT OUT" in doc, doc[:200]

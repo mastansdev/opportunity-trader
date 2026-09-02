@@ -6150,9 +6150,28 @@ class Engine:
         runs again afterwards that is a miss, and he has weighed that
         against the churn and chosen this.
 
-        SOLD BY HAND IS NOT TRADED BY THE BOT. Only the bot's own
-        closed positions count, so his own exit on the dashboard does
-        not lock the bot out of a name for the rest of the day.
+        A MANUAL SELL LOCKS THE BOT OUT TOO, and that is deliberate.
+
+            "my manual sell should lock the bot out. no change
+             required."                    -- the operator, 2 Sep 2026
+
+        Every position in closed_positions counts, however it was
+        closed -- the bot's own exit rule, a stop, or his SELL button.
+        Once a name is done with today it is done with.
+
+        THIS COMMENT SAID THE OPPOSITE UNTIL HE READ IT. It claimed a
+        hand sale did not lock the bot out, which the code has never
+        done. On 2 September he closed four positions at 11:15 and
+        IFCI, JINDRILL and SPORTKING were locked for the day -- IFCI
+        after being held for 87 seconds. He was shown that, asked, and
+        confirmed it is what he wants. A comment that contradicts its
+        own code is how a correct rule gets "fixed" into a wrong one.
+
+        WHAT THIS COSTS, so nobody has to rediscover it: at 12:35 that
+        day the only three candidates on the board were NIACL, IFCI and
+        COALINDIA -- all up, all on heavy volume, all locked, with four
+        seats free. Rs 2,642 of further move went by. That is the
+        accepted price of not paying the spread twice on the same name.
         """
         today = datetime.now().date()
         out = set()
