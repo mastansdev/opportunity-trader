@@ -421,8 +421,40 @@ class CircuitMonitor:
             # fabricate a base.
             return None
 
+        # ---- int("12345.0") RAISES. 3 September 2026. ----
+        #
+        #     "today bot missed too many volume surge & order
+        #      opportunities ... order will be received & volume starts
+        #      surging, bot needs to track, enter & exit"
+        #                                        -- the operator
+        #
+        # Dhan sends these numbers as STRINGS -- the feed banner has
+        # printed {'avg_price': '41.03', 'close': '40.19'} at every
+        # startup for weeks. When volume arrives as "12345.0" rather
+        # than "12345", int() raises ValueError and this except turned
+        # the volume into None for that symbol, for the rest of the
+        # session.
+        #
+        # MEASURED LIVE at 14:20: 49 of 100 gainer/loser rows had no
+        # volume. And core/ranker.py's surge door needs exactly that
+        # number -- dashboard/state._surging_now() opens with
+        #
+        #     if not (symbol and volume and price and a): continue
+        #
+        # so no volume means no ratio, no seed, and the stock is
+        # refused for "no event behind it -- the tape is not a reason"
+        # while it trades at 191x its normal. BFUTILITIE was refused
+        # 1,562 times today on that line at +15.7%; SBCL 1,557 times
+        # and it never reached the board once.
+        #
+        # The surge rule was never broken. It was never handed the
+        # number it runs on, for half the market.
+        #
+        # float() first, then int(). "12345.0", "12345", 12345.0 and
+        # 12345 all land on the same integer; genuinely unparseable
+        # still becomes None, which is honest.
         try:
-            volume = int(info.get("volume") or 0)
+            volume = int(float(info.get("volume") or 0))
         except (TypeError, ValueError):
             volume = None
 

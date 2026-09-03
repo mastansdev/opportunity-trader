@@ -144,6 +144,12 @@ _NOT_AN_ORDER = re.compile(
     re.I)
 
 
+# A rebuild slower than this names its worst panels in the log. The
+# board runs at a 42s median, 82s p90 (measured 3 Sep), and entries
+# read this snapshot -- so anything past 20s is worth saying out loud.
+SLOW_REBUILD_MS = 20_000
+
+
 def _adv(symbol):
     """Average daily traded value in crore, or 0. Fail-quiet."""
     try:
@@ -742,12 +748,70 @@ class DashboardState:
 
     # --------------------------------------------------
 
+    # ==========================================================
+    # WHAT ACTUALLY COSTS THE FORTY-TWO SECONDS
+    # ==========================================================
+    #
+    #     "fix the ranker slowness first after market close"
+    #                                 -- the operator, 3 Sep 2026
+    #
+    # MEASURED, 10:00-14:00, from the [GL] line:
+    #
+    #     2 Sep   n=545   median 28s   p90 41s
+    #     3 Sep   n=324   median 42s   p90 82s   max 192s
+    #
+    # It doubled at p90 in a day, and ENTRIES READ THIS SNAPSHOT --
+    # main.py hands snapshot["ranked"].rows to auto_entry.take() -- so
+    # every entry decides on prices up to 82 seconds old. Exits are
+    # unaffected: they run on the tick feed.
+    #
+    # I have twice named a culprit without measuring: the watchlist
+    # panel (it is 0.02s), then the ranker chewing a top-50 list
+    # (there is no top-50 list -- build_ranked starts movers = [] and
+    # fills it from published reasons alone). Both wrong, both said
+    # with confidence, both cost him time.
+    #
+    # So this measures. Every panel is timed and a long rebuild names
+    # its worst offenders with their seconds. One perf_counter() call
+    # per panel: nothing here can itself be the problem.
+    def _timed(self, name, fn, *args, **kwargs):
+        """Run one panel builder and remember what it cost."""
+        start = time.perf_counter()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            self._panel_ms[name] = (time.perf_counter() - start) * 1000.0
+
+    def _report_slow_panels(self, total_ms):
+        """Name the expensive ones once a rebuild goes long."""
+        if total_ms < SLOW_REBUILD_MS:
+            return
+        worst = sorted(self._panel_ms.items(), key=lambda kv: -kv[1])[:6]
+        detail = ", ".join("%s %.1fs" % (n, ms / 1000.0)
+                           for n, ms in worst if ms > 50)
+        if not detail:
+            detail = "nothing over 50ms -- the cost is spread thin"
+        when_it_changes(
+            "slow-rebuild",
+            "[SLOW] The board took %.1fs to rebuild. Entries read this "
+            "snapshot, so they are deciding on prices that old. "
+            "Worst: %s." % (total_ms / 1000.0, detail))
+
     def refresh(self):
         """Rebuilds the snapshot, then swaps it in atomically --
         same pattern as NewsQueueReader.refresh()."""
+        self._panel_ms = {}
+        started = time.perf_counter()
         snapshot = self._build()
+        took_ms = (time.perf_counter() - started) * 1000.0
+        snapshot["rebuild_ms"] = round(took_ms)
+        snapshot["panel_ms"] = {k: round(v) for k, v in self._panel_ms.items()}
         with self._lock:
             self._snapshot = snapshot
+        try:
+            self._report_slow_panels(took_ms)
+        except Exception:                                  # noqa: BLE001
+            pass
 
     def force_gainers_losers_refresh(self):
         """2026-07-24 dashboard revamp -- the manual "Refresh now"
@@ -890,12 +954,14 @@ class DashboardState:
         }
 
         breadth = self._build_breadth()
-        gainers_losers = self._build_gainers_losers()
-        performance = self._build_performance(closed_positions)
+        gainers_losers = self._timed("gainers_losers",
+                                     self._build_gainers_losers)
+        performance = self._timed("performance",
+                                  self._build_performance, closed_positions)
         # Built once and passed to build_calls() rather than rebuilt
         # inside it -- the shortlist is the expensive thing on this
         # snapshot and it runs once a second.
-        shortlist = self._build_shortlist()
+        shortlist = self._timed("shortlist", self._build_shortlist)
 
         snapshot = {
             "ready": True,
@@ -943,15 +1009,15 @@ class DashboardState:
                                       open_positions),
             # Top 50 each side WITH the shortlist's reasons joined on --
             # the panel that replaced both of the above on the LIVE tab.
-            "movers": self.build_movers(),
-            "breakouts": self._build_breakouts(),
+            "movers": self._timed("movers", self.build_movers),
+            "breakouts": self._timed("breakouts", self._build_breakouts),
             "actions": self._build_actions(),
             "announcements": self._build_announcements(),
             "news": self._build_news(),
             # ONE ROW PER STOCK, not one row per message. The panel
             # this replaces printed every RSS item and every Telegram
             # message as its own paragraph -- see core/news_table.py.
-            "news_table": self._build_news_table(),
+            "news_table": self._timed("news_table", self._build_news_table),
             "market_intelligence": self._build_market_intelligence(
                 breadth, gainers_losers, performance
             ),
@@ -980,7 +1046,7 @@ class DashboardState:
             "results_today": self.build_results_today(),
             "watchlist": self._safe_watchlist(),
             # The 09:08 list -- see build_morning_watchlist().
-            "morning_watchlist": self._safe_morning_watchlist(),
+            "morning_watchlist": self._timed("morning_watchlist", self._safe_morning_watchlist),
             # ---- THE TELEGRAM TAB. 30 August 2026. ----
             #
             #     "show me in another tab named Telegram, under this
@@ -1070,11 +1136,11 @@ class DashboardState:
             # can be narrowed the same way the pre-open panel already
             # is. 4 August 2026 -- his request, and the membership was
             # already loaded for build_preopen.
-            "ranked": self.build_ranked(gainers_losers, open_positions),
+            "ranked": self._timed("ranked", self.build_ranked, gainers_losers, open_positions),
             # The 09:15-09:30 early-bird lane -- see build_early()'s
             # docstring. Read by main.py alongside "ranked" and fed into
             # the same auto_entry.take() call.
-            "early": self.build_early(gainers_losers, open_positions),
+            "early": self._timed("early", self.build_early, gainers_losers, open_positions),
             # ---- THE WATCHLIST BUILDS ITSELF NOW. 6 August 2026. ----
             #
             #     "it must check for the stocks & add them to watchlist
@@ -6347,10 +6413,29 @@ class DashboardState:
             # The key carries the input size, so each caller remembers
             # its own line and both go quiet until their own number
             # really moves.
+            # ---- IT DESCRIBED A DESIGN THAT IS GONE. 3 Sep 2026. ----
+            #
+            #     "who is looking at top 50 stocks? even any financial
+            #      website does that right? we made bot to know the
+            #      stocks list sorted based on the momentum not to see
+            #      which stocks were top gainers"
+            #
+            # He is right, and it already works his way: build_ranked()
+            # starts `movers = []` and this method fills it from
+            # published reasons alone. The top 50 seeds nothing.
+            #
+            # This line still said "that the top-50 list would have
+            # hidden", wording left over from when the leaderboard WAS
+            # the seed. It cost real time today: I read it, told him
+            # the ranker was chewing through a gainers list, and only
+            # found the truth when he pushed back. A message that
+            # describes removed code is worse than no message -- it is
+            # believed, and it sends the next reader down a dead road.
             when_it_changes(
                 f"rank-added-by-reason-{len(movers)}",
-                f"[RANK] {len(extra)} stock(s) added by reason "
-                f"that the top-50 list would have hidden.")
+                f"[RANK] {len(extra)} stock(s) in the pool -- every one "
+                f"of them because something was published about it "
+                f"today. Nothing here comes from a gainers list.")
         return list(movers) + [dict(r) for r in extra]
 
     def _symbols_with_news_today(self):
