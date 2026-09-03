@@ -57,12 +57,28 @@ def _loss_per_failed_trade():
     return MTF_MARGIN_PER_POSITION_RS * TYPICAL_LEVERAGE * HARD_STOP_FROM_ENTRY_PCT
 
 
-def test_the_loss_limit_allows_about_four_failed_trades():
-    """The ORIGINAL intent. Rs 20,000 meant eight failed trades when
-    positions were unleveraged; after the fix it meant two. Restoring
-    the intent matters more than preserving the number."""
+def test_the_loss_limit_allows_about_seven_failed_trades():
+    """---- HE HALVED THE SLOT AND KEPT THE CAP. 3 Sep 2026. ----
+
+    This asked for 3.5 to 5 failed trades, which was right while a
+    slot was Rs 30,000. On 3 September the slot became Rs 15,000 --
+    eight seats on his Rs 1,23,491 instead of four -- because the book
+    was full 290 of the day's 306 minutes and the bot was arriving late
+    to every setup that mattered.
+
+    Halving the slot halves what a failed trade costs. The same
+    Rs 12,000 now buys about seven of them, not four. He was told the
+    ratio moved and answered:
+
+        "keep 12000 as it is"
+
+    So the cap is deliberate and this band records HIS number rather
+    than continuing to assert the old slot's arithmetic. The band is
+    still a band: a cap worth twenty stop-outs would not be a brake,
+    and one worth two would end most days by 10am.
+    """
     trades = DAILY_MAX_LOSS_RS / _loss_per_failed_trade()
-    assert 3.5 <= trades <= 5.0
+    assert 5.0 <= trades <= 9.0
 
 
 def test_the_loss_limit_is_a_sane_share_of_capital():
@@ -84,9 +100,27 @@ def test_the_loss_limit_is_a_sane_share_of_capital():
 
     The BAND is unchanged -- a few percent, 2% to 5%, exactly as
     chosen. Only the denominator is now the real one.
+
+    ---- THE SEAT COUNT IS NOT MAX_OPEN_POSITIONS. 3 Sep 2026. ----
+
+    This multiplied by core.rules.MAX_OPEN_POSITIONS, which is 3. The
+    live book has not been sized by that constant since cash sizing
+    went in: core.capital.slots() divides real capital by the slot, and
+    engine._position_cap() only falls back to MAX_OPEN_POSITIONS when
+    cash sizing is off or no portfolio is wired. On his Rs 1,23,491
+    the real book is EIGHT seats, so this was measuring the cap
+    against three-eighths of the money actually at risk.
     """
-    at_risk = (MAX_OPEN_POSITIONS * MTF_MARGIN_PER_POSITION_RS
-               * TYPICAL_LEVERAGE)
+    from core.capital import slots
+
+    # His Dhan balance on 3 September 2026, read live by the bot and
+    # confirmed by him ("capital is correctly read with dhan"). Written
+    # here as a number because there is no config constant for it --
+    # capital is a fact about the account, not a setting.
+    HIS_CAPITAL_RS = 123_491.0
+
+    seats = slots(HIS_CAPITAL_RS)["slots"]
+    at_risk = seats * MTF_MARGIN_PER_POSITION_RS * TYPICAL_LEVERAGE
     assert 0.02 <= DAILY_MAX_LOSS_RS / at_risk <= 0.05
 
 

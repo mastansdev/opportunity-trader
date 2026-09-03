@@ -73,9 +73,28 @@ def day(**turnovers):
             for s, v in turnovers.items()]
 
 
-QUIET = 1_00_00_000       # Rs 1cr
-BUSY = 60_00_00_000       # Rs 60cr
-FINE = 9_00_00_000        # Rs 9cr
+# ---- THESE ARE DERIVED, NOT TYPED. 3 September 2026. ----
+#
+# They were Rs 1cr / Rs 60cr / Rs 9cr, chosen to sit either side of a
+# MIN_TURNOVER_RS that was Rs 1.5cr at the time. That constant is not
+# a setting -- core/subscribe_list.py computes it as
+#
+#     MIN_TURNOVER_RS = _POSITION_RS / MAX_POSITION_SHARE_OF_DAY
+#
+# so when the slot was halved to Rs 15,000 on 3 September the floor
+# halved with it, to Rs 0.75cr, and the "quiet" fixture at Rs 1cr was
+# suddenly LIQUID. Four tests in this file failed saying nothing about
+# medians at all.
+#
+# That the floor moved is correct and is the point: a smaller position
+# needs less of the day's turnover to fill, so more stocks become
+# tradeable. What was wrong was a test that pinned it.
+#
+# Tied to the constant now, so the next time the slot changes these
+# still bracket it.
+QUIET = MIN_TURNOVER_RS / 2          # too thin to trade
+FINE = MIN_TURNOVER_RS * 12          # comfortably liquid
+BUSY = MIN_TURNOVER_RS * 80          # the one results day
 
 
 # ---------------------------------------------------------------
@@ -180,7 +199,10 @@ def test_the_reason_says_how_many_sessions_it_speaks_from():
     idx = build_bhav_index_over(days)
     _, why = decide("A", bhav=idx["A"], sector="IT")
     assert f"median of {TURNOVER_SESSIONS} sessions" in why
-    assert "1.00cr" in why
+    # The rupee figure is QUIET expressed in crore -- derived, so it
+    # cannot drift away from the fixture the way the hard-coded
+    # "1.00cr" did when the slot halved.
+    assert "%.2fcr" % (QUIET / 1_00_00_000) in why
 
     _, why_one = decide("A", bhav=build_bhav_index(day(A=QUIET))["A"],
                         sector="IT")

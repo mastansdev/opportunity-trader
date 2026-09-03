@@ -3112,6 +3112,38 @@ class DashboardState:
                     "rules-dropped",
                     f"[RULES] {len(dropped)} pick(s) removed: a card "
                     f"is required and the move must still be going.")
+
+            # ---- ONE STOCK, ONE ROW. 3 September 2026. ----
+            #
+            #     "Duplicates of data is not acceptable at all"
+            #
+            # The cause was core/tick_ohlc serving a PREVIOUS session's
+            # tick whenever REST dropped a symbol, and that is fixed at
+            # the source. This is the guarantee, not the fix: the board
+            # he reads and the list the bot BUYS FROM are the same
+            # rows, so a duplicate here is not a display blemish -- it
+            # is a second, possibly stale, price the bot could size an
+            # order against. On 3 September ANTELOPUS was ranked twice
+            # in one cycle, the frozen copy at rank 6 and the live one
+            # at 13.
+            #
+            # Loud, not silent. If a duplicate ever appears again he
+            # sees which stock and both prices, rather than the board
+            # quietly looking fine.
+            once, seen_syms, twice = [], set(), []
+            for row in kept:
+                sym = str(row.get("symbol") or "").upper()
+                if sym in seen_syms:
+                    twice.append((sym, row.get("ltp")))
+                    continue
+                seen_syms.add(sym)
+                once.append(row)
+            if twice:
+                warn("[RANK] %d duplicate row(s) dropped -- one stock "
+                     "may appear once: %s. The bot buys from this list."
+                     % (len(twice), ", ".join(
+                         "%s at %s" % (a, b) for a, b in twice[:5])))
+            kept = once
             got["rows"] = kept
         except Exception as exc:                           # noqa: BLE001
             warn(f"[RULES] Could not apply the entry rules ({exc}). "

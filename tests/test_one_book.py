@@ -158,7 +158,21 @@ def test_a_position_bigger_than_the_margin_rule_is_marked_not_blocked():
 
 
 def test_a_normal_sized_position_is_not_marked():
-    book = state([at_dhan("YASHO", 24, 4114.10)]).build_book({})
+    """---- "NORMAL" IS A FRACTION OF THE SLOT. 3 September 2026. ----
+
+    This bought 24 YASHO at 4114.10 -- Rs 98,738, which was normal
+    while a slot was Rs 30,000 controlling Rs 1.2 lakh at 4x. The slot
+    halved to Rs 15,000 that day, so the cap is Rs 60,000 and the same
+    fixture is now genuinely over it. The test was right; its fixture
+    had a slot size baked into it.
+
+    Sized off the constants now, at half the cap, so it stays "normal"
+    whatever the slot becomes.
+    """
+    from config import MTF_LEVERAGE, MTF_MARGIN_PER_POSITION_RS
+    price = 4114.10
+    qty = int(MTF_MARGIN_PER_POSITION_RS * MTF_LEVERAGE / 2 / price)
+    book = state([at_dhan("YASHO", qty, price)]).build_book({})
     assert book["rows"][0]["over_cap"] is False
 
 

@@ -238,14 +238,29 @@ def test_the_seed_is_never_tighter_than_the_hard_stop():
 # 4. WHAT IT COSTS, SO THE NUMBER IS NEVER ABSTRACT AGAIN
 # ---------------------------------------------------------------
 def test_a_stop_out_stays_inside_the_daily_loss_cap():
-    """Rs 1 lakh of margin at 4X is Rs 4,00,000 of stock. A 2.5% stop
-    is Rs 10,000. The operator should be able to be wrong four times
-    in a day before the bot stops him -- at the old 1% it took ten,
-    which is not a safety margin, it is ten chances to keep going."""
+    """The hard stop must cost a readable fraction of the day's cap.
+
+    ---- THE SLOT HALVED, THE CAP DID NOT. 3 September 2026. ----
+
+    This asked for 3 to 5 stop-outs, correct while a slot was
+    Rs 30,000 and a hard stop cost Rs 3,000. On 3 September the slot
+    became Rs 15,000 -- eight seats on his Rs 1,23,491 rather than
+    four, because the book was full for 290 of the day's 306 minutes
+    and the bot reached every good setup late. A hard stop now costs
+    Rs 1,500, so the unchanged Rs 12,000 buys eight of them.
+
+    He was shown the ratio and chose: "keep 12000 as it is". The band
+    records his number. It stays a band because a cap worth twenty
+    stop-outs is not a brake at all.
+
+    Note this is the HARD stop (2.5%), the broker-side backstop. The
+    entry stop is FIXED_STOP_PCT = 3%, costing Rs 1,800, which the cap
+    buys 6.7 of -- see test_daily_limits.py for that one.
+    """
     position = config.MTF_MARGIN_PER_POSITION_RS * config.MTF_LEVERAGE
     loss = position * config.HARD_STOP_FROM_ENTRY_PCT
     assert loss == pytest.approx(MTF_MARGIN_PER_POSITION_RS * 0.10)
-    assert 3 <= config.DAILY_MAX_LOSS_RS / loss <= 5
+    assert 5 <= config.DAILY_MAX_LOSS_RS / loss <= 9
 
 
 def test_the_stop_fires_well_before_dhans_margin_call():

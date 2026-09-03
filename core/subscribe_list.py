@@ -145,7 +145,16 @@ except Exception:                                          # noqa: BLE001
     # when config cannot be imported -- and that is precisely the
     # moment nothing else is around to catch a position sized 3.3x too
     # large. It tracks the live value now.
-    _POSITION_RS = 30_000.0              # his rule, as at 6 August 2026
+    #
+    # ---- AND DRIFTED AGAIN. 3 September 2026. ----
+    # The slot moved to Rs 15,000 that day -- eight seats on his
+    # Rs 1,23,491 instead of four, because the book was full for 290 of
+    # the session's 306 minutes -- and this stayed at 30,000. Same bug
+    # as the one the note above describes, one month later. The value
+    # here decides MIN_TURNOVER_RS, so a stale fallback silently
+    # doubles the liquidity floor and quietly shrinks the universe at
+    # exactly the moment config is unreadable.
+    _POSITION_RS = 15_000.0              # his rule, as at 3 September 2026
 
 MIN_TURNOVER_RS = _POSITION_RS / MAX_POSITION_SHARE_OF_DAY
 

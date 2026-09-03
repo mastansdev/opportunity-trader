@@ -79,7 +79,25 @@ from config import (
 
 
 def _brokerage(turnover):
-    return min(BROKERAGE_PER_ORDER_RS, BROKERAGE_PCT * turnover)
+    """Rs 20 an order, flat.
+
+    ---- WHAT DHAN ACTUALLY CHARGES. 3 September 2026. ----
+    This was min(Rs 20, 0.03% of turnover), which is the published
+    "whichever is lower" wording -- but on his account it is not what
+    is billed. His words:
+
+        "dhan charges us 20 rs for buying & 20rs for selling == 40rs
+         only for broker irrespective of qty"
+
+    Irrespective of qty. The min() only ever bit below Rs 66,667 of
+    turnover, which is exactly the size the bot trades now that a slot
+    is Rs 15,000 at 4x -- so every trade was being costed Rs 2-4 light
+    on each leg, understating a day of 20 trades by up to Rs 80.
+
+    BROKERAGE_PCT is left in config because the delivery/other plans
+    still quote it; nothing reads it here any more.
+    """
+    return BROKERAGE_PER_ORDER_RS
 
 
 def round_trip_charges(entry_price, exit_price, qty, direction="LONG",

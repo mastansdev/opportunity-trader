@@ -77,7 +77,42 @@ FREE_CASH_FLOOR_RS = 0.0
 
 # Own cash committed per position. MTF supplies the rest, and how much
 # it supplies depends on the stock's own margin percentage.
-OWN_CASH_PER_POSITION_RS = 30_000.0
+# ---- FOUR SEATS WAS THE BINDING CONSTRAINT. 3 Sep 2026. ----
+#
+#     "okay lets try this too, change slot to 15000"
+#
+# MEASURED by replaying today's own board (data/decisions.db, every
+# price as the bot saw it, 27-minute holds, seats the only variable):
+#
+#     seats  slot     capital     net      per 1 lakh
+#       4    30,000   120,000   -3,053       -2,544
+#       8    30,000   240,000   +8,801       +3,667
+#       8    10,000    80,000   +2,662       +3,327
+#      13    30,000   390,000  +21,616       +5,543
+#      20    30,000   600,000  +21,014       +3,502
+#
+# SEATS move the result, slot size barely does: at a fixed seat count,
+# dropping the slot from 30,000 to 10,000 changes the return per lakh
+# by a few percent. Four seats loses at every slot size; eight makes
+# money at every slot size. Past thirteen it stops helping -- only so
+# many stocks qualify in a day.
+#
+# His book was FULL for 290 of 306 minutes today -- 95% of the
+# session. Every late entry was bought within 0-2 minutes of a seat
+# freeing: RAYMOND 0 min after FINCABLES closed, WHEELS 0 min after
+# SOLARINDS, BAJAJCON 1 min after WHEELS. The bot was never slow. It
+# had nowhere to put anything.
+#
+# So 15,000 buys eight seats out of the same Rs 1.23 lakh, at half the
+# size each. Fewer rupees per trade, at prices that are actually
+# there: entries averaged 0.95% worse than first sighting today, and
+# every expensive one was a long wait.
+#
+# THE REPLAY DOES NOT MODEL THE EXIT RULE. It holds everything 27
+# minutes. Re-run it once liveness() refuses a fading stock and the
+# 15-minute exit stops cutting winners -- eight may not still be the
+# right number when winners are held.
+OWN_CASH_PER_POSITION_RS = 15_000.0
 
 # A sanity ceiling so a bad capital read cannot open 400 slots. Not a
 # trading rule -- a guard against a broker API returning nonsense.

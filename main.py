@@ -1990,6 +1990,13 @@ def main():
                         engine.routing_decisions = auto_entry.take(
                             _rows, engine,
                             now=datetime.now(),
+                            # The snapshot chose these rows up to 82
+                            # seconds ago. tick_ohlc.of() is written by
+                            # the feed handler on every packet, so this
+                            # is the freshest price in the process.
+                            # Injected, not imported there, for the
+                            # same reason buying_check is.
+                            price_of=tick_ohlc.of,
                             security_id_of=master_loader.security_id,
                             held=set(engine.open_positions),
                             # One stock, one trade a day -- his call

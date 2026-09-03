@@ -415,8 +415,21 @@ function drawStrip(d){
   if (free === null) free = num(cap.available);
   var used = num(cap.used_margin);
   var util = num(cap.margin_utilization_pct);
-  var realized = num(cap.realized_pnl);
-  if (realized === null) realized = num(perf.realized_pnl);
+  // ---- THE NUMBER HE READS MUST BE THE MONEY HE KEEPS. 3 Sep 2026 ----
+  // This showed cap.realized_pnl, which is gross: portfolio.on_sell()
+  // books (exit-entry)*qty and nothing else. On 3 September the desk
+  // said +Rs 2,015 across 20 trades. Charges were Rs 2,000. He kept
+  // fifteen rupees and the screen told him two thousand.
+  //   "dhan charges us 20 rs for buying & 20rs for selling == 40rs
+  //    only for broker irrespective of qty; next STT, other charges
+  //    added up will become around 100 rs"
+  // _build_performance() has always computed net_pnl_after_charges.
+  // Nothing read it. Gross stays available as the tooltip so the
+  // charge bite is visible rather than merely subtracted.
+  var realized = num(perf.net_pnl_after_charges);
+  var grossPnl = num(cap.realized_pnl);
+  if (grossPnl === null) grossPnl = num(perf.net_pnl);
+  if (realized === null) realized = grossPnl;
   var adv = num(d.advances), dec = num(d.declines), uni = num(d.universe_size);
   var short = boardRows(d);
 
@@ -426,9 +439,13 @@ function drawStrip(d){
      + (used === null ? "" : " · " + inr(used) + " used")
      + (util === null ? "" : " · " + util.toFixed(0) + "%")],
     ["Today", realized === null ? "—" :
-      '<span class="'+(realized>=0?"up":"down")+'">'+
+      '<span class="'+(realized>=0?"up":"down")+'" title="after brokerage, STT, exchange, SEBI, stamp and GST'
+      + (grossPnl === null ? "" : " &mdash; gross " + (grossPnl>=0?"+":"−") + inr(Math.abs(grossPnl)))
+      + '">'+
       (realized>=0?"+":"−")+inr(Math.abs(realized))+'</span>',
-     closed.length + " closed"],
+     closed.length + " closed"
+     + (grossPnl === null || realized === null ? ""
+        : " · " + inr(Math.round(grossPnl - realized)) + " charges")],
     ["Advancing", adv === null ? "—" : inr(adv),
      dec === null ? "" : inr(dec) + " falling"],
     ["On the board", inr(short.length),

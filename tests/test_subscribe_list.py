@@ -16,12 +16,29 @@ import pytest
 
 from core.master_loader import MasterLoader
 from core.subscribe_list import (
+    MIN_TURNOVER_RS,
     NO, REASON_COL, SUBSCRIBE_COL, UNCLASSIFIED_REASON, YES, apply,
     build_bhav_index, decide, find_new_listings, read_master, write_master,
     write_new_stocks_md,
 )
 
-GOOD = dict(series="EQ", close=850.0, turnover=9e7)
+# ---- THIN IS RELATIVE TO THE POSITION. 3 September 2026. ----
+#
+# Five tests in this file used a literal 1.2e7 (Rs 1.2cr) to mean "too
+# illiquid", which was true while MIN_TURNOVER_RS was Rs 1.5cr.
+# core/subscribe_list.py DERIVES that floor:
+#
+#     MIN_TURNOVER_RS = _POSITION_RS / MAX_POSITION_SHARE_OF_DAY
+#
+# so halving the slot to Rs 15,000 on 3 September halved it to
+# Rs 0.75cr, and Rs 1.2cr became perfectly liquid. The tests then said
+# "assert False is True" about stocks they were no longer describing.
+#
+# The floor moving is the intended effect -- a smaller position needs
+# less of the day's turnover to fill, so MORE stocks are tradeable.
+# Pinning it in a fixture was the mistake.
+THIN = MIN_TURNOVER_RS / 2               # cannot clear the floor
+GOOD = dict(series="EQ", close=850.0, turnover=MIN_TURNOVER_RS * 12)
 
 
 # ---------------------------------------------------------------
@@ -85,16 +102,16 @@ def test_price_alone_no_longer_excludes_a_stock():
 def test_liquidity_still_excludes_a_cheap_scrip_that_barely_trades():
     """Dropping the price floor must not quietly admit scrips nobody
     can get out of. Turnover, not price, is the rule that matters."""
-    ok, reason = decide("PENNY", bhav=dict(GOOD, close=45.0, turnover=1.2e7),
+    ok, reason = decide("PENNY", bhav=dict(GOOD, close=45.0, turnover=THIN),
                         sector="X")
     assert ok is False
-    assert "1.20cr" in reason
+    assert "%.2fcr" % (THIN / 1_00_00_000) in reason
 
 
 def test_illiquid_is_blocked_and_the_reason_carries_the_number():
-    ok, reason = decide("THINCO", bhav=dict(GOOD, turnover=1.2e7), sector="X")
+    ok, reason = decide("THINCO", bhav=dict(GOOD, turnover=THIN), sector="X")
     assert ok is False
-    assert "1.20cr" in reason
+    assert "%.2fcr" % (THIN / 1_00_00_000) in reason
     assert "illiquid" in reason.lower() or "enter and exit" in reason
 
 
@@ -287,7 +304,7 @@ def test_apply_reports_what_flipped_since_yesterday():
     rows = [_row("FELL", subscribe=YES), _row("ROSE", subscribe=NO)]
     # Was close=50.0 -- a price that no longer fails anything since
     # the bounds were removed. Turnover is the rule that still bites.
-    index = {"FELL": dict(GOOD, turnover=1.2e7), "ROSE": GOOD}
+    index = {"FELL": dict(GOOD, turnover=THIN), "ROSE": GOOD}
     _, summary = apply(rows, index)
 
     assert summary["flipped_off"] and summary["flipped_off"][0][0] == "FELL"
@@ -330,7 +347,7 @@ def test_write_master_never_loses_the_hand_built_columns(tmp_path):
     row = _row("KEEPME", sector="PHARMA")
     row["KEYWORDS"] = "ONCOLOGY | GENERICS"
     row["THEMES"] = "HEALTHCARE"
-    rows, _ = apply([row], {"KEEPME": dict(GOOD, turnover=1.2e7)})  # -> NO
+    rows, _ = apply([row], {"KEEPME": dict(GOOD, turnover=THIN)})  # -> NO
     write_master(rows, path)
 
     back, _ = read_master(path)
@@ -347,7 +364,7 @@ def test_find_new_listings_skips_what_we_already_have():
     # PENNY at Rs 12 is a genuine new listing now that price alone
     # excludes nothing -- ILLIQUID is the one that still gets skipped.
     index = {"HAVE": GOOD, "NEW": GOOD,
-             "ILLIQUID": dict(GOOD, turnover=1.2e7)}
+             "ILLIQUID": dict(GOOD, turnover=THIN)}
     found = find_new_listings(index, known_symbols={"HAVE"})
     assert [r["symbol"] for r in found] == ["NEW"]
 

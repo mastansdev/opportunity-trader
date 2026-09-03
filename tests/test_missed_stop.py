@@ -21,6 +21,8 @@ exchange's extreme extends past our stop AFTER entry, that trade
 happened after we bought and we missed it.
 """
 
+from datetime import datetime, timedelta
+
 import core.engine as engine_module
 from core.engine import Engine, EXIT_REASON_MISSED_STOP
 
@@ -53,6 +55,10 @@ def _engine_with(snap):
                   enable_tick_sanity=False)
 
 
+ENTRY_TIME = datetime(2026, 8, 31, 10, 15, 0)
+AFTER_ENTRY = ENTRY_TIME + timedelta(minutes=12)
+
+
 def _open_long(engine, entry=100.0, stop=98.0):
     """Places a position directly, bypassing the entry path -- these
     tests are about the STOP, not about how the trade was chosen."""
@@ -62,7 +68,17 @@ def _open_long(engine, entry=100.0, stop=98.0):
         "stop_mode": engine_module.STOP_MODE_ATR_TRAILING,
         "atr_stop": stop, "atr_extreme": entry, "atr_value": 1.0,
         "entry_reason": engine_module.ENTRY_REASON_STRUCTURAL_LONG,
-        "entry_time": None, "sector": None, "rel_strength": None,
+        # ---- A POSITION HAS A TIME. 3 September 2026. ----
+        # These fixtures carried entry_time=None and every call below
+        # passed tick_time=None, so the rule could not tell whether a
+        # breach happened after entry -- and on 3 September it did not
+        # ask. FIRSTCRY was "sold" sixteen seconds before it was
+        # bought, at a price it never printed, for -Rs 2,164, because
+        # its PREVIOUS close (170.83) sat below the stop the bot had
+        # just set. A real position always carries an entry time, so
+        # these now do too.
+        "entry_time": ENTRY_TIME,
+        "sector": None, "rel_strength": None,
         "regime": None,
         "exchange_extreme_at_entry": engine._exchange_extreme("X"),
     }
@@ -76,7 +92,7 @@ def test_a_breach_the_feed_skipped_is_caught_and_tagged():
     _open_long(engine, entry=100.0, stop=98.0)
 
     snap.set(low=97.0)                       # traded through, unseen
-    engine._check_trailing_stop("X", 99.5, None)
+    engine._check_trailing_stop("X", 99.5, AFTER_ENTRY)
 
     assert "X" not in engine.open_positions
     assert engine.closed_positions[-1]["exit_reason"] == EXIT_REASON_MISSED_STOP
@@ -143,13 +159,23 @@ def test_short_side_is_mirrored_on_the_day_high():
         "stop_mode": engine_module.STOP_MODE_ATR_TRAILING,
         "atr_stop": 102.0, "atr_extreme": 100.0, "atr_value": 1.0,
         "entry_reason": engine_module.ENTRY_REASON_STRUCTURAL_SHORT,
-        "entry_time": None, "sector": None, "rel_strength": None,
+        # ---- A POSITION HAS A TIME. 3 September 2026. ----
+        # These fixtures carried entry_time=None and every call below
+        # passed tick_time=None, so the rule could not tell whether a
+        # breach happened after entry -- and on 3 September it did not
+        # ask. FIRSTCRY was "sold" sixteen seconds before it was
+        # bought, at a price it never printed, for -Rs 2,164, because
+        # its PREVIOUS close (170.83) sat below the stop the bot had
+        # just set. A real position always carries an entry time, so
+        # these now do too.
+        "entry_time": ENTRY_TIME,
+        "sector": None, "rel_strength": None,
         "regime": None,
         "exchange_extreme_at_entry": engine._exchange_extreme("X"),
     }
 
     snap.set(high=103.0)                     # spiked through, unseen
-    engine._check_trailing_stop("X", 100.5, None)
+    engine._check_trailing_stop("X", 100.5, AFTER_ENTRY)
 
     assert "X" not in engine.open_positions
     assert engine.closed_positions[-1]["exit_reason"] == EXIT_REASON_MISSED_STOP

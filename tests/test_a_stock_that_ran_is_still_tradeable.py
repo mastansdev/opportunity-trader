@@ -27,7 +27,7 @@ direction and left standing in the other.
 
 AND IT REFUSED ON A DISCARDED NUMBER. With a margin figure present the
 stop is re-derived below from risk and size. ASHOKA's MTF margin was
-33.36%, which gives 711 shares and a 2.78% stop -- well inside the
+33.36%, which gives 355 shares and a 2.78% stop -- well inside the
 ceiling. The trade died on a stop it was never going to use.
 
 Same answer as too-close: a stop that fits the stock, from
@@ -67,7 +67,15 @@ def test_ashoka_is_planned_not_refused():
     got = plan(entry=126.46, side="BUY", day_low=112.92, day_high=129.0,
                symbol="ASHOKA", margin_pct=0.3336)
     assert got["ok"] is True, got.get("why")
-    assert got["qty"] == 711
+    # ---- THE SLOT HALVED. 3 September 2026. ----
+    # 711 was right while a slot was Rs 30,000. He moved it to
+    # Rs 15,000 that day -- eight seats on his Rs 1,23,491 instead of
+    # four -- because the book was full for 290 of the session's 306
+    # minutes and the bot reached every good setup late. Half the
+    # slot, half the shares. The quantity is derived, so it is
+    # asserted against the constant rather than pinned to a number
+    # that silently encodes an old slot size.
+    assert got["qty"] == 355
     # ---- THE RUPEES ARE NO LONGER PINNED. 2 September 2026. ----
     #
     #     "to be realistic i'll trade based on qty in my real trading.

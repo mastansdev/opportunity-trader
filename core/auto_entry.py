@@ -894,9 +894,106 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None,
     return None
 
 
+def price_now(row, price_of):
+    """Put the LIVE tick price on a ranked row before anything reads it.
+
+    ---- THE DOOR WAS READING A PHOTOGRAPH. 3 September 2026. ----
+
+        "fix the entry lag, make it read ticks not the snapshot ...
+         i want lag free & seamless dashboard with out missing any
+         opportunity"                                -- the operator
+
+    take() ends in
+
+        enter(symbol, security_id, row.get("ltp"), plan["stop"], ...)
+
+    and row["ltp"] came from the dashboard snapshot. That snapshot is
+    rebuilt by dashboard/state._build(), which recomputes about
+    twenty-five panels from scratch and takes 42s at the median, 82s
+    at p90 -- main.py asks for it every second and gets one every
+    forty. So the price the order was placed at, and the stop derived
+    from it, were both up to a minute and a half old.
+
+    Measured on his own book: entries averaged 0.95% worse than the
+    price at first sighting.
+
+    THE SPLIT. The snapshot is good at the slow question -- WHICH
+    stocks qualify: the reason, the sector, liquidity, ADV, the news.
+    None of that changes in a minute. It is bad at the fast one --
+    WHAT the price is now. So the snapshot still chooses the
+    candidates and the tick prices them, which is the same division
+    core/engine.py already uses for exits: process_tick() runs the
+    trailing stop intrabar, on every tick.
+
+    price_of is INJECTED, like engine.buying_check -- main.py hands in
+    core.tick_ohlc.of. Nothing here imports the tick store, so a unit
+    test cannot reach the live one.
+
+    A row with no tick is left exactly as it was. A missing reading
+    means nothing; it must never be read as a better price.
+    """
+    if price_of is None:
+        return row
+    try:
+        live = price_of(row.get("symbol")) or {}
+    except Exception:                                      # noqa: BLE001
+        return row
+
+    try:
+        ltp = float(live.get("LTP") or 0)
+    except (TypeError, ValueError):
+        return row
+    if ltp <= 0:
+        return row
+
+    row["ltp"] = ltp
+    row["priced_from"] = "tick"
+
+    try:
+        prev = float(live.get("close") or 0)
+        if prev > 0:
+            row["change_pct"] = (ltp - prev) / prev * 100.0
+    except (TypeError, ValueError):
+        pass
+
+    # The day's extremes can only widen. Take the wider of the two
+    # sources rather than trusting either alone -- REST drops symbols
+    # and the feed reconnects.
+    for key, live_key, pick in (("day_high", "high", max),
+                                ("day_low", "low", min)):
+        try:
+            got = float(live.get(live_key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if got <= 0:
+            continue
+        had = row.get(key)
+        row[key] = pick(got, float(had)) if had else got
+    # LTP itself is a print, so it is evidence about the extremes too.
+    if row.get("day_high") is None or ltp > row["day_high"]:
+        row["day_high"] = ltp
+    if row.get("day_low") is None or ltp < row["day_low"]:
+        row["day_low"] = ltp
+
+    # The gate that decides whether the move is still on was computed
+    # on the stale price. Re-ask it on the live one. A None answer
+    # ("cannot say") leaves the ranker's own verdict standing rather
+    # than replacing a judgement with a shrug.
+    try:
+        from core.ranker import liveness
+        state, why = liveness(row)
+        if state:
+            row["state"] = state
+            if why:
+                row["state_why"] = why
+    except Exception:                                      # noqa: BLE001
+        pass
+    return row
+
+
 def take(rows, engine, now=None, security_id_of=None, held=None,
          traded_today=None,
-         max_positions=None, alert=None, enter=None):
+         max_positions=None, alert=None, enter=None, price_of=None):
     """Route the ranker's picks into the order path.
 
     `enter` and `alert` are injected so this can be exercised without
@@ -993,6 +1090,10 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
         if not isinstance(row, dict):
             continue
         symbol = str(row.get("symbol") or "").upper()
+
+        # PRICED BY THE TICK, NOT THE SNAPSHOT. Done per row and as
+        # late as possible -- the last thing before the gates read it.
+        row = price_now(row, price_of)
         why = refuse_reason(row, engine, now=now, held=held,
                             max_positions=seats,
                             traded_today=traded_today)

@@ -97,6 +97,7 @@ from config import (
     LAST_ENTRY_TIME, REGIME_GATE_ENABLED, REGIME_BREADTH_THRESHOLD,
     REGIME_REFRESH_SECONDS, REGIME_MIN_SYMBOLS,
     MAX_OPEN_POSITIONS, DAILY_MAX_LOSS_RS, DAILY_PROFIT_TARGET_RS,
+    BUYING_DRIED_UP_MIN_OFF_PEAK_PCT,
     BREAKOUT_MIN_MARGIN_PCT,
     ENABLE_TREND_RANK_ENTRY, TREND_RANK_TOP_N, TREND_RANK_REFRESH_SECONDS,
     ENABLE_SLOT_ROTATION, ROTATION_MIN_STRENGTH_EDGE,
@@ -174,6 +175,7 @@ def _is_provisional(reason):
 # _check_atr_trailing().
 STOP_MODE_SWING_TRAILING = "SWING_TRAILING"
 STOP_MODE_ATR_TRAILING = "ATR_TRAILING"
+from trading.charges import round_trip_charges, nights_between
 from trading.execution import Execution
 from trading.trade_controller import TradeController
 
@@ -3216,10 +3218,34 @@ class Engine:
         is seeded once at startup from the persisted portfolio, so the
         guardrail now governs the WHOLE day, not just the current
         process's slice of it.
+
+        ---- THE CAP MUST COUNT THE MONEY THAT LEFT. 3 Sep 2026. ----
+        This summed record["pnl"], which is gross -- (exit-entry)*qty
+        and nothing else. Charges are real and they are not small: at
+        Rs 100 a round trip (his figure), a forty-trade day pays
+        Rs 4,000 that this sum could not see. The guardrail would have
+        gone on allowing entries at a true -Rs 16,000 while reading
+        -Rs 12,000, which is not the brake he set.
+
+        _carried_pnl is left alone: it is seeded once at startup from
+        the persisted portfolio, which is also gross, but it has no
+        per-trade prices to charge against. On a same-day restart it
+        is a small understatement of the loss, never an overstatement
+        of it -- the safe direction.
         """
-        return self._carried_pnl + sum(
-            (record.get("pnl") or 0) for record in self.closed_positions
-        )
+        charged = 0.0
+        for record in self.closed_positions:
+            charged += (record.get("pnl") or 0)
+            try:
+                charged -= round_trip_charges(
+                    record["entry_price"], record["exit_price"],
+                    record["qty"], record.get("direction", LONG),
+                    nights_held=nights_between(record.get("entry_time"),
+                                               record.get("exit_time")),
+                )
+            except (KeyError, TypeError, ValueError):
+                pass          # a degenerate record must not blind the cap
+        return self._carried_pnl + charged
 
     def seed_daily_pnl(self, realized_pnl):
         """Called once at startup with the realized P&L already booked
@@ -5208,6 +5234,31 @@ class Engine:
         if position is None:
             return False
 
+        # ---- IT SOLD FIRSTCRY BEFORE IT BOUGHT IT. 3 Sep 2026. ----
+        #
+        # This rule's own sentence, three lines up, is "if it extends
+        # past our stop AFTER we entered, the breach is ours". It never
+        # checked the AFTER.
+        #
+        #     FIRSTCRY   bought 09:35:21 at 177.49, stop 172.08
+        #                "sold" 09:35:05 at 173.01   -Rs 2,164
+        #
+        # Sixteen seconds before it was bought, at a price the stock
+        # never printed. FIRSTCRY's whole day was 176.09 to 180.89 over
+        # 335 board rows and it closed at 180.48 -- the 172.08 stop was
+        # never within reach. But its PREVIOUS close was 170.83, below
+        # that stop, so any row carrying the previous session's low
+        # reports a breach the moment it is read. Same shape as the
+        # stale rows in core/tick_ohlc.
+        #
+        # A tick at or before the entry cannot evidence a breach that
+        # is ours, by this function's own definition of ours. It says
+        # it "fails OPEN in every uncertain case"; this was a case it
+        # did not test.
+        held = self._held_minutes(position, tick_time)
+        if held is None or held <= 0:
+            return False
+
         baseline = position.get("exchange_extreme_at_entry")
         now = self._exchange_extreme(symbol)
         if baseline is None or now is None:
@@ -5643,6 +5694,13 @@ class Engine:
         fifteen minutes ago; below that it is reading the noise around
         its own entry. CDSL was once bought and closed eleven seconds
         later. Never again.
+
+        AND NOT WHILE IT IS STILL AT ITS HIGH. 3 September 2026. On
+        that day all thirteen winners exited here and not one reached
+        the 2.5% peak trail; eleven were sold while price was still
+        climbing, and ANANTRAJ and KIRIINDUS were sold at a new high.
+        Rs 23,310 was left on the table in one session. See
+        config.BUYING_DRIED_UP_MIN_OFF_PEAK_PCT for the measurement.
         """
         check = getattr(self, "buying_check", None)
         if check is None:
@@ -5656,6 +5714,22 @@ class Engine:
 
         held = self._held_minutes(position, tick_time)
         if held is not None and held < BUYING_CHECK_MIN_MINUTES:
+            return False
+
+        # STILL AT ITS HIGH IS STILL IN MOMENTUM. The peak comes from
+        # the trailing stop, which has tracked it on every tick since
+        # entry. No peak means the trail is not running for this
+        # position, and a missing reading must never be read as "sell"
+        # -- the same rule the flow check itself follows.
+        peak = None
+        trail = getattr(self, "trailing_stop", None)
+        if trail is not None:
+            try:
+                peak = trail.get_peak(symbol)
+            except Exception:                              # noqa: BLE001
+                peak = None
+        if peak and price >= peak * (
+                1 - BUYING_DRIED_UP_MIN_OFF_PEAK_PCT / 100.0):
             return False
 
         try:

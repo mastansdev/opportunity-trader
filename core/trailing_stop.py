@@ -405,6 +405,17 @@ class TrailingStopEngine:
         state = self._state.get(symbol)
         return state["direction"] if state else None
 
+    def get_peak(self, symbol):
+        """The best price this position has seen since entry, or None.
+
+        Already tracked on every tick by update_on_price(); it simply
+        had no reader outside this file. core/engine._buying_dried_up()
+        needs it to answer one question -- is this stock still at its
+        high? -- before it acts on an order-flow reading.
+        """
+        state = self._state.get(symbol)
+        return state.get("peak") if state else None
+
     def is_hit(self, symbol, price):
         state = self._state.get(symbol)
         if state is None:

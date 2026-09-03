@@ -970,6 +970,51 @@ TRAILING_STOP_WINDOW_CANDLES = 5   # LEGACY -- see PEAK_TRAIL_PCT below
 ENABLE_PEAK_TRAIL = True
 PEAK_TRAIL_PCT = 0.025
 
+# ---- A STOCK AT ITS HIGH HAS NOT STOPPED BEING BOUGHT. 3 Sep 2026 ----
+#
+#     "why we need to focus on only loosing part ? and leaving the
+#      gaining stocks completely"                    -- the operator
+#
+# On 3 September every one of the thirteen winning trades exited
+# BUYING_DRIED_UP. Not one reached the 2.5% peak trail above. Eleven of
+# the thirteen were sold while the price was STILL CLIMBING, and two --
+# ANANTRAJ and KIRIINDUS -- were sold at a new high: the sale price was
+# the highest print of the day so far.
+#
+#     stock      sold at   held   made   the day's peak, later
+#     BRIGADE     689.66    84m  3,406   732.30 at 15:25
+#     HIKAL       224.95    15m    648   239.45 at 14:48
+#     KIRIINDUS   564.47    15m     99   589.55 at 13:19
+#     ANANTRAJ    623.79    15m  1,587   640.00 at 12:16
+#
+# Rs 23,310 left on the table in one session, against Rs 2,000 of
+# charges for the whole day.
+#
+# still_buying() is bool(cum > 0 and cum > cum_15min_ago) -- cumulative
+# delta, so it asks only whether the last fifteen minutes had net
+# buying, in ANY amount. One share of net selling in a normal pullback
+# flips it, and one tick is enough to sell. It never looks at price.
+#
+# His rule is "exit once the momentum gone". Price making new highs IS
+# momentum. So the flow reading is not allowed to close a winner that
+# is still at its high; the 2.5% peak trail above owns that exit, which
+# is what it was built for and has never once been reached.
+#
+# 1.0% and not more: it must still be possible for flow to get out
+# ahead of the trail once a move genuinely stalls -- that is the whole
+# point of reading order flow. This only stops it selling the top tick.
+#
+# MEASURED, n = 34 real trades over 4 sessions with recorded board
+# data (2026-08-21, 09-01, 09-02, 09-03): holding to the trail instead
+# of the flow reading was better on 22 and worse on 10, and better on
+# every one of the four sessions. The ten it hurts are the scratch
+# trades -- ELECON, CAPLIPOINT, MANYAVAR, WHEELS, MAHABANK, RBLBANK --
+# which core/ranker.liveness() now refuses at entry.
+#
+# n = 34 is small. This is a direction the evidence supports, not a
+# settled number.
+BUYING_DRIED_UP_MIN_OFF_PEAK_PCT = 1.0
+
 # ---- AND THE TRAIL IS ONE WIDTH TOO. 19 August 2026. ----
 #
 #     "trailing in good moving stocks (strong supported events)"
@@ -2005,7 +2050,42 @@ MANUAL_ALERT_HISTORY = 400
 # any one position may consume.
 #
 # Raise it back when the join has been watched for a few sessions.
-MTF_MARGIN_PER_POSITION_RS = 30_000.0
+# ---- FOUR SEATS WAS THE BINDING CONSTRAINT. 3 Sep 2026. ----
+#
+#     "okay lets try this too, change slot to 15000"
+#
+# MEASURED by replaying today's own board (data/decisions.db, every
+# price as the bot saw it, 27-minute holds, seats the only variable):
+#
+#     seats  slot     capital     net      per 1 lakh
+#       4    30,000   120,000   -3,053       -2,544
+#       8    30,000   240,000   +8,801       +3,667
+#       8    10,000    80,000   +2,662       +3,327
+#      13    30,000   390,000  +21,616       +5,543
+#      20    30,000   600,000  +21,014       +3,502
+#
+# SEATS move the result, slot size barely does: at a fixed seat count,
+# dropping the slot from 30,000 to 10,000 changes the return per lakh
+# by a few percent. Four seats loses at every slot size; eight makes
+# money at every slot size. Past thirteen it stops helping -- only so
+# many stocks qualify in a day.
+#
+# His book was FULL for 290 of 306 minutes today -- 95% of the
+# session. Every late entry was bought within 0-2 minutes of a seat
+# freeing: RAYMOND 0 min after FINCABLES closed, WHEELS 0 min after
+# SOLARINDS, BAJAJCON 1 min after WHEELS. The bot was never slow. It
+# had nowhere to put anything.
+#
+# So 15,000 buys eight seats out of the same Rs 1.23 lakh, at half the
+# size each. Fewer rupees per trade, at prices that are actually
+# there: entries averaged 0.95% worse than first sighting today, and
+# every expensive one was a long wait.
+#
+# THE REPLAY DOES NOT MODEL THE EXIT RULE. It holds everything 27
+# minutes. Re-run it once liveness() refuses a fading stock and the
+# 15-minute exit stops cutting winners -- eight may not still be the
+# right number when winners are held.
+MTF_MARGIN_PER_POSITION_RS = 15_000.0
 
 # Cached per session: margin rates change rarely, and a live API call on
 # every click would put ~300ms between the operator pressing BUY and the

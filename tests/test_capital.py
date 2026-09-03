@@ -32,7 +32,10 @@ def test_cash_still_decides_below_the_working_ceiling():
     for rupees in (120_000, 150_000, 200_000, 246_593):
         assert capital.slots(rupees)["total"] == min(
             int(rupees // per), cap), rupees
-    assert capital.slots(20_000)["slots"] == 0, (
+    # Below ONE slot, whatever the slot is. Was 20,000 when a slot
+    # cost 30,000; the slot halved to 15,000 on 3 September, so the
+    # example has to move with it rather than pin a rupee figure.
+    assert capital.slots(per - 1)["slots"] == 0, (
         "an account that cannot fund one position must still open none")
 
 
@@ -40,9 +43,16 @@ def test_the_floor_machinery_still_works_if_he_restores_it():
     """Set to 0, not deleted. Putting the reserve back is one number,
     and the arithmetic that honours it must not rot while it is off."""
     from core import capital
+    per = capital.OWN_CASH_PER_POSITION_RS
     got = capital.slots(150_000, floor_rs=100_000)
-    assert got["total"] == 1, "the reserve no longer holds cash back"
-    assert capital.slots(120_000, floor_rs=100_000)["slots"] == 0
+    # 100,000 held back leaves 50,000 to deploy, whatever a slot costs.
+    # This asserted "== 1", true only while a slot was 30,000, so it
+    # broke when the slot halved -- the test was pinning the dial
+    # rather than the rule it defends: the reserve holds cash back.
+    assert got["total"] == int(50_000 // per), (
+        "the reserve no longer holds cash back")
+    assert capital.slots(per - 1 + 100_000, floor_rs=100_000)["slots"] == 0, (
+        "a floor that leaves less than one slot must open none")
 
 
 def test_the_working_ceiling_still_caps_a_big_account():
@@ -81,8 +91,13 @@ def test_the_working_ceiling_still_caps_a_big_account():
     from core import capital
 
     # Cash decides, all the way up.
-    assert capital.slots(431_116)["total"] == int(431_116 // 30_000)
-    assert capital.slots(146_593)["total"] == 4
+    # Reads the constant rather than repeating it -- this line said
+    # 30_000 and broke the day the slot changed, which is the test
+    # pinning a dial instead of the rule it defends.
+    per = capital.OWN_CASH_PER_POSITION_RS
+    assert capital.slots(431_116)["total"] == min(
+        int(431_116 // per), capital.WORKING_MAX_POSITIONS)
+    assert capital.slots(146_593)["total"] == int(146_593 // per)
 
     # ...until the bad-read guard, which is the only thing left.
     absurd = capital.slots(100_000_000)

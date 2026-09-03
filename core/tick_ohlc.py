@@ -168,9 +168,50 @@ def pressure(symbol):
     return out
 
 
+def _is_today(row):
+    """Was this tick recorded in the CURRENT session?
+
+    ---- YESTERDAY'S TICK CAME BACK AS TODAY'S PRICE. 3 Sep 2026 ----
+
+        "Duplicates of data is not acceptable at all"   -- the operator
+
+    _latest is keyed by symbol only and never expires. reset() has
+    existed since this file was written and is called from NOWHERE --
+    a grep across the repo finds no caller. So a process that runs
+    across midnight, or a feed that stops sending a symbol, keeps
+    serving that symbol's LAST tick for ever.
+
+    dashboard/state._compute_gl_rows() backfills from here whenever the
+    REST snapshot drops a stock, which the snapshot's own docstring
+    says happens in 99% of sessions. The result on 3 September:
+
+        ANTELOPUS   live rows   951.15 .. 1063.10, moving
+                    stale rows  951.15 all day, +20.00%, frozen
+
+    951.15 is ANTELOPUS's PREVIOUS close, and +20.00% was YESTERDAY's
+    move. The board carried both copies of the same stock at the same
+    minute -- 2,247 symbol-minutes across 23 symbols -- and the ranker
+    ranked the frozen one at rank 6 while the live one sat at 13.
+
+    Nothing new is stored to fix it: remember() has always stamped
+    row["at"] with a full datetime. It was simply never read.
+    """
+    at = row.get("at") if row else None
+    try:
+        return at is not None and at.date() == datetime.now().date()
+    except AttributeError:
+        return False            # not a datetime -- cannot vouch for it
+
+
 def of(symbol):
-    """{"open","high","low","close","at"} from the tick, or None."""
-    return _latest.get(str(symbol or "").upper())
+    """{"open","high","low","close","at"} from the tick, or None.
+
+    None for a tick recorded in an earlier session. A stale price is
+    worse than no price: no price leaves the stock unranked, a stale
+    one puts yesterday's close on the board as today's.
+    """
+    row = _latest.get(str(symbol or "").upper())
+    return row if _is_today(row) else None
 
 
 def symbols():
@@ -181,8 +222,10 @@ def symbols():
     every session on 2 September. The feed is a single persistent
     connection and lost nothing that day. This is how the board finds
     the stocks the snapshot forgot.
+
+    TODAY means today. See _is_today().
     """
-    return list(_latest)
+    return [sym for sym, row in _latest.items() if _is_today(row)]
 
 
 def prev_close(symbol):

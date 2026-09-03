@@ -534,8 +534,36 @@ def liveness(row):
     dead = False
     if off_high is not None and off_high > MAX_OFF_EXTREME_PCT:
         dead = True
-    if recent is not None and abs(recent) < MIN_RECENT_PCT:
-        dead = True
+
+    # ---- MOVING DOWN IS STILL MOVING. 3 September 2026. ----
+    #
+    #     "i need to see the stocks which are actively moving not
+    #      already moved stocks and struck at upper levels"
+    #     "my real goal is to get max profits"
+    #
+    # This was abs(recent) < MIN_RECENT_PCT, so a stock sliding 0.28%
+    # in the recent window passed the test -- it was "moving", just
+    # the wrong way. Live on his board at 15:20 today, all reading
+    # ALIVE while drifting down:
+    #
+    #     RAYMOND    off_high 0.84   recent -0.28
+    #     RBLBANK    off_high 0.60   recent -0.36
+    #     JYOTICNC   off_high 1.58   recent -0.65
+    #     KIRIINDUS  off_high 2.22   recent -0.45
+    #
+    # He buys long. A long whose recent window is NEGATIVE is not a
+    # move he is joining, it is one he is catching. The direction has
+    # to agree with the side.
+    #
+    # Flat still counts as dead, which is what the old test caught and
+    # this keeps: a stock going nowhere is not an opportunity either.
+    if recent is not None:
+        if abs(recent) < MIN_RECENT_PCT:
+            dead = True                      # going nowhere
+        elif up and recent < 0:
+            dead = True                      # going the wrong way
+        elif (not up) and recent > 0:
+            dead = True
     if vwap and ltp:
         # Below VWAP on a long means the average buyer today is under
         # water. That is not a stock to be joining.
