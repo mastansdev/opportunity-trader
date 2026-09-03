@@ -950,7 +950,10 @@ def test_the_sector_heatmap_still_has_its_data():
     assert "gl.sector_gainers" in src and "gl.sector_losers" in src
     state = open("dashboard/state.py", encoding="utf-8").read()
     assert '"gainers_losers": gainers_losers' in state
-    assert "gainers_losers = self._build_gainers_losers()" in state
+    # _timed() wraps it since 3 Sep -- the panel must still be
+    # built and still feed the snapshot, which the two asserts
+    # above and below already prove.
+    assert "self._build_gainers_losers" in state
 
 
 # ---------------------------------------------------------------

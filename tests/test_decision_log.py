@@ -160,7 +160,11 @@ def test_an_empty_ranking_writes_nothing(log):
 def test_the_ranker_is_recorded_by_the_dashboard():
     src = open("dashboard/state.py", encoding="utf-8").read()
     assert "self._decisions.record(got, prices=prices)" in src
-    assert '"ranked": self.build_ranked(gainers_losers, open_positions),' in src
+    # Wrapped in _timed() on 3 Sep to find what costs the 42-second
+    # rebuild. The call and its arguments are what matter here, not
+    # whether a stopwatch sits around them.
+    assert "self.build_ranked" in src
+    assert "gainers_losers, open_positions" in src
 
 
 def test_the_ranking_reaches_the_order_path_and_starts_disarmed():
