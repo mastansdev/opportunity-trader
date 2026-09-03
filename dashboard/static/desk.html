@@ -228,7 +228,7 @@ tr.hand td{background:var(--sunk)}
     <div class="cols">
       <div class="card">
         <div class="hd"><b>What is moving, and why</b>
-          <span class="sub">ranked by how unusual the volume is</span></div>
+          <span class="sub">busiest right now &mdash; money changing hands this second, not what already moved</span></div>
         <div class="list" id="oplist"></div>
       </div>
       <div class="card">
@@ -394,16 +394,37 @@ function drawStrip(d){
   var perf = d.performance || {};
   var open = rowsOf(d.open_positions);
   var closed = rowsOf(d.closed_positions);
-  var free = num(cap.available_capital);
+  /* ---- available_capital GOES NEGATIVE ON MTF. 3 Sep 2026. ----
+   *
+   * Live at 09:53 it read MINUS Rs 2,40,271 and he asked what had
+   * happened. Nothing had: available_capital is cash MINUS the full
+   * value of the stock, and on 5x margin Rs 3.6 lakh of stock sits on
+   * Rs 1.23 lakh of cash. It is arithmetic, not a loss.
+   *
+   * But "Capital free: -2,40,271" on the one strip he reads all day
+   * is a number that looks like the account has blown up. What he
+   * actually needs is what he can still deploy, and the engine
+   * already computes it: available_margin, with used_margin and the
+   * utilisation beside it.
+   *
+   * available_capital stays the fallback for a cash book, where the
+   * two are the same number. */
+  var free = num(cap.available_margin);
+  if (free === null) free = num(cap.available_buying_power);
+  if (free === null) free = num(cap.available_capital);
   if (free === null) free = num(cap.available);
+  var used = num(cap.used_margin);
+  var util = num(cap.margin_utilization_pct);
   var realized = num(cap.realized_pnl);
   if (realized === null) realized = num(perf.realized_pnl);
   var adv = num(d.advances), dec = num(d.declines), uni = num(d.universe_size);
   var short = boardRows(d);
 
   var cells = [
-    ["Capital free", free === null ? "—" : inr(free),
-     (open.length||0) + " open"],
+    ["Margin free", free === null ? "—" : inr(free),
+     (open.length || 0) + " open"
+     + (used === null ? "" : " · " + inr(used) + " used")
+     + (util === null ? "" : " · " + util.toFixed(0) + "%")],
     ["Today", realized === null ? "—" :
       '<span class="'+(realized>=0?"up":"down")+'">'+
       (realized>=0?"+":"−")+inr(Math.abs(realized))+'</span>',
@@ -473,8 +494,161 @@ function tagOf(r){
     return ["news","NEWS"];
   return ["vol","VOLUME ONLY"];
 }
+/* ==========================================================
+   MOVING NOW, NOT MOVED EARLIER
+   ==========================================================
+ *     "i need to see the stocks which are actively moving not
+ *      already moved stocks and struck at upper levels"
+ *                              -- the operator, 3 September 2026
+ *
+ * He is right and the OLD board had this and I dropped it. It sorted
+ * by activityOf(): volume traded SINCE THE LAST POLL, times price,
+ * times 1.5 if the stock is still going his way and 0.3 if it has
+ * turned. A rate, not a total.
+ *
+ * The desk sorted by the ranker's order, which is driven by
+ * volume_x -- the CUMULATIVE multiple for the whole day. Cumulative
+ * never decays, so a stock that surged once at 09:20 sits at the top
+ * until 15:30 looking like an opportunity while nothing at all is
+ * happening in it. That is the "top gainers list you can get on any
+ * website" he is describing, and it is the exact complaint he has
+ * made since 4 August: "some stocks will rally in opening 1/2 mins &
+ * sit in top gainers no use of such movement in stock for trader".
+ *
+ * THE BOT'S OWN ORDER IS UNCHANGED. core/ranker.py still ranks by
+ * volume multiple, which is measured at +Rs 565 a trade against
+ * ordering by score. This is the order HE reads, on his screen. The
+ * two are allowed to differ as long as the screen says so -- every
+ * row carries its board rank, so he can always see what the bot
+ * would reach for first.
+ *
+ * Needs two polls to say anything: the first fills the baseline and
+ * every row reads "--", which is honest rather than a zero that
+ * looks like silence. */
+/* ==========================================================
+   LIVE PRICES, NOT THE 90-SECOND SNAPSHOT
+   ==========================================================
+ *     "i need to see the stocks which are actively moving not
+ *      already moved stocks and struck at upper levels"
+ *
+ * MEASURED at 13:06 on 3 September: the snapshot rebuilt at 13:04:26,
+ * 13:05:50 and 13:07:35 -- 84 and 105 seconds apart. It is swapped in
+ * only when every panel has finished building, so ltp and volume on
+ * this page were up to a minute and a half old and NOTHING appeared
+ * to move. Polling /api/snapshot every 3 seconds cannot help: the
+ * server has nothing new to give for 90 of them.
+ *
+ * /ws/prices has existed all along, pushes changed prices from the
+ * tick feed four times a second (config.PRICE_PUSH_SECONDS = 0.25),
+ * and NOTHING was reading it -- not this page, not the old board.
+ * Another thing built and left standing alone.
+ *
+ * So: prices come from the socket, everything else from the snapshot.
+ * "Moving now" is then measurable honestly -- the percent a stock has
+ * moved in the last MOVE_WINDOW seconds, from real ticks, which is a
+ * RATE and decays the moment a stock stops. A name that spiked at
+ * 09:20 and has sat still since reads 0.00% and sinks, which is
+ * exactly what he asked for.
+ *
+ * If the socket never connects the page is unchanged -- snapshot
+ * prices, ranker order. It degrades to what it was, never to blank. */
+var LIVE = {};          // symbol -> latest traded price
+var PXHIST = {};        // symbol -> [{t, p}] over the last minute
+var LIVE_OK = false;
+var MOVE_WINDOW = 30;   // seconds
+
+function notePrice(sym, px){
+  px = num(px);
+  if (px === null || px <= 0) return;
+  LIVE[sym] = px;
+  var now = Date.now() / 1000;
+  var h = PXHIST[sym] || (PXHIST[sym] = []);
+  if (!h.length || now - h[h.length - 1].t >= 1) h.push({t: now, p: px});
+  while (h.length > 1 && now - h[0].t > 90) h.shift();
+}
+
+/* Percent moved over the last MOVE_WINDOW seconds. null when there is
+   not enough history yet -- an unknown must not read as "flat". */
+function movingNow(sym){
+  var h = PXHIST[sym];
+  if (!h || h.length < 2) return null;
+  var now = Date.now() / 1000, base = null;
+  for (var i = 0; i < h.length; i++){
+    if (now - h[i].t <= MOVE_WINDOW){ base = h[i]; break; }
+  }
+  if (!base) base = h[0];
+  if (now - base.t < 5) return null;          // too short to mean anything
+  var last = h[h.length - 1];
+  if (!base.p) return null;
+  return (last.p - base.p) / base.p * 100.0;
+}
+
+function openPriceSocket(){
+  var proto = location.protocol === "https:" ? "wss:" : "ws:";
+  var ws;
+  try { ws = new WebSocket(proto + "//" + location.host + "/ws/prices"); }
+  catch (e) { return; }
+  ws.onopen = function(){ LIVE_OK = true; };
+  ws.onmessage = function(ev){
+    try {
+      var d = JSON.parse(ev.data);
+      for (var k in d) notePrice(String(k).toUpperCase(), d[k]);
+    } catch (e) { /* a bad frame must never blank the board */ }
+    if (LAST) { drawList(LAST); drawOpen(LAST); }
+  };
+  ws.onclose = function(){
+    LIVE_OK = false;
+    setTimeout(openPriceSocket, 3000);        // it comes back by itself
+  };
+  ws.onerror = function(){ try { ws.close(); } catch (e) {} };
+}
+openPriceSocket();
+
+var TICKWAS = {};
+
+function activityOf(r){
+  var sym = String(r.symbol || "");
+  var vol = num(r.volume), ltp = num(r.ltp);
+  var was = TICKWAS[sym];
+  if (vol !== null && ltp !== null) TICKWAS[sym] = {vol: vol, ltp: ltp};
+  if (!was || vol === null || ltp === null) return null;
+  var dv = Math.max(vol - was.vol, 0);
+  var up = (num(r.change_pct) || 0) >= 0;
+  var still = up ? (ltp >= was.ltp) : (ltp <= was.ltp);
+  r.turnover_window_cr = dv * ltp / 1e7;
+  return dv * ltp * (still ? 1.5 : 0.3);
+}
+
 function drawList(d){
   var rows = boardRows(d);
+  /* Keep the ranker's position before re-ordering, so the row can
+     still say where the bot has it. */
+  rows.forEach(function(r, i){
+    if (r.board_rank === undefined) r.board_rank = i + 1;
+    var live = LIVE[String(r.symbol || "").toUpperCase()];
+    if (live) r.ltp = live;                   // the tick beats the snapshot
+    r.moving_now = movingNow(String(r.symbol || "").toUpperCase());
+    r.activity = (r.moving_now === null) ? activityOf(r) : null;
+  });
+  var anyLive = rows.some(function(r){ return r.moving_now !== null; });
+  if (anyLive) {
+    rows = rows.slice().sort(function(a, b){
+      var ha = a.held ? 0 : 1, hb = b.held ? 0 : 1;
+      if (ha !== hb) return ha - hb;
+      return (b.moving_now === null ? -1e9 : b.moving_now)
+           - (a.moving_now === null ? -1e9 : a.moving_now);
+    });
+  }
+  var anyOld = !anyLive && rows.some(function(r){ return r.activity !== null; });
+  if (anyOld) {
+    rows = rows.slice().sort(function(a, b){
+      /* Held first -- a position of his sliding is the one row he
+         must never scroll for. Same rule the old board used. */
+      var ha = a.held ? 0 : 1, hb = b.held ? 0 : 1;
+      if (ha !== hb) return ha - hb;
+      return (b.activity || 0) - (a.activity || 0);
+    });
+  }
   if (!rows.length){
     $("oplist").innerHTML = '<p class="empty">Nothing is moving with volume '+
       'behind it. A quiet day is a correct day.</p>';
@@ -499,7 +673,22 @@ function drawList(d){
       + (chg===null?'' : '<span class="'+(chg>=0?"up":"down")+'">'
          +(chg>=0?"+":"")+chg.toFixed(1)+'%</span>')+'</span>'
       + '<span class="why">'+esc(reasonOf(r))+'</span>'
-      + '<span class="sig n">'+(vx===null?"volume unmeasured":vx.toFixed(1)+"× normal")
+      + '<span class="sig n">'
+      // Money changing hands SINCE THE LAST POLL -- the "is it moving
+      // now" number. #rank is where core/ranker.py has it, so the
+      // bot's own order is never hidden by this one.
+      // MOVING NOW: percent over the last 30 seconds, from live ticks.
+      // A rate, so it decays the moment a stock stops -- unlike the
+      // day's cumulative multiple, which never does.
+      + (r.moving_now === null || r.moving_now === undefined
+         ? '<span class="dim">reading…</span>'
+         : (Math.abs(r.moving_now) < 0.03
+            ? '<span class="dim">flat 30s</span>'
+            : '<b class="' + (r.moving_now > 0 ? 'up' : 'down') + '">'
+              + (r.moving_now > 0 ? '+' : '') + r.moving_now.toFixed(2)
+              + '% in 30s</b>'))
+      + ' · #' + r.board_rank + ' · '
+      + (vx===null?"volume unmeasured":vx.toFixed(1)+"× normal")
       + (adv===null?"":" · ₹"+adv.toFixed(1)+" cr/day")+'</span></div>';
   }).join("");
 
