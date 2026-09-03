@@ -55,12 +55,47 @@ def test_a_long_still_rising_is_alive():
     assert state == "alive"
 
 
-def test_flat_is_still_dead():
-    """What the old test caught, and it was right. A stock going
-    nowhere is not an opportunity."""
-    state, _ = liveness(_row(change_pct=6.0,
-                             recent_pct=MIN_RECENT_PCT / 2))
+def test_flat_and_off_the_high_is_still_dead():
+    """What the old test caught, and it was right in that case: a
+    stock drifting sideways well below its high has stopped."""
+    state, _ = liveness(_row(change_pct=6.0, recent_pct=MIN_RECENT_PCT / 2,
+                             ltp=98.0, day_high=100.0))
     assert state == "fading"
+
+
+def test_flat_at_its_own_high_is_a_coil_not_a_stall():
+    """---- WHY BRIGADE WAS REFUSED. 3 September 2026. ----
+
+        bought 12:22:39 at 665.33
+        day high so far  665.25    off the high  0.04%
+        recent window   +0.02%     needed       +0.15%
+
+    Fifteen minutes in a ONE-RUPEE range at its own day high, then a
+    break to 732.30 and Rs 3,406 -- the best trade of his day, refused
+    by the flat test.
+    """
+    state, _ = liveness(_row(change_pct=6.0, recent_pct=0.02,
+                             ltp=665.00, day_high=665.25))
+    assert state == "alive", (
+        "a stock coiling at its own high reads as finished")
+
+
+def test_falling_at_its_high_is_still_dead():
+    """The band relaxes FLAT only. ALEMBICLTD was 0.40% off its high
+    and falling 0.40%, and lost Rs 2,581. Admitting anything merely
+    near its high would have taken that trade and FIRSTCRY with it."""
+    state, _ = liveness(_row(change_pct=6.0, recent_pct=-0.40,
+                             ltp=114.73, day_high=115.19, day_low=110.0))
+    assert state == "fading"
+
+
+def test_the_band_matches_the_exit_gate():
+    """One idea at both ends of the trade: a stock at its own high has
+    not stopped being bought, so the bot may enter it and will not sell
+    it on a flow blip either."""
+    from config import BUYING_DRIED_UP_MIN_OFF_PEAK_PCT
+    from core.ranker import COILING_AT_HIGH_PCT
+    assert COILING_AT_HIGH_PCT == BUYING_DRIED_UP_MIN_OFF_PEAK_PCT
 
 
 def test_far_off_the_high_is_still_dead():

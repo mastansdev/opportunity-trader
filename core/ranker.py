@@ -183,6 +183,43 @@ RANKED_LIST_SIZE = 25
 MAX_OFF_EXTREME_PCT = 3.0
 MIN_RECENT_PCT = 0.15
 
+# ---- FLAT AT ITS OWN HIGH IS A COIL, NOT A STALL. 3 Sep 2026. ----
+#
+#     "why brigade got refused?"                    -- the operator
+#
+# BRIGADE, 3 September, the best trade of his day:
+#
+#     bought 12:22:39 at 665.33
+#     day high so far  665.25      off the high  0.04%
+#     recent window   +0.02%       needed       +0.15%
+#     verdict: FADING -- flat
+#
+# It had spent fifteen minutes in a ONE-RUPEE range at its own day
+# high. It then broke to 732.30 and made Rs 3,406. The flat test --
+# which predates this session -- cannot tell a stock coiling under its
+# high from one that has stopped.
+#
+# Distance from the high is what separates them, and today's board
+# says so plainly. Every trade, measured at its own entry minute:
+#
+#     BRIGADE     +3,406   at its high   recent +0.02%   FLAT
+#     RAYMOND       +412   at its high   recent +0.00%   FLAT
+#     BAJAJCON       +64   at its high   recent +0.00%   FLAT
+#     ALEMBICLTD  -2,581   at its high   recent -0.40%   FALLING
+#     FIRSTCRY    -2,164   at its high   recent -0.34%   FALLING
+#     VISHNU        +218   at its high   recent -0.20%   FALLING
+#
+# "At its high" alone admits the two worst trades of the day. FLAT at
+# its high does not: the three flat ones are all winners and every
+# loser in that list is FALLING. So falling stays dead everywhere, and
+# only the FLAT test is relaxed, and only within this band.
+#
+# Same number as config.BUYING_DRIED_UP_MIN_OFF_PEAK_PCT on purpose --
+# one idea at both ends of the trade. A stock at its own high has not
+# stopped being bought, so the bot may enter it, and will not sell it
+# on an order-flow blip either.
+COILING_AT_HIGH_PCT = 1.0
+
 # A fading move is not deleted -- it is pushed below every live one.
 # Deleting it teaches him nothing; showing it decay teaches him what a
 # dying move looks like before he buys the next one.
@@ -558,12 +595,12 @@ def liveness(row):
     # Flat still counts as dead, which is what the old test caught and
     # this keeps: a stock going nowhere is not an opportunity either.
     if recent is not None:
-        if abs(recent) < MIN_RECENT_PCT:
-            dead = True                      # going nowhere
-        elif up and recent < 0:
+        wrong_way = (up and recent < 0) or ((not up) and recent > 0)
+        at_high = off_high is not None and off_high <= COILING_AT_HIGH_PCT
+        if wrong_way:
             dead = True                      # going the wrong way
-        elif (not up) and recent > 0:
-            dead = True
+        elif abs(recent) < MIN_RECENT_PCT and not at_high:
+            dead = True                      # going nowhere, and not at its high
     if vwap and ltp:
         # Below VWAP on a long means the average buyer today is under
         # water. That is not a stock to be joining.
