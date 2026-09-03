@@ -45,8 +45,15 @@ h1{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em}
 .sw button{font:inherit;font-weight:700;font-size:12px;letter-spacing:.06em;
   padding:7px 16px;border-radius:6px;border:1px solid var(--line);
   background:var(--panel);color:var(--mid);cursor:pointer}
-.sw button.on{background:var(--up);border-color:var(--up);color:#fff}
-.sw button.off{background:var(--down);border-color:var(--down);color:#fff}
+/* WHICHEVER ONE IS TRUE RIGHT NOW IS GREEN. 3 September 2026.
+   "if i click OFF = then bot show green color on OFF box . now ON
+    must not show any color"
+   OFF used to paint itself RED, which reads as an error rather than
+   as the state he just chose -- and with neither box green he could
+   not tell at a glance which one was live. Green means THIS IS THE
+   MODE, not "good": OFF green is paper, ON green is real money, and
+   the words on the buttons say which. */
+.sw button.active{background:var(--up);border-color:var(--up);color:#fff}
 #switchwhy{font-size:11.5px;color:var(--warn);display:none}
 
 /* ---- tabs ---- */
@@ -924,7 +931,7 @@ function drawRest(d){
     ["Why it ended", function(r){
       return esc(String(r.exit_reason||"").replace(/_/g," ").toLowerCase()); }]
   ];
-  var isReal = !!d.bot_trading;
+  var isReal = switchIsOn(d);
   simple("paper", isReal ? [] : closed.filter(function(r){
     return !HAND.test(String(r.exit_reason||"")); }), tradeCols,
     isReal ? "The switch is ON — today's trades are real, and are in the next table."
@@ -1061,10 +1068,31 @@ function drawRest(d){
 }
 
 /* ---------------- the switch ---------------- */
+/* ---- IT IS AN OBJECT, NOT A BOOLEAN. 3 September 2026. ----
+ *
+ *     "i clicked on OFF but color part not showed as i want"
+ *
+ * /api/snapshot returns:
+ *
+ *     bot_trading: {on: false, mode: "PAPER", placing_real_orders: false}
+ *
+ * and this page read it as `!!d.bot_trading`. An object is ALWAYS
+ * truthy, so ON stayed green and OFF never lit no matter what he
+ * clicked -- the switch was reporting a constant, not a state.
+ *
+ * Reads .on when it is an object, the value itself when it is a plain
+ * boolean, so an older payload still works. */
+function switchIsOn(d){
+  var v = d && d.bot_trading;
+  if (v && typeof v === "object") return !!v.on;
+  return !!v;
+}
+
 function drawSwitch(d){
-  var on = !!d.bot_trading;
-  $("btn-on").className = on ? "on" : "";
-  $("btn-off").className = on ? "" : "off";
+  var on = switchIsOn(d);
+  // Exactly one of the two carries .active, always.
+  $("btn-on").className  = on ? "active" : "";
+  $("btn-off").className = on ? "" : "active";
   $("modelab").textContent = on ? "real money" : "paper";
 }
 async function setMode(state){

@@ -286,3 +286,63 @@ def test_a_fixed_width_still_obeys_the_bounds():
     from core.rules import MIN_STOP_DISTANCE_PCT, MAX_STOP_DISTANCE_PCT
     from config import FIXED_STOP_PCT
     assert MIN_STOP_DISTANCE_PCT <= FIXED_STOP_PCT <= MAX_STOP_DISTANCE_PCT
+
+
+# ==========================================================
+# THE SWITCH SHOWS WHICH ONE IS TRUE
+# ==========================================================
+#
+#     "if i click OFF = then bot show green color on OFF box . now ON
+#      must not show any color"
+#     "i clicked on OFF but color part not showed as i want"
+#                                    -- operator, 3 September 2026
+#
+# TWO bugs, one behind the other.
+#
+# The first was colour: OFF painted itself RED, which reads as an
+# error rather than as the state he just chose, and with neither box
+# green he could not tell at a glance which was live.
+#
+# The second was worse and hid behind it. /api/snapshot returns
+#
+#     bot_trading: {on: false, mode: "PAPER", ...}
+#
+# and this page read it as `!!d.bot_trading`. An object is ALWAYS
+# truthy in JavaScript, so the switch reported a CONSTANT: ON green
+# for ever, whatever he clicked. The same read decided which trades
+# went in the paper table and which in the real one, so that was
+# wrong too, silently.
+#
+# The shape changed under a reader that assumed a boolean -- the same
+# fault as prev_close, as shortlist-versus-ranked, as `close` in the
+# feed backfill. Assert the source, because a truthiness bug throws
+# no error and shows no stack.
+
+def test_the_switch_reads_the_object_not_its_truthiness():
+    body = _desk()
+    assert "function switchIsOn(" in body, (
+        "the page has no helper that unpacks bot_trading")
+    # The phrase appears in the comment that explains the bug, so
+    # look for it as CODE: an assignment, not prose.
+    for bad in ("= !!d.bot_trading", "=!!d.bot_trading"):
+        assert bad not in body, (
+            "bot_trading is read as a boolean somewhere -- it is an "
+            "object, and an object is always truthy")
+
+
+def test_every_reader_of_the_switch_goes_through_it():
+    body = _desk()
+    assert body.count("switchIsOn(d)") >= 2, (
+        "the trade tables and the switch must read the mode the same "
+        "way, or one of them is wrong")
+
+
+def test_the_active_side_is_the_coloured_one():
+    """Green means THIS IS THE MODE, not 'good'. OFF green is paper,
+    ON green is real, and the button text carries which."""
+    body = _desk()
+    assert ".sw button.active{" in body
+    assert ".sw button.off{" not in body, (
+        "OFF still has its own red style -- it reads as an error")
+    assert 'on ? "active" : ""' in body
+    assert 'on ? "" : "active"' in body

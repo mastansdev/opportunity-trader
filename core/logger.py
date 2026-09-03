@@ -58,6 +58,7 @@ Author : H&M Opportunity Trader
 """
 
 import logging
+import time
 import os
 from logging.handlers import RotatingFileHandler
 
@@ -120,7 +121,73 @@ def _build_logger():
     return logger
 
 
+class _SayItOnce(logging.Filter):
+    """The same line, once -- then a count, not a flood.
+
+    ==========================================================
+        "why can't we stop this printing continously ... print only
+         one time at starting & do not make this print every second"
+                                -- the operator, 3 September 2026
+    ==========================================================
+
+    dhanhq logs its own failures to the ROOT logger, which is why it
+    reads ERROR:root: and not like anything this bot writes. With the
+    static IP expired, every poll of /v2/positions and /v2/holdings
+    comes back "Tunnel connection failed: 403" and prints in full,
+    once a cycle, all day -- burying the lines that matter on the one
+    screen he watches.
+
+    This does not hide it. The first occurrence prints in full, and
+    every 15 minutes it prints again WITH the number of times it
+    happened in between, so a fault that is getting worse still looks
+    like it is getting worse. A message that scrolls past 400 times an
+    hour is not more visible than one that prints five times; it is
+    less.
+
+    Keyed on the message text, so a DIFFERENT error is never
+    suppressed by a noisy neighbour.
+    """
+
+    def __init__(self, every_seconds=900):
+        super().__init__()
+        self._every = float(every_seconds)
+        self._seen = {}
+
+    def filter(self, record):                              # noqa: A003
+        try:
+            key = record.getMessage()[:200]
+        except Exception:                                  # noqa: BLE001
+            return True
+        now = time.time()
+        seen = self._seen.get(key)
+        if seen is None:
+            self._seen[key] = [now, 0]
+            return True
+        last, repeats = seen
+        if now - last >= self._every:
+            seen[0], seen[1] = now, 0
+            if repeats:
+                record.msg = (f"{record.getMessage()}   "
+                              f"[and {repeats} more like it in the last "
+                              f"{int(self._every // 60)} minutes]")
+                record.args = ()
+            return True
+        seen[1] = repeats + 1
+        return False
+
+
+def quieten_repeats(every_seconds=900):
+    """Install the filter on the ROOT logger -- where third-party
+    libraries write. The bot's own logger sets propagate=False and is
+    untouched by this."""
+    root = logging.getLogger()
+    if any(isinstance(f, _SayItOnce) for f in root.filters):
+        return
+    root.addFilter(_SayItOnce(every_seconds))
+
+
 log = _build_logger()
+quieten_repeats()
 
 
 def log_file_path():

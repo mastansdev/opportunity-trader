@@ -136,6 +136,14 @@ from core.shortlist import ShortlistBuilder
 from trading.charges import round_trip_charges, nights_between
 
 
+# A surveillance notice is not an order won. See the note where this
+# is used in build_morning_watchlist().
+_NOT_AN_ORDER = re.compile(
+    r"spurt in volume|price movement|action\(s\) taken|orders passed"
+    r"|pendency of litigation|surveillance|clarification",
+    re.I)
+
+
 def _adv(symbol):
     """Average daily traded value in crore, or 0. Fail-quiet."""
     try:
@@ -6596,7 +6604,9 @@ class DashboardState:
             live = {}
 
         rows = []
+        by_symbol = {}
         for symbol, d in filed.items():
+            by_symbol[symbol] = len(rows)
             move, vx = live.get(symbol, (None, None))
             # ---- SIZE AGAINST THE STOCK, NOT IN RUPEES. 3 Sep 2026 ----
             #
@@ -6637,6 +6647,73 @@ class DashboardState:
                 "volume_x": vx,
                 "got_buying": move is not None,
             })
+        # ---- THE NSE FILINGS WERE NOT ON IT. 3 September 2026. ----
+        #
+        # 07:46 this morning, live in the collector log:
+        #
+        #     [NEWS] INOXWIND -- ORDER_WIN filed 07:46:00 (4 min ago)
+        #
+        # and the 09:08 list would not have shown it. filed_symbols()
+        # reads data/stock_events.db, which Telegram and the RSS feeds
+        # write to. core/announcement_watcher.py -- the NSE corporate
+        # filings, the fastest and most reliable source there is --
+        # keeps everything IN MEMORY and writes to no database at all.
+        #
+        # The bot itself was never blind to them: _symbols_with_news_
+        # today() already reads announcements.symbols_today(), so they
+        # have always widened the pool. Only the screen I built
+        # yesterday missed them, which is its own kind of wrong -- he
+        # reads this list at 09:08 to decide what to watch, and an
+        # order filed at 07:46 is exactly what belongs on it.
+        #
+        # Merged, not replaced: a filing outranks a Telegram post about
+        # the same stock, because it is the primary source.
+        try:
+            watcher = getattr(self.engine, "announcements", None)
+            fresh = (watcher.snapshot(limit=400) or {}) if watcher else {}
+            for a in (fresh.get("rows") or []):
+                symbol = str(a.get("symbol") or "").upper()
+                if not symbol:
+                    continue
+                kind = str(a.get("kind") or "").upper()
+                subject = str(a.get("subject") or "")
+                # ---- A SURVEILLANCE NOTICE IS NOT AN ORDER WON. ----
+                #      3 September 2026, 08:51, on the live list.
+                #
+                # The classifier reads "orders passed" and "Spurt in
+                # Volume" as ORDER, so CEATLTD, XPROINDIA, DYCL and
+                # four others sat at the TOP of his 09:08 list -- the
+                # position reserved for the biggest real order of the
+                # morning. INOXWIND's genuine Rs 755 crore win was
+                # below them.
+                #
+                # These rows are worth keeping: "Spurt in Volume" is
+                # the exchange itself flagging unusual volume, which
+                # is exactly what he watches for. They are just not
+                # orders, so they lose the tag and keep the row.
+                if _NOT_AN_ORDER.search(subject):
+                    kind = "NEWS"
+                row = {
+                    "symbol": symbol,
+                    "kind": "ORDER" if "ORDER" in kind else (kind or "NEWS"),
+                    "at": str(a.get("filed_at") or "")[:5],
+                    "headline": str(a.get("subject") or "")[:160],
+                    "value_cr": None, "mcap_cr": None, "pct_of_mcap": None,
+                    "adv_cr": _adv(symbol), "days_of_trading": None,
+                    "grade": None, "source": "NSE filing",
+                }
+                move, vx = live.get(symbol, (None, None))
+                row["change_pct"], row["volume_x"] = move, vx
+                row["got_buying"] = move is not None
+                prior = by_symbol.get(symbol)
+                if prior is not None:
+                    rows[prior] = row          # the filing is primary
+                else:
+                    by_symbol[symbol] = len(rows)
+                    rows.append(row)
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[WATCHLIST] Could not read NSE filings: {exc}")
+
         # Orders first, biggest value at the top; then everything else
         # newest first. The same order he reads it in.
         rows.sort(key=lambda r: (
