@@ -36,6 +36,7 @@ from config import (
     ORB_WINDOW_END, ENABLE_MOMENTUM_LOCK,
     HEARTBEAT_INTERVAL_SECONDS,
     DASHBOARD_REFRESH_INTERVAL_SECONDS,
+    ENTRY_DECISION_INTERVAL_SECONDS,
 )
 from core import single_instance
 from core.master_loader import MasterLoader
@@ -1495,6 +1496,72 @@ def main():
         except Exception as e:
             warn(f"Tick handling error: {e}")
 
+    # ---- TWO LANES: THE REBUILD SAYS WHO, THE TICK SAYS WHEN ----
+    #                                      3 September 2026.
+    #
+    #     "fix the entry lag, make it read ticks not the snapshot ...
+    #      i want lag free & seamless dashboard with out missing any
+    #      opportunity. bot is doing too much complex of operations"
+    #
+    # The entry decision used to be made in the main loop, from
+    # dashboard_state.get_snapshot(). That snapshot is rebuilt by
+    # _build(), which recomputes twenty-seven panels from scratch: 42s
+    # at the median, 82s at p90. main.py asks for one every second and
+    # gets one every forty. So the buy decision stood in a queue behind
+    # twenty-four panels no trade ever reads.
+    #
+    # The split is by how fast the thing actually CHANGES:
+    #
+    #   WHO is worth watching -- news, an order win, results, a
+    #   concall, a volume surge. A company does not win a Rs 755 crore
+    #   order twice in a minute. The rebuild owns this and 42s is fine.
+    #
+    #   WHEN to act -- the price. That changes constantly, so it runs
+    #   here, on the tick worker, the same single thread the exits
+    #   already live on (engine.process_tick).
+    #
+    # WHY ONCE A SECOND AND NOT EVERY TICK. take() sorts candidates by
+    # volume ratio before handing out seats, and core/auto_entry.py's
+    # own measurement says that ordering is worth +Rs 565 a trade
+    # against -Rs 36 for "whoever fired first". Deciding inside a
+    # single tick means only ever considering the one stock that just
+    # ticked -- which IS "first to fire". Once a second the bot sees
+    # every candidate and gives the free seat to the best of them.
+    #
+    # Nothing about WHICH stocks qualify changes. take() is called with
+    # the same arguments and applies the same gates -- seats, the
+    # Rs 12,000 daily cap, one stock one trade a day, refuse_reason,
+    # sizing, the stop. The only thing that changes is how old the
+    # price was when it decided.
+    _candidates = {"rows": []}
+    _last_route = [0.0]
+
+    def _route_entries():
+        """Give the free seats to the best candidates, priced NOW.
+
+        Reads the list the main loop published; never builds one. No
+        candidates is not an error, it is most of the day.
+
+        NO PRICES, NO ENTRIES. price_now() leaves a row untouched when
+        tick_ohlc has nothing current for it, and tick_ohlc.of() now
+        refuses a tick from an earlier session -- so a dead feed makes
+        the bot stop trading rather than trade on yesterday.
+        """
+        rows = _candidates["rows"]
+        if not rows:
+            return
+        engine.routing_decisions = auto_entry.take(
+            rows, engine,
+            now=datetime.now(),
+            price_of=tick_ohlc.of,
+            security_id_of=master_loader.security_id,
+            held=set(engine.open_positions),
+            traded_today=engine.symbols_traded_today(),
+            max_positions=engine._position_ceiling(),
+            alert=engine._manual_alert,
+            enter=engine._enter,
+        )
+
     def _tick_worker(stop_event):
         """Drains tick_queue sequentially -- the ONE thread that
         drives market_data/engine, exactly the role the feed thread
@@ -1508,14 +1575,27 @@ def main():
                     timeout=1.0
                 )
             except queue.Empty:
-                continue
-            try:
-                market_data.on_tick(
-                    symbol, price, tick_time, now=received_at,
-                    cum_volume=cum_volume,
-                )
-            except Exception as e:
-                warn(f"Tick processing error ({symbol}): {e}")
+                pass          # a quiet second still gets a decision
+            else:
+                try:
+                    market_data.on_tick(
+                        symbol, price, tick_time, now=received_at,
+                        cum_volume=cum_volume,
+                    )
+                except Exception as e:
+                    warn(f"Tick processing error ({symbol}): {e}")
+
+            # THE ENTRY DECISION. Here and nowhere else -- this is the
+            # only thread that places entries now, so two ticks can
+            # never buy the same stock at once, and it needs no lock.
+            if (time.monotonic() - _last_route[0]
+                    >= ENTRY_DECISION_INTERVAL_SECONDS):
+                _last_route[0] = time.monotonic()
+                try:
+                    _route_entries()
+                except Exception as exc:                   # noqa: BLE001
+                    warn(f"[ROUTE] Entry routing failed ({exc}). "
+                         f"Exits and the feed are unaffected.")
 
     error_tracker = {"last_message": None}
 
@@ -1987,34 +2067,21 @@ def main():
                         # scored 30.7, was KEPT by the ranker, never
                         # reached his phone, and nothing anywhere
                         # could say why. Kept now, and published.
-                        engine.routing_decisions = auto_entry.take(
-                            _rows, engine,
-                            now=datetime.now(),
-                            # The snapshot chose these rows up to 82
-                            # seconds ago. tick_ohlc.of() is written by
-                            # the feed handler on every packet, so this
-                            # is the freshest price in the process.
-                            # Injected, not imported there, for the
-                            # same reason buying_check is.
-                            price_of=tick_ohlc.of,
-                            security_id_of=master_loader.security_id,
-                            held=set(engine.open_positions),
-                            # One stock, one trade a day -- his call
-                            # after VTL was sold and bought back two
-                            # seconds later. The BOT'S own book only:
-                            # what he trades himself is a separate book
-                            # and never blocks the bot.
-                            traded_today=engine.symbols_traded_today(),
-                            # ---- CASH, NOT THE NUMBER 3. 8 Aug 2026. ----
-                            # The engine sizes the book from the balance
-                            # (core/capital.py) and falls back to
-                            # MAX_OPEN_POSITIONS when it cannot read it.
-                            # This path was passing the constant directly
-                            # and overriding that entirely.
-                            max_positions=engine._position_ceiling(),
-                            alert=engine._manual_alert,
-                            enter=engine._enter,
-                        )
+                        # PUBLISH, DO NOT ROUTE. The decision moved to
+                        # the tick worker on 3 September -- see
+                        # _route_entries() above it for why. This hands
+                        # over WHO is worth watching; the worker decides
+                        # WHEN, once a second, on prices off the tick.
+                        #
+                        # Assignment of a new list is atomic in CPython,
+                        # so the worker either sees the previous list or
+                        # this one, never a half-built one. No lock, and
+                        # nothing here can block the feed.
+                        #
+                        # take() is NOT called here any more. Two
+                        # callers would be two threads placing orders,
+                        # and one stock could be bought twice.
+                        _candidates["rows"] = _rows
                 except Exception as exc:                   # noqa: BLE001
                     warn(f"[RANKED] Could not route the ranker's picks "
                          f"({exc}). The panel is unaffected.")

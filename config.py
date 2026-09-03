@@ -3913,6 +3913,24 @@ DASHBOARD_PORT = 8000
 # do.
 DASHBOARD_REFRESH_INTERVAL_SECONDS = 1
 
+# ---- HOW OFTEN THE BOT DECIDES TO BUY. 3 September 2026. ----
+#
+#     "i want lag free & seamless dashboard with out missing any
+#      opportunity"                                -- the operator
+#
+# The entry decision used to happen once per dashboard rebuild -- 42s
+# at the median, 82s at p90 -- because it read the snapshot. It now
+# runs on main.py's tick worker at this interval, on prices taken
+# straight off the feed.
+#
+# ONE SECOND, not every tick. core/auto_entry.take() sorts candidates
+# by volume ratio before handing out seats, and its own measured table
+# puts that ordering at +Rs 565 a trade against -Rs 36 for "first to
+# fire". Deciding inside a single tick can only ever consider the
+# stock that just ticked, which IS first-to-fire. A one-second beat
+# lets the bot see every candidate and give the seat to the best one.
+ENTRY_DECISION_INTERVAL_SECONDS = 1.0
+
 # ---- THE PRICE CHANNEL. 4 August 2026. ----
 #
 #     "even today i got confused no of times & felt that lag on price
