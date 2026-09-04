@@ -951,6 +951,34 @@ class DashboardState:
         # through, and the next build must never reuse this one.
         self._gl_rows_this_build = None
 
+        # ---- AND THE SAME THING AGAIN, ONE FUNCTION OVER. ----
+        #                                4 September 2026.
+        #
+        #     "fix the movers panel next"           -- the operator
+        #
+        # The reasoning just above -- "a build that takes twenty
+        # seconds must not recompute halfway through" -- was applied to
+        # _compute_gl_rows() and never to _build_shortlist(), which is
+        # guarded by a 30-SECOND TIMER instead.
+        #
+        # On 4 September the median rebuild took 58.9 seconds. The
+        # shortlist is built near the top of this method; build_movers()
+        # asks for it again further down. By then the 30 seconds have
+        # passed, the timer has expired, and movers rebuilds the whole
+        # shortlist from scratch -- inside the snapshot that just
+        # built it.
+        #
+        #     shortlist  14.4s median       movers  24.9s median
+        #
+        # A VICIOUS CIRCLE, not just waste: a slow build outlives the
+        # cache, which makes the build slower, which makes it outlive
+        # the cache by more. It is why movers reached 72.5s.
+        #
+        # It was quietly WRONG too -- two panels in one snapshot could
+        # show two different shortlists taken half a minute apart, with
+        # nothing saying so.
+        self._shortlist_this_build = None
+
         # Snapshot every engine-owned mutable structure ONCE, up
         # front, before any of the _build_X methods below touch it.
         # engine.open_positions / closed_positions / entry_blocked
@@ -6106,9 +6134,16 @@ class DashboardState:
         wrapped so a failure here can never take the dashboard down --
         a screener going quiet must degrade to an empty panel, never to
         a dead page while the operator has money on the screen."""
+        # ONE ANSWER PER BUILD, whatever the timer says. Cleared at the
+        # top of _build(); see the note there.
+        held = getattr(self, "_shortlist_this_build", None)
+        if held is not None:
+            return held
+
         now = time.monotonic()
         if self._shortlist_cache is not None and \
                 now - self._shortlist_built_at < SHORTLIST_REFRESH_SECONDS:
+            self._shortlist_this_build = self._shortlist_cache
             return self._shortlist_cache
         try:
             result = self._shortlist.rank(
@@ -6119,6 +6154,7 @@ class DashboardState:
                       "built_at": datetime.now().strftime("%H:%M:%S")}
         self._shortlist_cache = result
         self._shortlist_built_at = now
+        self._shortlist_this_build = result
         return result
 
     def build_movers(self):
