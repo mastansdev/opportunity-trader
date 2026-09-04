@@ -297,8 +297,10 @@ EXIT_REASON_BUYING_DRIED_UP = "BUYING_DRIED_UP"
 # not a number anybody chose.
 BUYING_CHECK_MIN_MINUTES = 15
 EXIT_REASON_FIXED_STOP = "FIXED_STOP_LOSS"
-# core/circuit_monitor.py -- proactive, direction-agnostic close
-# ahead of either circuit limit (see config.py's
+# core/circuit_monitor.py -- proactive close ahead of a circuit
+# limit that is AGAINST the position (direction-aware since
+# 29 July 2026; a long at its upper circuit is left alone -- see
+# Engine._circuit_blocks). (see config.py's
 # CIRCUIT_PROXIMITY_PCT docstring, post-HFCL operator instruction
 # 2026-07-23). Distinct from EXIT_REASON_TRAILING_STOP/FIXED_STOP --
 # this isn't a losing-trade stop-out, so BLOCK_REENTRY_AFTER_STOPOUT
@@ -4788,12 +4790,14 @@ class Engine:
         """
         Operator instruction, post-HFCL discussion 2026-07-23:
         "Bullish & Bearish irrespective we will close the open
-        position before circuits." Direction-agnostic by design --
-        this does NOT check whether the approaching circuit favours
-        the open position (upper for a long, lower for a short) or
-        not; either way there's no real counterparty for an exit
-        order once the lock actually happens, so the position closes
-        pre-emptively regardless. Runs ahead of the trailing
+        position before circuits." That was the rule until 29 July
+        2026, when CIRCUIT_RULE_DIRECTION_AWARE (True today) made it
+        DIRECTION-AWARE: see _circuit_blocks() below. A LONG walking
+        into its UPPER circuit is not trapped, it has run out of
+        sellers, and it is left alone. Only an approach that is
+        against the position closes it, because that is the one where
+        a lock leaves no counterparty for the exit. Runs ahead of the
+        trailing
         stop/manual-exit checks in process_tick() -- a circuit
         approach is a market-structure exit, not a normal risk-
         management one, and takes priority.
@@ -4819,9 +4823,24 @@ class Engine:
             f" ({flag['side']}, gap={flag['gap_pct'] * 100:.2f}%)"
             if flag else ""
         )
+        # ---- "IRRESPECTIVE OF DIRECTION" HAS BEEN FALSE SINCE
+        #      29 JULY 2026. ----
+        #
+        # _circuit_blocks(), four lines above, returns False for a LONG
+        # approaching its UPPER circuit -- the day's best position, not
+        # a trapped one -- so this line is only ever reached when the
+        # approach is genuinely against the position. The message kept
+        # claiming the old blanket behaviour for five weeks.
+        #
+        # It is not a cosmetic lie. On 4 September TBZ was locked at
+        # its upper circuit and he asked about it; a reader who
+        # believed this line would have concluded the bot was about to
+        # sell a stock with no sellers left in it.
+        side = (flag or {}).get("side") or "unknown"
         decision(
             f"CIRCUIT PROXIMITY EXIT: {symbol} price={price:.2f}{detail} -- "
-            f"closing ahead of the circuit lock, irrespective of direction."
+            f"closing ahead of the {side} circuit lock, which is against "
+            f"this position. An approach in our favour is left alone."
         )
         self._exit(symbol, price, EXIT_REASON_CIRCUIT_PROXIMITY, tick_time)
 

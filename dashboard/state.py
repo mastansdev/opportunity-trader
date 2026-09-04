@@ -793,9 +793,29 @@ class DashboardState:
             detail = "nothing over 50ms -- the cost is spread thin"
         when_it_changes(
             "slow-rebuild",
-            "[SLOW] The board took %.1fs to rebuild. Entries read this "
-            "snapshot, so they are deciding on prices that old. "
-            "Worst: %s." % (total_ms / 1000.0, detail))
+            # ---- THIS LINE STOPPED BEING TRUE ON 2 SEPTEMBER ----
+            #
+            #     "fix the entry lag, make it read ticks not the
+            #      snapshot"                        -- the operator
+            #
+            # It said "Entries read this snapshot, so they are
+            # deciding on prices that old". They have not since
+            # core/auto_entry.price_now() landed: the order price,
+            # the liveness check and (from 4 September) the stop and
+            # the size are all rebuilt off the tick at the moment of
+            # the decision.
+            #
+            # The cost is REAL but it is a different cost, and saying
+            # the wrong one hides it. A slow board does not delay the
+            # PRICE any more. It delays the STOCK APPEARING AT ALL --
+            # nothing can be bought until the rebuild puts it on the
+            # board, which on 4 September cost Rs 77,779 across nine
+            # trades that were found late, not priced late.
+            "[SLOW] The board took %.1fs to rebuild. Prices are not "
+            "affected -- entries re-read the tick. What this delays is "
+            "a stock APPEARING: nothing can be bought until a rebuild "
+            "puts it on the board. Worst: %s."
+            % (total_ms / 1000.0, detail))
 
     def refresh(self):
         """Rebuilds the snapshot, then swaps it in atomically --
