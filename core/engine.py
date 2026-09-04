@@ -5144,6 +5144,17 @@ class Engine:
             "rel_strength": entry_rel,
             "regime": self._last_logged_regime,
             **entry_reason_context,
+            # ---- THE FINGERPRINT. 4 September 2026. ----
+            # Stamped by core/auto_entry.take() at the instant it
+            # decided, and carried through to core/trade_memory so the
+            # question "which combination of rules made money" can be
+            # asked of the data rather than argued about. Only for THIS
+            # symbol -- a fingerprint left over from another stock is
+            # worse than none, so it is matched and then cleared.
+            **({k: v for k, v in (getattr(self, "entry_facts", None) or {}).items()
+                if k != "symbol"}
+               if (getattr(self, "entry_facts", None) or {}).get("symbol") == symbol
+               else {}),
             "entry_reason": entry_reason,
             "entry_time": entry_time,
             "direction": direction,

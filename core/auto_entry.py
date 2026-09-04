@@ -993,7 +993,8 @@ def price_now(row, price_of):
 
 def take(rows, engine, now=None, security_id_of=None, held=None,
          traded_today=None,
-         max_positions=None, alert=None, enter=None, price_of=None):
+         max_positions=None, alert=None, enter=None, price_of=None,
+         surge_of=None):
     """Route the ranker's picks into the order path.
 
     `enter` and `alert` are injected so this can be exercised without
@@ -1051,9 +1052,40 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
     #
     # The score still breaks ties -- it carries the reason weight and
     # the sector work, which volume knows nothing about.
+    # ---- THE SEAT GOES TO THE JUMP, NOT THE LEVEL. 4 Sep 2026 ----
+    #
+    # The measured table above is right that volume beats every other
+    # ordering -- but it was measured on the CUMULATIVE ratio, because
+    # that was the only one that existed. A cumulative ratio describes
+    # a move that already happened.
+    #
+    # 4 September, the 10:19 seat. RESPONIND's volume had jumped at
+    # 10:07 -- 34,906 shares against a baseline of 11 -- and it was
+    # twelve minutes into a move that ran 152 -> 174. VISHNU had a
+    # cumulative 16.5x from a move made an hour earlier. The sort took
+    # VISHNU. RESPONIND was finally bought at 13:26, 48 paise below the
+    # top, for -Rs 4,833; entering at that 10:19 seat makes +Rs 9,039.
+    #
+    # So the jump ranks first when it is known, and the cumulative
+    # ratio remains the tie-break and the fallback -- a stock the flow
+    # store cannot speak for must not be sorted last for that reason
+    # alone.
+    if surge_of is not None:
+        for r in (rows or []):
+            if not isinstance(r, dict):
+                continue
+            try:
+                got = surge_of(r.get("symbol"))
+            except Exception:                              # noqa: BLE001
+                got = None
+            if got and got.get("ratio"):
+                r["jump_x"] = float(got["ratio"])
+                r["jump_at"] = got.get("minute")
+
     rows = sorted(
         [r for r in (rows or []) if isinstance(r, dict)],
-        key=lambda r: (-(_num(r.get("volume_x"))
+        key=lambda r: (-(_num(r.get("jump_x")) or 0.0),
+                       -(_num(r.get("volume_x"))
                          or _num(r.get("volume_ratio")) or 0.0),
                        -(_num(r.get("score")) or 0.0)))
 
@@ -1177,6 +1209,31 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
             continue
 
         try:
+            # ---- THE FINGERPRINT OF THIS ENTRY. 4 September 2026 ----
+            #
+            #     "i want to make sure that which combination of rules
+            #      set were yielding results = profits"
+            #
+            # The facts as they stood at the instant of the decision,
+            # handed to the engine so they land on the trade record.
+            # Facts only -- no grouping, no score. Which combinations
+            # pay is a question for the data, not for me tonight.
+            try:
+                ltp = _num(row.get("ltp"))
+                hi = _num(row.get("day_high"))
+                engine.entry_facts = {
+                    "symbol": symbol,
+                    "door": row.get("door"),
+                    "volume_x": (_num(row.get("volume_x"))
+                                 or _num(row.get("volume_ratio"))),
+                    "jump_x": _num(row.get("jump_x")),
+                    "liveness": row.get("state"),
+                    "off_high_pct": (round((hi - ltp) / hi * 100.0, 2)
+                                     if hi and ltp and hi > 0 else None),
+                }
+            except Exception:                              # noqa: BLE001
+                engine.entry_facts = None   # never block a trade for bookkeeping
+
             enter(symbol, security_id, row.get("ltp"), plan["stop"],
                   now, "RANKED_SETUP", "LONG",
                   target=plan.get("target"), qty=plan["qty"])

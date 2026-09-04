@@ -128,6 +128,12 @@ class TradeMemory:
             Column("days_since_results", Integer),
             Column("had_reason", Integer, index=True),     # 1/0, the headline
             Column("reason_summary", String(160)),         # human-readable
+            # The fingerprint of the entry -- see LATE_COLUMNS.
+            Column("door", String(16), index=True),
+            Column("volume_x", Float),
+            Column("jump_x", Float),
+            Column("liveness", String(12)),
+            Column("off_high_pct", Float),
             Column("recorded_at", DateTime(timezone=True), default=_utcnow),
             # ---- ONE ROW PER STOCK PER DAY LOST HALF A SESSION ----
             #      1 September 2026.
@@ -168,6 +174,33 @@ class TradeMemory:
         "days_since_results": "INTEGER",
         "had_reason": "INTEGER",
         "reason_summary": "TEXT",
+        # ---- THE FINGERPRINT. 4 September 2026. ----
+        #
+        #     "i want to make sure that which combination of rules set
+        #      were yielding results = profits"        -- the operator
+        #
+        # reason_summary says WHAT was known about the stock -- news,
+        # results, a filing. It does not say which RULE admitted it to
+        # the pool, nor what the numbers were when the bot decided.
+        # Without those, a rule change can be argued about but never
+        # scored: after a week he cannot say whether news plus a volume
+        # jump beats news alone.
+        #
+        # These record the FACTS at the moment of entry and group
+        # nothing. Deciding the buckets now would throw away every
+        # question neither of us has thought of yet.
+        #
+        #   door        which rule opened the pool to it -- news,
+        #               filing, results, reporting, surge, opening
+        #   volume_x    the day-total ratio, the old surge measure
+        #   jump_x      this minute against its own recent minutes
+        #   liveness    alive / fading, as the gate read it
+        #   off_high    how far below its own day high it was bought
+        "door": "TEXT",
+        "volume_x": "REAL",
+        "jump_x": "REAL",
+        "liveness": "TEXT",
+        "off_high_pct": "REAL",
     }
 
     def _widen_the_unique_constraint(self):
@@ -354,6 +387,13 @@ class TradeMemory:
                 days_since_results=closed_position.get("days_since_results"),
                 had_reason=1 if closed_position.get("had_reason") else 0,
                 reason_summary=closed_position.get("reason_summary"),
+                # The fingerprint -- see LATE_COLUMNS. Facts, not
+                # groupings. None wherever the bot could not say.
+                door=closed_position.get("door"),
+                volume_x=closed_position.get("volume_x"),
+                jump_x=closed_position.get("jump_x"),
+                liveness=closed_position.get("liveness"),
+                off_high_pct=closed_position.get("off_high_pct"),
                 recorded_at=_utcnow(),
             )
             with self.engine.begin() as conn:

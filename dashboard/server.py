@@ -1580,6 +1580,32 @@ def build_app(dashboard_state, trade_controller, master_loader,
                 await asyncio.sleep(PRICE_PUSH_SECONDS)
         except WebSocketDisconnect:
             diagnostic("[DASHBOARD] Price client disconnected.")
+        except Exception as exc:                           # noqa: BLE001
+            # ---- A CLOSED TAB IS NOT AN ERROR. 4 September 2026. ----
+            #
+            #     "WARNING:asyncio:socket.send() raised exception.
+            #      is still printing"                  -- the operator
+            #
+            # Only WebSocketDisconnect was caught. That is the CLEAN
+            # goodbye -- and a browser tab that is closed, refreshed or
+            # put to sleep does not send one. The socket underneath
+            # dies first, send_json raises at the transport level, and
+            # asyncio logs it straight to the terminal, bypassing this
+            # process's own logger entirely. He refreshed the desk all
+            # afternoon on my instruction, and every stale connection
+            # then complained four times a second.
+            #
+            # It was never a trading fault -- this is the display
+            # socket, not the market feed -- but a warning that prints
+            # every 250ms is how a log stops being read, which is the
+            # same complaint he made about the results misread that has
+            # printed every session since day one.
+            #
+            # Said ONCE per client, at diagnostic level, and the
+            # coroutine ends so the connection is dropped rather than
+            # written to for ever.
+            diagnostic(f"[DASHBOARD] Price client went away "
+                       f"({type(exc).__name__}). Dropping it.")
 
     return app
 

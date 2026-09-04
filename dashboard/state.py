@@ -3305,6 +3305,11 @@ class DashboardState:
                 # reason at all and looked identical to one nothing
                 # had ever been published about.
                 row["reason_age"] = self._reason_age_for(row.get("symbol"))
+                # WHICH DOOR LET IT IN -- see _symbols_with_news_today().
+                # "opening" for anything already on the board before the
+                # pool was widened: it came in as a mover, not by a rule.
+                row["door"] = (getattr(self, "_door", None) or {}).get(
+                    str(row.get("symbol") or "").upper(), "opening")
                 source = by_symbol.get(row.get("symbol")) or {}
                 mtf = self._mtf_for(row.get("symbol"), source) or {}
                 row["plan"] = position_plan(
@@ -6503,12 +6508,40 @@ class DashboardState:
         the chance to be judged.
         """
         out = set()
+        # ---- WHICH DOOR LET IT IN. 4 September 2026. ----
+        #
+        #     "today rules as set -1 & now proposed rules to set-1
+        #      becomes set -2 . so that we can track which set gives us
+        #      more adapted to markets & make money more."
+        #
+        # Every entry has a reason_summary -- news:ORDER, results:STRONG
+        # -- but nothing records WHICH RULE admitted the stock to the
+        # candidate pool in the first place. Without that, a change to
+        # the rules can only be argued about, never scored: after a
+        # week he cannot say which door made money and which lost it.
+        #
+        # A door is not the same as a reason. RESPONIND on 4 September
+        # had reason_summary None and came in purely on volume; AFFLE
+        # had filed:CONCALL AND a volume jump, and only one of those
+        # actually opened the door.
+        #
+        # Recorded here, at the only place that knows.
+        self._door = {}
+
+        def _door(names, door):
+            """Tag anything this source is first to bring in."""
+            for n in (names or ()):
+                key = str(n).upper()
+                if key and key not in self._door:
+                    self._door[key] = door
+            return names
         for holder in ("announcements", "news"):
             source = getattr(self.engine, holder, None)
             getter = getattr(source, "symbols_today", None)
             if getter:
                 try:
-                    out.update(getter() or [])
+                    got = getter() or []
+                    out.update(_door(got, "news" if holder == "news" else "filing"))
                 except Exception:                          # noqa: BLE001
                     continue
 
@@ -6518,8 +6551,9 @@ class DashboardState:
         try:
             from core import watchlist_builder
             cutoff_day = datetime.now().date().isoformat()
-            out.update(watchlist_builder.graded_symbols() or {})
-            out.update(watchlist_builder.reporting_on(cutoff_day) or {})
+            out.update(_door(watchlist_builder.graded_symbols() or {}, "results"))
+            out.update(_door(watchlist_builder.reporting_on(cutoff_day) or {},
+                             "reporting"))
             # ---- AND THE THREE DOORS HE NAMED FIRST. 2 Sep 2026. ----
             #
             #     "create a watchlist each day & add the stocks which
@@ -6543,7 +6577,7 @@ class DashboardState:
             # Nothing here TAKES a trade: every gate downstream still
             # has to be cleared, and most of these will never move.
             # It only gives them the chance to be judged.
-            out.update(watchlist_builder.filed_symbols() or {})
+            out.update(_door(watchlist_builder.filed_symbols() or {}, "filing"))
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[RANK] Could not widen by watchlist: {exc}")
 
@@ -6576,6 +6610,7 @@ class DashboardState:
                 for symbol, ratio in (self._surging_now() or {}).items():
                     if ratio >= SURGE_REASON_MIN_RATIO:
                         out.add(symbol)
+                        _door([symbol], "surge")
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[RANK] Could not seed by volume surge: {exc}")
         return out
@@ -6620,14 +6655,56 @@ class DashboardState:
         return out
 
     def _surging_now(self):
-        """{SYMBOL: ratio} for every mover trading far above its own
-        normal pace by this minute.
+        """{SYMBOL: ratio} for every stock whose volume has just JUMPED.
 
-        Computed, not read off a field: nothing computes a volume ratio
-        before this point in the build, which is the mistake the first
-        version of the surge rule made.
+        ---- 10:07, NOT 13:26. 4 September 2026. ----
+
+            "fix the volume issue at 10:07 detection, not 13:26 reading"
+            "use flow_minutes for surge detection"    -- the operator
+
+        RESPONIND on 4 September. Its per-minute volume went 167, 11, 0,
+        then 34,906 at 10:07, and the price stepped 152 -> 157. The bot
+        bought at 13:26 at 172.11 -- three hours nineteen minutes later,
+        48 paise below the top of the entire move -- and lost Rs 4,833.
+        Replayed on the same rules, entering at 10:07 makes +Rs 8,170.
+        AFFLE the same day: jump at 10:22, bought at 13:06, +Rs 7,733
+        against -Rs 2,326.
+
+        Across nine trades that day the lateness cost Rs 77,779, on a
+        session that netted Rs 9,247.
+
+        WHY IT WAS LATE. This asked "is today's CUMULATIVE turnover far
+        above this stock's normal pace" -- a LEVEL. A level stays true
+        for hours after the move is over, so the stock qualified all
+        afternoon and was bought whenever a seat happened to free. At
+        11:24 RESPONIND traded its biggest minute of the day, 480,378
+        shares, and the JUMP reading was only 3x: enormous level, no
+        change. That is the distinction the old rule could not make.
+
+        core.order_flow.surge() asks the other question -- is THIS
+        MINUTE far above this stock's own recent minutes -- off the
+        per-minute record the bot already keeps for all 1,455
+        subscribed symbols, from the websocket. It does not depend on
+        the REST quote's volume field, which was absent for 54 of 100
+        board rows that day and is what made DOLPHIN, MUKKA and RHETAN
+        invisible while they ran 10%.
+
+        The pace ratio is still computed and still returned when the
+        jump has nothing to say -- a stock the flow store has not seen
+        enough of must not be read as quiet.
         """
         out = {}
+        # THE JUMP FIRST. A stock whose volume just multiplied is an
+        # event; one whose day-total is high is a description.
+        try:
+            from core import order_flow
+            for symbol in list(getattr(order_flow, "_recent", {}) or {}):
+                got = order_flow.surge(symbol)
+                if got and got.get("ratio"):
+                    out[symbol] = float(got["ratio"])
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[RANK] Jump detection unavailable ({exc}); "
+                       f"falling back to the pace ratio alone.")
         try:
             import json as _json
             import os as _os
