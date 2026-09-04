@@ -23,13 +23,20 @@ from trading.trade_logger import log_trade
 
 class PaperExecution:
 
-    def __init__(self, turnover_lookup=None, fill_log=None):
+    def __init__(self, turnover_lookup=None, fill_log=None,
+                 range_lookup=None):
         # turnover_lookup(symbol) -> day turnover in crores, or None.
         # Injected rather than imported so this module stays testable
         # and so a missing lookup degrades to "assume thin" (the
         # expensive assumption, which is the safe one) instead of
         # crashing an order.
         self._turnover_lookup = turnover_lookup
+        # range_lookup(symbol) -> (day_low, day_high), or None. Injected
+        # for the same reason turnover_lookup is: this module must not
+        # reach into a live store, and a test must be able to hand it
+        # any range it likes. Without it the fill is uncapped, exactly
+        # as before -- see fill_price().
+        self._range_lookup = range_lookup
         # Every fill is kept. Injected so tests get their own file.
         self._fills = fill_log if fill_log is not None else FillLog()
 
@@ -41,9 +48,23 @@ class PaperExecution:
         except Exception:                                  # noqa: BLE001
             return None
 
+    def _range(self, symbol):
+        """(low, high) for today, or (None, None). Never raises."""
+        if self._range_lookup is None:
+            return None, None
+        try:
+            got = self._range_lookup(symbol) or {}
+            if isinstance(got, dict):
+                return got.get("low"), got.get("high")
+            return got[0], got[1]
+        except Exception:                                  # noqa: BLE001
+            return None, None
+
     def _execute(self, side, security_id, symbol, price, qty, reason,
                  at_time=None):
-        filled = fill_price(price, side, self._turnover(symbol), at_time)
+        low, high = self._range(symbol)
+        filled = fill_price(price, side, self._turnover(symbol), at_time,
+                            day_high=high, day_low=low)
         cost = slippage_cost(price, filled, qty, side)
 
         # The TRADE LOG records the price actually paid, not the price

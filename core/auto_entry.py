@@ -975,6 +975,49 @@ def price_now(row, price_of):
     if row.get("day_low") is None or ltp < row["day_low"]:
         row["day_low"] = ltp
 
+    # ---- THE STOP WAS BUILT ON A PRICE FIVE MINUTES OLD. 4 Sep ----
+    #
+    # SBCL, 4 September:
+    #
+    #     bought 09:16:39 at 1135.67
+    #     stop   1144.80   -- ABOVE the entry
+    #     sold   09:16:40 at 1131.13, one second later, -Rs 481
+    #
+    # 1144.80 / 0.97 = 1180.20, which is where SBCL was before it fell
+    # into the open. The ORDER price was fresh -- price_now() had
+    # already done its job -- but row["plan"] carries the stop and the
+    # quantity, and that is built by dashboard/state._build() during
+    # the rebuild. On 4 September the rebuild took 50 to 344 seconds.
+    #
+    # So the bot bought at a one-second price against a stop and a size
+    # from a price up to five minutes old. On a stock falling into the
+    # open, the stop lands above the entry and the position is closed
+    # on the next tick.
+    #
+    # THE MARGIN RATE IS RECOVERED, NOT RE-ASKED. Dhan's margin for a
+    # stock does not change minute to minute, and asking again here
+    # would put a network call on the entry path. value_rs is what the
+    # old plan sized, so budget / value_rs is the rate it used.
+    #
+    # A rebuild that fails leaves the old plan standing. A stale stop
+    # is bad; no plan at all refuses the trade outright, which is worse.
+    try:
+        old_plan = row.get("plan") or {}
+        if old_plan.get("ok") and row.get("ltp"):
+            from config import MTF_MARGIN_PER_POSITION_RS
+            from core.position_plan import plan as _position_plan
+            value = _num(old_plan.get("value_rs"))
+            pct = (MTF_MARGIN_PER_POSITION_RS / value) if value else None
+            fresh = _position_plan(
+                row.get("ltp"), row.get("action") or "BUY",
+                day_low=row.get("day_low"), day_high=row.get("day_high"),
+                margin_pct=pct, symbol=row.get("symbol"))
+            if fresh.get("ok"):
+                row["plan"] = fresh
+                row["plan_priced_from"] = "tick"
+    except Exception:                                      # noqa: BLE001
+        pass
+
     # The gate that decides whether the move is still on was computed
     # on the stale price. Re-ask it on the live one. A None answer
     # ("cannot say") leaves the ranker's own verdict standing rather

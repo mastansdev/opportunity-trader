@@ -186,6 +186,37 @@ class TrailingStopEngine:
         breakout/breakdown candle's own extreme (low for LONG,
         high for SHORT).
         """
+        # ---- A LONG'S STOP GOES BELOW ITS ENTRY. 4 September 2026 ----
+        # start() took the seed verbatim and never asked whether it was
+        # on the right side. On 4 September SBCL was seeded at 1144.80
+        # against an entry of 1135.67 and was stopped out one second
+        # later for -Rs 481. The cause was upstream -- a plan built on a
+        # stale price -- and is fixed there, but a guard that only one
+        # caller respects is not a guard.
+        #
+        # It is CLAMPED, not refused: the position is already open by
+        # the time this runs, and leaving it unprotected would be worse
+        # than protecting it at the standard distance. Said loudly,
+        # because a stop on the wrong side means something upstream is
+        # broken and silence would hide it.
+        try:
+            if entry_price and seed_stop:
+                wrong = (direction == LONG and seed_stop >= entry_price) or (
+                    direction != LONG and seed_stop <= entry_price)
+                if wrong:
+                    from config import FIXED_STOP_PCT
+                    from core.logger import warn
+                    fixed = (entry_price * (1 - FIXED_STOP_PCT / 100.0)
+                             if direction == LONG
+                             else entry_price * (1 + FIXED_STOP_PCT / 100.0))
+                    warn(f"[STOP] {symbol} {direction}: the plan gave a stop of "
+                         f"{seed_stop:.2f} on an entry of {entry_price:.2f} -- "
+                         f"the wrong side. Using {fixed:.2f}. Something "
+                         f"upstream built this on a stale price.")
+                    seed_stop = fixed
+        except Exception:                                  # noqa: BLE001
+            pass
+
         self._state[symbol] = {
             "stop": seed_stop,
             "recent": [seed_stop],

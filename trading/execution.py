@@ -85,10 +85,15 @@ class Execution:
     live = False
 
     def __init__(self, turnover_lookup=None, dhan_client=None,
-                 price_lookup=None, open_position_count=None):
+                 price_lookup=None, open_position_count=None,
+                 range_lookup=None):
         # PAPER is always built. It is what the switch returns to, and
         # what every order takes while the switch is OFF.
-        self.executor = PaperExecution(turnover_lookup=turnover_lookup)
+        # range_lookup lets the paper fill be capped at a price the
+        # stock actually traded -- see trading/slippage.fill_price().
+        # None means uncapped, exactly as before.
+        self.executor = PaperExecution(turnover_lookup=turnover_lookup,
+                                       range_lookup=range_lookup)
         self.mode = "PAPER"
 
         # LIVE is built too, when this process is capable of it, so the

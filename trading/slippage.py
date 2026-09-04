@@ -103,7 +103,8 @@ def slippage_pct(turnover_cr=None, at_time=None):
     return pct
 
 
-def fill_price(intent_price, side, turnover_cr=None, at_time=None):
+def fill_price(intent_price, side, turnover_cr=None, at_time=None,
+               day_high=None, day_low=None):
     """The price a paper order ACTUALLY fills at.
 
     Always worse than intent. A BUY fills higher, a SELL fills lower.
@@ -116,9 +117,33 @@ def fill_price(intent_price, side, turnover_cr=None, at_time=None):
         pct = slippage_pct(turnover_cr, at_time)
         if pct <= 0:
             return intent_price
+        # ---- A FILL MUST BE A PRICE THAT TRADED. 4 Sep 2026. ----
+        #
+        #     "INOX WIND 76.5 is todays high till now"  -- the operator
+        #
+        # The bot filled INOXWIND at 76.57 that day. The stock's high
+        # was 76.50; 76.57 never printed. The percentage was applied to
+        # the intent price and nothing checked the answer against the
+        # session's own range, so the position began underwater by
+        # construction and could only show a profit if the stock went
+        # somewhere it had never been.
+        #
+        # Real slippage moves you to a WORSE PRICE THAT EXISTS -- the
+        # next level in the book. It cannot invent one. So the penalty
+        # still applies, and is then capped at the extreme the stock
+        # has actually reached.
+        #
+        # No range known -> no cap. A guess about the range would be
+        # the same mistake in the other direction.
         if side == BUY:
-            return round(intent_price * (1 + pct), 2)
-        return max(0.01, round(intent_price * (1 - pct), 2))
+            got = round(intent_price * (1 + pct), 2)
+            if day_high and day_high > 0:
+                got = min(got, round(float(day_high), 2))
+            return max(got, intent_price)
+        got = max(0.01, round(intent_price * (1 - pct), 2))
+        if day_low and day_low > 0:
+            got = max(got, round(float(day_low), 2))
+        return min(got, intent_price)
     except Exception:                                      # noqa: BLE001
         return intent_price
 

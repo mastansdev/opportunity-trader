@@ -564,6 +564,7 @@ class Engine:
         # order time, not whatever existed at construction.
         self.execution = Execution(
             turnover_lookup=self._day_turnover_cr,
+            range_lookup=self._day_range,
             dhan_client=dhan_client,
             price_lookup=self._live_price_for_order,
             open_position_count=lambda: len(self.open_positions),
@@ -2074,6 +2075,38 @@ class Engine:
             return (float(price) * float(volume)) / 1e7
         except Exception:                                  # noqa: BLE001
             return None
+
+    def _day_range(self, symbol):
+        """(low, high) traded TODAY off the feed, or (None, None).
+
+        ---- A FILL MUST BE A PRICE THAT TRADED. 4 September 2026 ----
+
+            "INOX WIND 76.5 is todays high till now"   -- the operator
+
+        The paper fill was 76.57. It caps against these two numbers;
+        see trading/slippage.fill_price().
+
+        THE FEED, NOT THE REST SNAPSHOT. core/tick_ohlc.of() carries
+        Dhan's own day high and low and is written on every tick, so it
+        cannot be behind the price being filled. The REST snapshot on
+        4 September was missing volume for 54 of 100 rows and would
+        have handed back a high older than the order.
+
+        (None, None) means UNKNOWN and uncaps the fill -- the same
+        posture as _day_turnover_cr. Inventing a range to cap against
+        would be the identical mistake pointing the other way.
+        """
+        try:
+            row = tick_ohlc.of(symbol) or {}
+            low = row.get("low")
+            high = row.get("high")
+            low = float(low) if low else None
+            high = float(high) if high else None
+            if low and high and low > high:
+                return None, None          # cannot both be true
+            return low, high
+        except (TypeError, ValueError):
+            return None, None
 
     def _live_price_for_order(self, symbol):
         """The CURRENT traded price, for the pre-send drift check.
