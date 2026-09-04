@@ -160,8 +160,25 @@ def _server_source():
 def test_the_bot_trades_in_both_positions():
     """No third state. alert_only is off either way."""
     body = _server_source()
-    assert "engine.alert_only = False" in body
-    assert "execution.live = bool(want_trading)" in body
+    # ---- ONE FUNCTION MOVES THE SWITCH NOW. 5 September 2026. ----
+    #
+    # These asserted on lines inside the endpoint. The endpoint no
+    # longer writes the flags itself: the desk and the phone both go
+    # through core.trading_gate.apply_switch(), because until then the
+    # same OFF meant "still trading, on paper" on the desk and "stop
+    # trading, alerts only" from Telegram -- the third state, still
+    # reachable from his phone.
+    #
+    # So the assertion follows the behaviour to where it lives: the
+    # endpoint must DELEGATE, and apply_switch must do the thing.
+    import inspect
+
+    from core.trading_gate import apply_switch
+    _gate = inspect.getsource(apply_switch)
+    assert "apply_switch" in body, (
+        "the endpoint no longer moves the switch through the gate")
+    assert "engine.alert_only = False" in _gate
+    assert "execution.live = bool(on)" in _gate
 
 
 def test_the_on_message_asks_the_router_not_the_config():

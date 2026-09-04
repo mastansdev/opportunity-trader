@@ -142,8 +142,25 @@ def test_it_sets_the_live_switch_not_alert_only():
     off in both positions.
     """
     body = _endpoint()
-    assert "execution.live = bool(want_trading)" in body
-    assert "engine.alert_only = False" in body
+    # ---- ONE FUNCTION MOVES THE SWITCH NOW. 5 September 2026. ----
+    #
+    # These asserted on lines inside the endpoint. The endpoint no
+    # longer writes the flags itself: the desk and the phone both go
+    # through core.trading_gate.apply_switch(), because until then the
+    # same OFF meant "still trading, on paper" on the desk and "stop
+    # trading, alerts only" from Telegram -- the third state, still
+    # reachable from his phone.
+    #
+    # So the assertion follows the behaviour to where it lives: the
+    # endpoint must DELEGATE, and apply_switch must do the thing.
+    import inspect
+
+    from core.trading_gate import apply_switch
+    _gate = inspect.getsource(apply_switch)
+    assert "apply_switch" in body, (
+        "the endpoint no longer moves the switch through the gate")
+    assert "execution.live = bool(on)" in _gate
+    assert "engine.alert_only = False" in _gate
 
 
 def test_it_does_not_write_the_config_file():

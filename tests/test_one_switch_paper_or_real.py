@@ -58,6 +58,32 @@ class _Spy:
         return {"filled": True, "by": self.name}
 
 
+
+# ---- THE PROCESS MODE IS AN OUTER BOUND. 4 September 2026. ----
+#
+# These tests were written when the switch alone decided where an
+# order went. That night's audit found core/trading_gate.py had been
+# written to keep PAPER and REAL apart and was called by NOTHING, and
+# that dashboard/server.py set `execution.live` with no mode check --
+# so pressing ON in a PAPER session would have sent real orders to
+# Dhan. The only thing stopping it was a static IP returning 403.
+#
+# Execution._live_executor() now refuses on the mode, at the one line
+# every order routes through. A session started in PAPER never places
+# a real order however the switch is set.
+#
+# So a test about LIVE ROUTING has to say it is a live process. These
+# tests are not weakened -- they are made to state the thing they were
+# silently assuming. conftest forces PAPER for the suite as a whole
+# (tests/conftest.py::_tests_run_in_paper), which is why it has to be
+# said here rather than left to the default.
+@pytest.fixture
+def live_process(monkeypatch):
+    """A process started with TRADING_MODE=LIVE."""
+    import config
+    monkeypatch.setattr(config, "TRADING_MODE", "LIVE")
+    return True
+
 def _execution(live_possible=True):
     ex = Execution.__new__(Execution)
     ex.executor = _Spy("paper")
@@ -83,7 +109,7 @@ def test_off_means_paper_and_the_bot_still_trades():
     assert ex.executor.orders == ["buy"]
 
 
-def test_on_sends_his_click_to_the_exchange():
+def test_on_sends_his_click_to_the_exchange(live_process):
     ex = _execution()
     ex.live = True
     assert _who(ex.buy(1, "ASHOKA", 100.0, 10,
@@ -98,7 +124,7 @@ def test_it_starts_on_paper_whatever_config_says():
 
 # ------------------------------------------- no third state, either way
 
-def test_on_sends_the_bots_own_entry_to_the_exchange():
+def test_on_sends_the_bots_own_entry_to_the_exchange(live_process):
     """This asserted the OPPOSITE until he read it back to me.
 
     LIVE_ALLOW_BOT_ENTRIES kept the bot's own trades on paper while the
@@ -116,7 +142,7 @@ def test_on_sends_the_bots_own_entry_to_the_exchange():
         assert _who(ex.buy(1, "X", 100.0, 10, reason=reason)) == "live"
 
 
-def test_the_reason_no_longer_changes_where_an_order_goes():
+def test_the_reason_no_longer_changes_where_an_order_goes(live_process):
     """Whose idea a trade was used to decide which money paid for it.
     With two modes that cannot matter, and a router that reads the
     reason is a router that can grow a third mode again."""
@@ -149,7 +175,7 @@ def test_the_third_state_cannot_come_back_quietly():
 
 # --------------------------------------------------- exits are not gated
 
-def test_a_real_position_gets_a_real_exit():
+def test_a_real_position_gets_a_real_exit(live_process):
     """A position opened live is real. Sending its stop to paper would
     leave him holding stock the bot believes it has sold."""
     ex = _execution()

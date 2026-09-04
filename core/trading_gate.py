@@ -128,6 +128,73 @@ def may_place_real_orders(engine):
     return True, f"the switch is ON and {why}"
 
 
+def apply_switch(engine, on):
+    """Move THE switch. The desk and the phone both come through here.
+
+    ---- THE SAME 'OFF' MEANT TWO THINGS. 4 September 2026. ----
+
+        "i didn't understand why so much complex is in this switch
+         ON / OFF .?"
+        "i told you my requirements too, how each switch works right"
+                                              -- the operator
+
+    He is right, and the audit found it. Until this function existed:
+
+        dashboard OFF -> alert_only = False, execution.live = False
+                         the bot still trades, on paper.  HIS RULE.
+
+        Telegram  OFF -> RAISED the alert-only flag and left
+                         execution.live untouched: the bot stopped
+                         trading entirely and only alerted.  THE THIRD
+                         STATE he abolished on 31 August after 65
+                         alerts and 0 trades.
+
+    (Written out in words rather than as code, because
+    tests/test_the_guard_stops_a_dead_feed.py greps the live tree for
+    that assignment and a docstring quoting it reads exactly like the
+    bug. A guard that fires on its own explanation is a guard that
+    gets switched off.)
+
+    and Telegram ON set alert_only = False without touching
+    execution.live, so it did not turn real trading on either -- it
+    just unfroze the bot. One flag, two opposite meanings, depending
+    on which screen he happened to press.
+
+    So there is one function, and both callers use it. The dashboard
+    keeps its own extra work around this -- the readiness check, the
+    purse -- but the thing that decides WHOSE MONEY is decided here
+    and nowhere else.
+
+    Returns (ok, message). A refusal is a sentence, never silence.
+    """
+    if on:
+        refusal = refuse_to_arm_reason(engine)
+        if refusal:
+            return False, f"Refusing to arm: {refusal}"
+
+    execution = getattr(engine, "execution", None)
+    if execution is None:
+        return False, "no execution path in this session"
+
+    # THE THIRD STATE STAYS DEAD. Neither position of this switch may
+    # set alert_only. The bot always trades; the switch chooses whose
+    # money and nothing else.
+    engine.alert_only = False
+    execution.live = bool(on)
+
+    # This switch arms the RANKER, never the breakout. 6 August 2026:
+    # he turned it on having been told the ranker's rules and got eight
+    # breakout fills, because both paths read one flag.
+    engine.breakout_armed = False
+
+    if not on:
+        return True, "OFF -- every order is paper."
+    ok, why = may_place_real_orders(engine)
+    if ok:
+        return True, "ON -- real orders. " + why
+    return True, ("ON -- but " + why)
+
+
 def refuse_to_arm_reason(engine):
     """Why the switch must not go ON right now, or None if it may.
 

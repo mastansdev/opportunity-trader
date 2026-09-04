@@ -118,6 +118,24 @@ def test_the_dashboard_switch_is_what_re_arms(monkeypatch):
     from pathlib import Path
 
     src = Path("dashboard/server.py").read_text(encoding="utf-8")
+    # ---- ONE FUNCTION MOVES THE SWITCH NOW. 5 September 2026. ----
+    #
+    # These asserted on lines inside the endpoint. The endpoint no
+    # longer writes the flags itself: the desk and the phone both go
+    # through core.trading_gate.apply_switch(), because until then the
+    # same OFF meant "still trading, on paper" on the desk and "stop
+    # trading, alerts only" from Telegram -- the third state, still
+    # reachable from his phone.
+    #
+    # So the assertion follows the behaviour to where it lives: the
+    # endpoint must DELEGATE, and apply_switch must do the thing.
+    import inspect
+
+    from core.trading_gate import apply_switch
+    _gate = inspect.getsource(apply_switch)
+    assert "apply_switch" in src, (
+        "the endpoint no longer moves the switch through the gate")
+    src = _gate
     assert "engine.alert_only = False" in src, (
         "the switch no longer clears alert_only, so a guard disarm can "
         "no longer be undone from the dashboard and the message above "

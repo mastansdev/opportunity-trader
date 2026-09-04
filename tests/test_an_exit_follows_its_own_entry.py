@@ -39,6 +39,32 @@ class _Executor:
         return {"ok": True}
 
 
+
+# ---- THE PROCESS MODE IS AN OUTER BOUND. 4 September 2026. ----
+#
+# These tests were written when the switch alone decided where an
+# order went. That night's audit found core/trading_gate.py had been
+# written to keep PAPER and REAL apart and was called by NOTHING, and
+# that dashboard/server.py set `execution.live` with no mode check --
+# so pressing ON in a PAPER session would have sent real orders to
+# Dhan. The only thing stopping it was a static IP returning 403.
+#
+# Execution._live_executor() now refuses on the mode, at the one line
+# every order routes through. A session started in PAPER never places
+# a real order however the switch is set.
+#
+# So a test about LIVE ROUTING has to say it is a live process. These
+# tests are not weakened -- they are made to state the thing they were
+# silently assuming. conftest forces PAPER for the suite as a whole
+# (tests/conftest.py::_tests_run_in_paper), which is why it has to be
+# said here rather than left to the default.
+@pytest.fixture
+def live_process(monkeypatch):
+    """A process started with TRADING_MODE=LIVE."""
+    import config
+    monkeypatch.setattr(config, "TRADING_MODE", "LIVE")
+    return True
+
 def _execution(live_switch):
     x = Execution.__new__(Execution)
     x.executor = _Executor("paper")
@@ -66,7 +92,7 @@ def test_a_paper_entry_gets_a_paper_exit():
     assert x._route("STOP_HIT", selling=True, symbol="ASHOKA") is x.executor
 
 
-def test_a_live_entry_still_gets_a_live_exit():
+def test_a_live_entry_still_gets_a_live_exit(live_process):
     """The original concern, undamaged. His click is real, so its stop
     is real."""
     x = _execution(live_switch=True)
@@ -75,7 +101,7 @@ def test_a_live_entry_still_gets_a_live_exit():
     assert x._route("STOP_HIT", selling=True, symbol="TATASTEEL") is x._live
 
 
-def test_an_unknown_symbol_still_exits_live():
+def test_an_unknown_symbol_still_exits_live(live_process):
     """Nothing on record means this is not a position this process
     opened. Failing to exit a real position is the worse of the two
     errors, so the old behaviour stands here unchanged."""

@@ -1325,12 +1325,39 @@ def build_app(dashboard_state, trade_controller, master_loader,
             # positions; the switch chooses whose money, and nothing
             # else changes -- same entries, same exits, same sizing,
             # same capital.
-            engine.alert_only = False
             execution = getattr(engine, "execution", None)
             if execution is None:
                 return {"success": False,
                         "error": "no execution path in this session"}
-            execution.live = bool(want_trading)
+            # ---- ASK THE GATE. IT WAS WRITTEN TO BE ASKED. ----
+            #                       4 September 2026, 23:00.
+            #
+            #     "fix the gate now"                -- the operator
+            #
+            # core/trading_gate.py was written this morning to answer
+            # "may a REAL order be placed?" in ONE place, and the dead-
+            # code audit he asked for that evening found that nothing
+            # in the bot called it. The comment directly below this one
+            # -- written the same morning -- already describes arming
+            # ON in a PAPER process placing REAL orders. The purse was
+            # fixed that day. The routing was not.
+            #
+            # Two checks, because they answer different questions:
+            #
+            #   refuse_to_arm_reason()  -> the switch must not go ON at
+            #       all: LIVE, but the broker has not answered. Refused
+            #       here so it reaches him as a sentence rather than as
+            #       orders that quietly go nowhere.
+            #
+            #   trading/execution._live_executor() -> the outer bound.
+            #       A PAPER process never places a real order however
+            #       this flag is set. That one is enforced at the point
+            #       every order routes through, so it cannot be bypassed
+            #       by some future caller setting .live another way.
+            from core.trading_gate import apply_switch
+            armed, why = apply_switch(engine, want_trading)
+            if not armed:
+                return {"success": False, "error": why, "trading": False}
             # ---- THIS SWITCH ARMS THE RANKER. NOT THE BREAKOUT. ----
             # 6 August 2026. He turned this ON having been told the
             # ranker's rules and got eight breakout fills instead,

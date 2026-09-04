@@ -269,6 +269,38 @@ class TelegramDesk:
         self._offset = None
         self._pending = None          # (verb, symbol, qty, expires_at)
         self._thread = None
+        # ---- THE TICK WAITED FOR HIS PHONE. 4 September 2026. ----
+        #
+        #     "yes, alerts off the trading thread first."
+        #                                       -- the operator
+        #
+        # push() ended in send(), which ends in urlopen(timeout=35),
+        # and on a rejected Markdown parse it sends a SECOND time --
+        # another 35. The call chain reaching it is
+        #
+        #     Engine.process_tick()          the 1-second loop
+        #       -> _try_structural_entry()
+        #         -> _manual_alert() -> _push_alert()
+        #           -> TelegramDesk.push() -> send()
+        #
+        # so a slow or unreachable Telegram could stall the loop that
+        # decides entries and runs the trailing stops for up to seventy
+        # seconds. Engine._push_alert()'s own comment says "a Telegram
+        # timeout must never delay a tick" -- it wraps the call in
+        # try/except, which catches ERRORS and does nothing at all
+        # about SLOWNESS. A timeout is not an error until the wait is
+        # already over.
+        #
+        # So the alert goes on a queue and a daemon thread does the
+        # waiting. The message still goes; the tick never waits for it.
+        #
+        # OFF BY DEFAULT, started explicitly by main.py. A process that
+        # never starts the worker -- every test, every tool -- keeps
+        # the old synchronous behaviour, so nothing has to learn a new
+        # shape to be tested.
+        self._outbox = None
+        self._sender = None
+        self._dropped = 0
         self._stop = threading.Event()
         self._lock = threading.Lock()
         # Daily push ceiling -- see PUSH_MAX_PER_DAY. Keyed by date so
@@ -286,8 +318,11 @@ class TelegramDesk:
     # ---------------- outbound ----------------
 
     def alert(self, text):
-        """An unsolicited message -- an opportunity, a fill, a stop."""
-        return send(text)
+        """An unsolicited message -- an opportunity, a fill, a stop.
+
+        Off-thread once start_sender() has run: this is called from the
+        trading loop like push() is."""
+        return self._deliver(text)
 
     def opportunity(self, symbol, why, price=None, plan=None):
         """The message he actually wants at 09:40.
@@ -336,6 +371,74 @@ class TelegramDesk:
         "NEWS": ("NEWS ON A HOLDING", "SELL"),
     }
 
+    def start_sender(self, depth=200):
+        """Send alerts from a background thread from now on.
+
+        Called by main.py once. Idempotent. The queue is BOUNDED: a
+        Telegram that is down for an hour must not grow this process's
+        memory, and an alert nobody could send an hour ago is not worth
+        sending now anyway -- the board and the log already have it.
+        """
+        import queue as _queue
+
+        if self._sender is not None:
+            return self._sender
+        self._outbox = _queue.Queue(maxsize=depth)
+
+        def _drain():
+            while not self._stop.is_set():
+                try:
+                    text = self._outbox.get(timeout=1.0)
+                except Exception:                          # noqa: BLE001
+                    continue
+                if text is None:
+                    break
+                try:
+                    send(text)
+                except Exception as exc:                   # noqa: BLE001
+                    diagnostic(f"[TG] send failed off-thread "
+                               f"({type(exc).__name__}).")
+                finally:
+                    try:
+                        self._outbox.task_done()
+                    except Exception:                      # noqa: BLE001
+                        pass
+
+        self._sender = threading.Thread(
+            target=_drain, name="telegram-sender", daemon=True)
+        self._sender.start()
+        decision("[TG] Alerts now leave on their own thread -- a slow "
+                 "phone can no longer delay a tick.")
+        return self._sender
+
+    def _deliver(self, text):
+        """Hand a finished message to whoever does the waiting.
+
+        No worker -- tests, tools, any process that never called
+        start_sender() -- means send it here, exactly as before.
+        """
+        if not text:
+            return False
+        if self._outbox is None:
+            return bool(send(text))
+        try:
+            self._outbox.put_nowait(text)
+            return True
+        except Exception:                                  # noqa: BLE001
+            # Full. Drop the OLDEST, because the newest alert is the
+            # one about the market as it is now.
+            self._dropped += 1
+            try:
+                self._outbox.get_nowait()
+                self._outbox.put_nowait(text)
+            except Exception:                              # noqa: BLE001
+                pass
+            if self._dropped in (1, 10, 100):
+                warn(f"[TG] the outbox is full -- {self._dropped} alert(s) "
+                     f"dropped. They are on the board and in the log. "
+                     f"Telegram is not keeping up.")
+            return False
+
     def push(self, note):
         """Forward one Engine alert note to his phone. Never raises.
 
@@ -354,8 +457,8 @@ class TelegramDesk:
                 return False
             if not self._budget_allows(kind):
                 return False
-            return bool(send(self._card(symbol, kind, message,
-                                        note.get("at"))))
+            return self._deliver(self._card(symbol, kind, message,
+                                            note.get("at")))
         except Exception as exc:                            # noqa: BLE001
             diagnostic(f"[TG] push failed: {type(exc).__name__}")
             return False
@@ -1099,15 +1202,27 @@ class TelegramDesk:
         return "\n".join(head)
 
     def _arm(self, on):
+        """ON and OFF from the phone mean what they mean on the desk.
+
+        This set engine.alert_only = not on, which is the THIRD STATE
+        he abolished on 31 August: OFF from the phone stopped the bot
+        trading altogether and left only alerts, while OFF from the
+        desk kept it trading on paper. Same word, two behaviours, one
+        shared flag. See core.trading_gate.apply_switch().
+        """
         if self.engine is None:
             return "No engine wired."
         try:
-            self.engine.alert_only = not on
-            state = "TRADING" if on else "OBSERVING"
-            decision(f"[TG] Bot set to {state} from Telegram.")
-            return f"Bot is now *{state}*."
+            from core.trading_gate import apply_switch
+            ok, message = apply_switch(self.engine, on)
         except Exception as exc:                            # noqa: BLE001
             return f"Could not change it: {exc}"
+        if not ok:
+            decision(f"[TG] Switch refused from Telegram: {message}")
+            return f"*Not changed.* {message}"
+        state = "ON -- REAL" if on else "OFF -- PAPER"
+        decision(f"[TG] Bot set to {state} from Telegram. {message}")
+        return f"Bot is now *{state}*." + chr(10) + str(message)
 
     # ---------------- the poll loop ----------------
 

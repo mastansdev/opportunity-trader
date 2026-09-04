@@ -1877,6 +1877,17 @@ def main():
         # twice, and setting it here rather than inside the Engine
         # keeps core/engine.py with no knowledge that Telegram exists.
         engine.on_alert = telegram_desk.push
+
+        # ---- AND THE SENDING GOES OFF THIS THREAD. 4 Sep 2026 ----
+        #
+        #     "yes, alerts off the trading thread first."
+        #
+        # push() is called from Engine.process_tick() -- the 1-second
+        # loop that decides entries and runs the trailing stops -- and
+        # ended in a 35-second urlopen, twice over on a Markdown
+        # rejection. Without this line the alert still goes and the
+        # tick still waits for it; see TelegramDesk.start_sender().
+        telegram_desk.start_sender()
     except Exception as exc:                               # noqa: BLE001
         warn(f"[TG] Telegram desk not started ({exc}). Everything else "
              f"is unaffected.")

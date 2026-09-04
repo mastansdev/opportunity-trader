@@ -173,12 +173,18 @@ class Execution:
             warn("  order cannot be cancelled once it fills.")
             warn("=" * 62)
         elif self._live is not None:
+            # This sentence was FALSE when first written, hours before
+            # the gate below existed: it claimed a protection that
+            # nothing enforced. It is true now because _live_executor()
+            # enforces it -- and it is worth remembering that a
+            # reassuring message is exactly as dangerous as a false
+            # alarm, and harder to catch.
             decision(
                 f"[MODE] {str(_live_mode).upper()} -- every order this "
                 f"session is simulated. The Dhan client is connected for "
                 f"READING (holdings, MTF margin) and cannot place an "
-                f"order: the gate refuses on the mode, so the ON switch "
-                f"cannot make this session real.")
+                f"order: _live_executor() refuses on the mode, so the ON "
+                f"switch cannot make this session real.")
 
 
         # ---- SIMULATED ORDERS, REAL BOOK. 21 August 2026. ----
@@ -207,8 +213,57 @@ class Execution:
 
     def _live_executor(self):
         """The live executor, or None if this process cannot place a
-        real order at all."""
-        return getattr(self, "_live", None)
+        real order at all.
+
+        ---- THE GATE WAS WRITTEN AND NEVER CONNECTED. ----
+                              4 September 2026, 23:00.
+
+            "fix the gate now"                    -- the operator
+
+        core/trading_gate.py was written this morning to keep PAPER and
+        REAL completely separate, committed at 09:00, and the audit he
+        asked for that evening found that NOTHING CALLS IT. Not one
+        line. may_place_real_orders() appears twice in the repository:
+        its own definition, and a comment citing it.
+
+        Meanwhile, in the session he actually ran that night:
+
+            TRADING_MODE = PAPER
+            I_UNDERSTAND_THIS_PLACES_REAL_ORDERS = True
+            main.py passes the Dhan client in BOTH modes, so the bot
+              can read his holdings
+            -> self._live was BUILT (proven: the REAL ORDERS banner
+               fired, and that is its exact condition)
+
+        and dashboard/server.py sets `execution.live = bool(want_trading)`
+        with no mode check at all. So pressing ON in a PAPER session
+        would have sent real orders to Dhan. The only thing stopping it
+        was that his static IP was returning 403 -- a broken network,
+        not a safety mechanism.
+
+        THE MODE IS AN OUTER BOUND, CHECKED HERE, AT THE POINT OF USE.
+        Not at the switch, not at startup: this is the single line every
+        real order must pass through, so a future caller that sets
+        .live by some other path is still refused. A process started in
+        PAPER cannot place a real order however the switch is set --
+        which is what he asked for when he asked for the two modes to be
+        separated completely, so he could run tests freely without a
+        click costing money.
+        """
+        live = getattr(self, "_live", None)
+        if live is None:
+            return None
+        from config import TRADING_MODE as _mode
+        if str(_mode).upper() != "LIVE":
+            self._say_once(
+                "paper-outer-bound",
+                f"[GATE] The switch is ON but this process is "
+                f"{str(_mode).upper()} -- the order is PAPER. A session "
+                f"started in {str(_mode).upper()} never places a real "
+                f"order, whatever the switch says. Restart with "
+                f"TRADING_MODE=LIVE to trade for real.")
+            return None
+        return live
 
     def _route(self, reason, selling=False, symbol=None):
         """Which executor takes this order. Two answers, one question.
