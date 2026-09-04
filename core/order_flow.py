@@ -120,6 +120,34 @@ CREATE TABLE IF NOT EXISTS flow_minutes (
 );
 CREATE INDEX IF NOT EXISTS idx_flow_day_symbol
     ON flow_minutes(date, symbol);
+
+-- ---- THE BOARD SPENT 36 SECONDS LOOKING FOR 300 ROWS. ----
+--                                    4 September 2026.
+--
+--     "fix the board rebuild speed next. why it is taking that
+--      long"                                 -- the operator
+--
+-- session_series() asks WHERE date = ? AND symbol = ? ORDER BY
+-- minute. SQLite was answering it with the UNIQUE(date, minute,
+-- symbol) auto-index, which can only seek on `date` -- so every call
+-- scanned all ~460,000 rows of that day to find the ~320 belonging
+-- to one stock. It preferred that index because its second column is
+-- `minute`, which happens to satisfy the ORDER BY: it scanned half a
+-- million rows to avoid sorting three hundred.
+--
+-- idx_flow_day_symbol above cannot fix it -- it seeks correctly but
+-- leaves a sort, so the planner keeps choosing the auto-index. This
+-- one seeks AND orders, so it wins on both counts and gets chosen.
+--
+--     one call    48.41 ms  ->  0.66 ms
+--     one symbol 181.93 ms  ->  6.04 ms   (through session_series)
+--     100 rows      36.4 s  ->   1.2 s    (two calls a row: flow, shape)
+--
+-- Built once, in about 2.5 seconds on a 351 MB store, on the first
+-- flush after this ships. flush() is a background writer -- it does
+-- not touch the tick path, the entry decision, or any exit.
+CREATE INDEX IF NOT EXISTS idx_flow_day_symbol_minute
+    ON flow_minutes(date, symbol, minute);
 """
 
 _lock = threading.Lock()
