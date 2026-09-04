@@ -56,7 +56,7 @@ from config import I_UNDERSTAND_THIS_PLACES_REAL_ORDERS
 # OPERATOR_CLICKS goes with it. Nothing asks whose idea a trade was any
 # more, because with two modes it cannot matter: in PAPER nothing
 # reaches Dhan, in REAL everything does.
-from core.logger import warn
+from core.logger import decision, warn
 from trading.broker_view import BrokerView
 from trading.paper_execution import PaperExecution
 
@@ -135,13 +135,50 @@ class Execution:
                 "orders (%s). Refusing to start -- a bot you believe is "
                 "live and which is only pretending is the worse failure."
                 % self._live_refused)
-        if self._live is not None:
+        # ---- THE BANNER CRIED WOLF EVERY SINGLE SESSION. ----
+        #                             4 September 2026.
+        #
+        #     "fix that banner"                     -- the operator
+        #
+        # It fired whenever the live-order MACHINERY existed, which is
+        # every session, because main.py builds the Dhan client in both
+        # modes so the bot can READ his holdings. So a PAPER session
+        # printed
+        #
+        #     [FUNDS] PAPER -- purse is a fixed Rs 500,000
+        #     ...
+        #     REAL ORDERS ARE POSSIBLE IN THIS PROCESS.
+        #
+        # six lines apart, on 4 September.
+        #
+        # They are not possible. core/trading_gate.may_place_real_orders()
+        # refuses on the MODE alone -- a process started in PAPER cannot
+        # be turned real by the switch, deliberately, so that a paper
+        # session can be left running without a click costing money.
+        #
+        # THIS IS THE MOST HARMFUL FALSE MESSAGE OF THE THREE fixed
+        # today. The other two misdescribed a mechanism. This one tells
+        # him his real money is at risk when it is not -- which teaches
+        # him to ignore the banner, so on the day it IS true he will
+        # not look. A warning that is always on is not a warning.
+        #
+        # So it says what is true of THIS process, and the loud version
+        # is kept for the case it was written for.
+        from config import TRADING_MODE as _live_mode
+        if self._live is not None and str(_live_mode).upper() == "LIVE":
             warn("=" * 62)
             warn("  REAL ORDERS ARE POSSIBLE IN THIS PROCESS.")
             warn("  The switch starts OFF -- everything is PAPER until")
             warn("  you press ON. MARKET orders, MTF product; a market")
             warn("  order cannot be cancelled once it fills.")
             warn("=" * 62)
+        elif self._live is not None:
+            decision(
+                f"[MODE] {str(_live_mode).upper()} -- every order this "
+                f"session is simulated. The Dhan client is connected for "
+                f"READING (holdings, MTF margin) and cannot place an "
+                f"order: the gate refuses on the mode, so the ON switch "
+                f"cannot make this session real.")
 
 
         # ---- SIMULATED ORDERS, REAL BOOK. 21 August 2026. ----

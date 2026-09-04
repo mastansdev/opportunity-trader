@@ -521,7 +521,38 @@ class LiveExecution:
         try:
             response = getter()
         except Exception as exc:                           # noqa: BLE001
-            warn(f"[LIVE] could not read holdings from Dhan ({exc}).")
+            # ---- "CONNECTION RESET" WAS THE SYMPTOM, NOT THE CAUSE.
+            #                             4 September 2026.
+            #
+            # This printed
+            #
+            #     [LIVE] could not read holdings from Dhan
+            #     ([Errno 10054] connection reset).
+            #
+            # while the library, underneath, was saying
+            #
+            #     ProxyError('Unable to connect to proxy',
+            #     OSError('Tunnel connection failed: 403 Error'))
+            #
+            # Those are not the same message. A reset socket sounds
+            # like weather -- wait, retry, it will come back. A 403 on
+            # the proxy TUNNEL means the static IP is not authorised,
+            # which is a thing he has to go and renew, and which also
+            # means ORDERS CANNOT LEAVE, because orders go through the
+            # same tunnel (see the [ROUTE] line at startup).
+            #
+            # Only one of those two sentences sends him to fix it.
+            detail = str(exc)
+            blob = detail.lower()
+            if "tunnel connection failed" in blob or (
+                    "proxy" in blob and "403" in blob):
+                warn(f"[LIVE] the static IP proxy REFUSED the tunnel "
+                     f"(403). This is not a network wobble -- the IP is "
+                     f"not authorised, so holdings cannot be read and "
+                     f"ORDERS CANNOT LEAVE either. Renew the static IP. "
+                     f"({detail})")
+            else:
+                warn(f"[LIVE] could not read holdings from Dhan ({exc}).")
             return None
 
         if response is None:

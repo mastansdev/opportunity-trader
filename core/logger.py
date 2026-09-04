@@ -186,8 +186,71 @@ def quieten_repeats(every_seconds=900):
     root.addFilter(_SayItOnce(every_seconds))
 
 
+def capture_library_errors(root=None):
+    """Send THIRD-PARTY log output to the same file as everything else.
+
+    ---- THE ONE ERROR THAT MATTERED WAS NEVER WRITTEN DOWN. ----
+                                    4 September 2026.
+
+    He pasted this out of his console:
+
+        ERROR:root:Exception in DhanHQConnection.GET:
+        HTTPSConnectionPool(host='api.dhan.co', port=443): Max retries
+        exceeded with url: /v2/holdings (Caused by ProxyError('Unable
+        to connect to proxy', OSError('Tunnel connection failed: 403
+        Error')))
+
+    That is the single most consequential line the bot can produce --
+    the static IP tunnel is refusing, so ORDERS CANNOT LEAVE. And
+    grepping every file in logs/ for "Tunnel connection failed"
+    returns nothing. Not once, in any session, ever.
+
+    WHY. dhanhq logs to the ROOT logger. This module builds
+    "opportunity_trader" with propagate=False and attaches the file
+    handler to THAT, so the bot's own messages reach the file and
+    every library's message reaches the console and dies there.
+
+    The bot's own translation of the failure made it worse, not
+    better:
+
+        [LIVE] could not read holdings from Dhan (connection reset).
+
+    "Connection reset" is what the socket reported. "The proxy refused
+    the tunnel with 403" is what happened, and only one of those tells
+    him to go renew his IP.
+
+    So the SAME file handler is attached to root. Console is left
+    alone -- libraries already print there, and adding a second
+    handler would double every line.
+
+    WARNING AND ABOVE ONLY. The point is to capture what breaks, not
+    to import every library's debug chatter into a file that is
+    already 15 MB a session.
+    """
+    # The target is injectable so this can be tested without fighting
+    # pytest's own logging plugin, which swaps the real root logger's
+    # handlers out from under a test. Default is the real root.
+    root = logging.getLogger() if root is None else root
+    if getattr(root, "_ot_file_attached", False):
+        return None
+    for handler in log.handlers:
+        if isinstance(handler, logging.FileHandler):
+            mirror = logging.FileHandler(
+                handler.baseFilename, encoding="utf-8", delay=True)
+            mirror.setLevel(logging.WARNING)
+            mirror.setFormatter(logging.Formatter(
+                "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"))
+            root.addHandler(mirror)
+            root.setLevel(min(root.level or logging.WARNING,
+                              logging.WARNING))
+            root._ot_file_attached = True
+            return mirror
+    return None
+
+
 log = _build_logger()
 quieten_repeats()
+capture_library_errors()
 
 
 def log_file_path():
