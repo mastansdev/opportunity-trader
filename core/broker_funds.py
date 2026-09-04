@@ -215,20 +215,17 @@ def starting_capital(dhan_client=None, mode=None):
     live = str(mode if mode is not None else _mode()).upper() == "LIVE"
 
     if not live:
-        balance = refresh(dhan_client)
-        if balance is not None:
-            decision(f"[FUNDS] PAPER -- purse sized from the REAL Dhan "
-                     f"balance: Rs {balance:,.2f} (read "
-                     f"{_LAST['at']}). config.PAPER_STARTING_CAPITAL "
-                     f"(Rs {PAPER_STARTING_CAPITAL:,.2f}) is the "
-                     f"fallback only.")
-            return float(balance)
+        # ---- PAPER DOES NOT ASK DHAN. 4 September 2026. ----
+        # See the note on config.PAPER_STARTING_CAPITAL. The read is
+        # not made at all -- not made and ignored -- so a broker in the
+        # middle of its overnight settlement cannot decide how many
+        # seats a paper session gets. No token, no network, no wait.
         _LAST.update({"balance": float(PAPER_STARTING_CAPITAL),
                       "at": None, "source": "config"})
-        warn(f"[FUNDS] PAPER -- Dhan did not answer, so the purse is "
-             f"config.PAPER_STARTING_CAPITAL, Rs "
-             f"{PAPER_STARTING_CAPITAL:,.2f}. THIS IS A CONSTANT, not "
-             f"your balance. Check with py tools/dhan_account_check.py")
+        decision(f"[FUNDS] PAPER -- purse is a fixed Rs "
+                 f"{PAPER_STARTING_CAPITAL:,.2f} every session, from "
+                 f"config.PAPER_STARTING_CAPITAL. Dhan is not asked in "
+                 f"PAPER; the balance there has no bearing on this run.")
         return float(PAPER_STARTING_CAPITAL)
 
     balance = read_balance(dhan_client)

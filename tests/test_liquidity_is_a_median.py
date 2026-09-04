@@ -242,8 +242,15 @@ def test_it_still_works_if_config_cannot_be_read():
     block = src[src.find("try:\n    from config import MTF_MARGIN"):]
     block = block[:block.find("MIN_TURNOVER_RS =")]
     assert "except Exception" in block
-    from core.subscribe_list import _POSITION_RS
-    assert str(int(_POSITION_RS)) in block.replace("_", "")
+    # ---- THE FALLBACK IS THE LIVE SLOT, ON PURPOSE. 4 Sep 2026 ----
+    # MTF_MARGIN_PER_POSITION_RS is per mode from 4 September --
+    # Rs 50,000 in PAPER, Rs 15,000 in LIVE. This fallback only fires
+    # when config CANNOT BE READ, and a process that cannot read its
+    # config does not know which mode it is in either. It therefore
+    # takes the SMALLER, live figure: a slot too small trades less
+    # than it could, a slot too large sizes real positions off a paper
+    # decision. Only one of those is recoverable.
+    assert "15000" in block.replace("_", "")
 
 
 def test_the_morning_tool_asks_for_the_window():

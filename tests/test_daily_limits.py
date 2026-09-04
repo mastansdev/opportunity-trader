@@ -53,8 +53,19 @@ from core.rules import MAX_OPEN_POSITIONS
 TYPICAL_LEVERAGE = 3.8
 
 
+
+# ---- THE CAP IS A LIVE GUARDRAIL, SO MEASURE IT LIVE. 4 Sep 2026 ----
+# MTF_MARGIN_PER_POSITION_RS is per mode from 4 September: Rs 50,000
+# in PAPER (a fixed Rs 5 lakh purse, for testing behaviour freely) and
+# Rs 15,000 in LIVE. DAILY_MAX_LOSS_RS governs REAL money only -- it
+# is not applied in paper at all, see
+# config.DAILY_LOSS_CAP_APPLIES_IN_PAPER -- so its ratio must be
+# measured against the LIVE slot whatever mode the test runs in.
+LIVE_SLOT_RS = 15_000.0
+
+
 def _loss_per_failed_trade():
-    return MTF_MARGIN_PER_POSITION_RS * TYPICAL_LEVERAGE * HARD_STOP_FROM_ENTRY_PCT
+    return LIVE_SLOT_RS * TYPICAL_LEVERAGE * HARD_STOP_FROM_ENTRY_PCT
 
 
 def test_the_loss_limit_allows_about_seven_failed_trades():
@@ -119,8 +130,8 @@ def test_the_loss_limit_is_a_sane_share_of_capital():
     # capital is a fact about the account, not a setting.
     HIS_CAPITAL_RS = 123_491.0
 
-    seats = slots(HIS_CAPITAL_RS)["slots"]
-    at_risk = seats * MTF_MARGIN_PER_POSITION_RS * TYPICAL_LEVERAGE
+    seats = int(HIS_CAPITAL_RS // LIVE_SLOT_RS)
+    at_risk = seats * LIVE_SLOT_RS * TYPICAL_LEVERAGE
     assert 0.02 <= DAILY_MAX_LOSS_RS / at_risk <= 0.05
 
 

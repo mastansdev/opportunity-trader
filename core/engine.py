@@ -402,6 +402,32 @@ EXIT_REASON_MANUAL_PARTIAL = "MANUAL_PARTIAL"
 EXIT_REASON_MISSED_STOP = "MISSED_STOP_RECONCILED"
 
 
+def _daily_cap_applies():
+    """Is the Rs 12,000 daily loss brake armed for this session?
+
+    ---- NO DAILY CAP IN PAPER. 4 September 2026. ----
+
+        "remove the daily cap -12K per day in paper mode. no use at
+         all in paper mode"                        -- the operator
+
+    It stops a real account bleeding. In paper it only truncates the
+    day's evidence -- the session ends at lunch and the afternoon's
+    setups are never scored, which is the opposite of what a paper run
+    is for.
+
+    Read fresh rather than captured at import, so flipping the mode
+    does not need a code change to take effect. Anything unreadable
+    ARMS the brake: an unknown mode must not be treated as paper.
+    """
+    try:
+        from config import (DAILY_LOSS_CAP_APPLIES_IN_PAPER, TRADING_MODE)
+    except Exception:                                      # noqa: BLE001
+        return True
+    if str(TRADING_MODE).upper() == "LIVE":
+        return True
+    return bool(DAILY_LOSS_CAP_APPLIES_IN_PAPER)
+
+
 # ---- A REFUSED EXIT IS NOT AN EXIT. 31 August 2026. ----
 #
 # _enter() has checked this since it was written:
@@ -472,6 +498,17 @@ class Engine:
         # signal that it belonged here rather than in the hot path.
         self.alert_only = (ALERT_ONLY_MODE if alert_only is None
                            else bool(alert_only))
+
+        # ---- THE SWITCH NEEDED THIS AND IT WAS NOT KEPT. 4 Sep 2026 ----
+        # dhan_client arrived in this signature and was passed straight
+        # down to the sub-objects without ever being stored. On
+        # 4 September the dashboard switch began taking a fresh balance
+        # reading before arming -- and read it through
+        # getattr(engine, "dhan_client", None), which was ALWAYS None.
+        # So ON refused every time, whether Dhan was reachable or not,
+        # and refused silently. He clicked it on both dashboards and
+        # nothing happened.
+        self.dhan_client = dhan_client
         # THE SECOND SWITCH, AND IT IS OFF. The structural breakout
         # path has no ranker gates -- no move threshold, no reason, no
         # sector check, no liquidity check. It must be armed on its own,
@@ -3788,7 +3825,7 @@ class Engine:
         # and nothing more -- see the note on it below. Edge-triggered
         # log so the moment it trips is loud, once.
         realized = self._daily_realized_pnl()
-        if realized <= -DAILY_MAX_LOSS_RS:
+        if _daily_cap_applies() and realized <= -DAILY_MAX_LOSS_RS:
             if self._daily_halt_logged != "LOSS":
                 self._daily_halt_logged = "LOSS"
                 warn(
@@ -4934,7 +4971,7 @@ class Engine:
             return cutoff
 
         realized = self._daily_realized_pnl()
-        if realized <= -DAILY_MAX_LOSS_RS:
+        if _daily_cap_applies() and realized <= -DAILY_MAX_LOSS_RS:
             return (f"daily loss cap hit ({realized:.0f} <= "
                     f"-{DAILY_MAX_LOSS_RS:.0f}) -- no new entries for the "
                     f"rest of the session")

@@ -1337,6 +1337,68 @@ def build_app(dashboard_state, trade_controller, master_loader,
             # because both paths read alert_only. The breakout has its
             # own switch now, and this one always leaves it off.
             engine.breakout_armed = False
+
+            # ---- THE PURSE FOLLOWS THE SWITCH. 4 September 2026. ----
+            #
+            #     "new dashboard is showing 5 L as available capital in
+            #      both REAL / PAPER MODES which is not correct.
+            #      PAPER = 5 Lakh, REAL = Dhan funds reflects"
+            #
+            # He found this before it cost anything. On 4 September the
+            # paper purse became a fixed Rs 5 lakh so a session could
+            # run with Dhan unreachable -- but the purse was chosen by
+            # config.TRADING_MODE, read ONCE at startup, while THIS
+            # switch is what trading/execution._route() actually reads.
+            # So arming ON in a PAPER process placed REAL orders sized
+            # against Rs 5 lakh of money that does not exist: ten seats
+            # at Rs 50,000, Rs 2,00,000 a position.
+            #
+            # Two states, one switch, and the money moves with it:
+            #
+            #     ON  -> real orders, and the REAL Dhan balance
+            #     OFF -> paper orders, and the fixed paper purse
+            #
+            # ARMING IS REFUSED IF DHAN DOES NOT ANSWER. His static IP
+            # was not renewed that morning; ON would have sent orders to
+            # a broker this process cannot reach. Sizing on a stale
+            # figure is the specific failure being prevented.
+            portfolio = getattr(dashboard_state, "portfolio", None)
+            if portfolio is not None:
+                from core import broker_funds
+                if want_trading:
+                    balance = broker_funds.refresh(
+                        getattr(engine, "dhan_client", None))
+                    if balance is None:
+                        # TWO STATES. A refusal drops to PAPER, never to
+                        # silence -- alert_only is the third state he
+                        # abolished on 31 August after 65 alerts and 0
+                        # trades, and tests/test_the_guard_stops_a_dead_
+                        # feed.py fails the build for setting it True.
+                        # The first version of this line did exactly
+                        # that and would have left the bot placing
+                        # nothing at all for the session.
+                        execution.live = False
+                        # SAY IT. A switch that does nothing and says
+                        # nothing is indistinguishable from a broken
+                        # page -- which is exactly how it looked when
+                        # this refused on a client it never had.
+                        warn("[GATE] Refusing to arm ON: Dhan did not "
+                             "answer, so the real balance is unknown. "
+                             "The switch stays OFF and the session "
+                             "stays on paper.")
+                        return {"success": False,
+                                "error": ("Dhan did not answer, so the real "
+                                          "balance is unknown. Refusing to "
+                                          "arm -- a real order sized on a "
+                                          "guess is the one thing this "
+                                          "switch must never do."),
+                                "still": "OFF -- paper"}
+                    portfolio.starting_capital = float(balance)
+                    portfolio.available_capital = float(balance)
+                else:
+                    from config import PAPER_STARTING_CAPITAL
+                    portfolio.starting_capital = float(PAPER_STARTING_CAPITAL)
+                    portfolio.available_capital = float(PAPER_STARTING_CAPITAL)
         except Exception as exc:                           # noqa: BLE001
             return {"success": False, "error": str(exc)}
 

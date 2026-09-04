@@ -75,7 +75,16 @@ def test_ashoka_is_planned_not_refused():
     # slot, half the shares. The quantity is derived, so it is
     # asserted against the constant rather than pinned to a number
     # that silently encodes an old slot size.
-    assert got["qty"] == 355
+    # DERIVED, not pinned. The slot has moved three times in two days
+    # -- Rs 30,000, then Rs 15,000, then per mode on 4 September
+    # (Rs 50,000 in PAPER on a fixed Rs 5 lakh purse, Rs 15,000 LIVE).
+    # A hard-coded share count silently encodes whichever slot was
+    # current the day it was written, and fails saying nothing about
+    # what this test is for: that ASHOKA is PLANNED, not refused.
+    from config import MTF_MARGIN_PER_POSITION_RS
+    from core.mtf_margin import shares_for
+    expected = shares_for(126.46, 0.3336, MTF_MARGIN_PER_POSITION_RS)
+    assert got["qty"] == expected
     # ---- THE RUPEES ARE NO LONGER PINNED. 2 September 2026. ----
     #
     #     "to be realistic i'll trade based on qty in my real trading.

@@ -163,7 +163,36 @@ RISK_PER_TRADE_RS = 2500.0
 # minutes. Re-run it once liveness() refuses a fading stock and the
 # 15-minute exit stops cutting winners -- eight may not still be the
 # right number when winners are held.
-MTF_MARGIN_PER_POSITION_RS = 15_000.0
+# ---- RS 50,000 A SLOT. 4 September 2026. ----
+#
+#     "if 5 Lakh give 25 seats, then change capital alloted from 30 K
+#      to 50K"                                    -- the operator
+#
+# PAPER became a fixed Rs 5 lakh the same morning, and Rs 15,000 a
+# slot gave 25 seats -- more concurrent positions than the selector
+# has ever been shown to justify, and 25 lots of brokerage.
+#
+# At Rs 50,000 of margin and 4x, a position is Rs 2,00,000 of stock
+# and the 3% entry stop costs Rs 6,000. He was shown that the
+# Rs 12,000 daily cap therefore ends the day after TWO stop-outs,
+# against 6.7 at the old slot.
+#
+# ---- AND IT IS PER MODE. 4 September 2026. ----
+# The slot is Rs 50,000 in PAPER, where the purse is a fixed Rs 5 lakh
+# and the point is to test behaviour freely -- "bot/we need to trade
+# as & when opportunity triggers, so in paper mode thats safe to test
+# the behaviour of bot trading".
+#
+# LIVE stays Rs 15,000, which is where he moved it on 3 September
+# because the book was full for 290 of the session's 306 minutes. His
+# real balance is about Rs 1.2 lakh: at Rs 50,000 that is TWO seats
+# and, against the Rs 12,000 live cap, two stop-outs to the end of the
+# day. A paper decision must not shrink the live book.
+try:
+    from config import TRADING_MODE as _MODE
+except Exception:            # noqa: BLE001
+    _MODE = "PAPER"
+MTF_MARGIN_PER_POSITION_RS = 50_000.0 if str(_MODE).upper() == "PAPER" else 15_000.0
 
 # Below this the stock is not traded at all, "no matter what".
 #

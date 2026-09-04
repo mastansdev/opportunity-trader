@@ -1562,6 +1562,19 @@ def main():
             enter=engine._enter,
         )
 
+    def _real_orders_armed():
+        """Is this session actually placing real orders right now?
+
+        The switch, not config.TRADING_MODE -- trading/execution._route()
+        reads execution.live and nothing else. False whenever it cannot
+        be established, so paper is the resting state.
+        """
+        try:
+            return bool(getattr(getattr(engine, "execution", None),
+                                "live", False))
+        except Exception:                                  # noqa: BLE001
+            return False
+
     def _tick_worker(stop_event):
         """Drains tick_queue sequentially -- the ONE thread that
         drives market_data/engine, exactly the role the feed thread
@@ -2266,12 +2279,26 @@ def main():
                 # position cannot change size underneath itself
                 # mid-session. Reporting and sizing are separate here
                 # on purpose and stay separate.
-                try:
-                    broker_funds.refresh(dhan_rest_client)
-                except Exception as exc:                   # noqa: BLE001
-                    diagnostic(f"[FUNDS] Could not refresh the balance "
-                               f"({type(exc).__name__}). The last good "
-                               f"reading stands, with its own timestamp.")
+                # ---- PAPER ASKS DHAN FOR NOTHING BUT MARGIN ----
+                #      4 September 2026.
+                #
+                #     "paper mode only reaches dhan for MTF calculation.
+                #      nothing touches apart from that"  -- the operator
+                #
+                # This heartbeat read is for the DISPLAY only, and in
+                # paper the display shows the fixed paper purse, so the
+                # call buys nothing and costs a request a minute at a
+                # broker whose IP allow-list may not even have us on it.
+                # The switch takes its own fresh reading at the moment
+                # it arms -- see dashboard/server.py -- so nothing that
+                # decides money depends on this poll.
+                if _real_orders_armed():
+                    try:
+                        broker_funds.refresh(dhan_rest_client)
+                    except Exception as exc:               # noqa: BLE001
+                        diagnostic(f"[FUNDS] Could not refresh the balance "
+                                   f"({type(exc).__name__}). The last good "
+                                   f"reading stands, with its own timestamp.")
 
                 # Same cadence as the heartbeat -- cheap, and bounds
                 # how much state a crash could lose to ~60s instead

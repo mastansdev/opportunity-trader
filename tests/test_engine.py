@@ -2893,6 +2893,14 @@ def test_max_open_positions_cap_skips_new_signals_once_full(monkeypatch):
 
 
 def test_daily_loss_halt_blocks_new_entries(monkeypatch):
+    # ---- THE CAP IS LIVE-ONLY FROM 4 SEPTEMBER. ----
+    # config.DAILY_LOSS_CAP_APPLIES_IN_PAPER is False -- "remove the
+    # daily cap -12K per day in paper mode. no use at all in paper
+    # mode". These tests are about the BRAKE, so they arm it
+    # explicitly rather than depending on whichever mode the suite
+    # happens to run in.
+    monkeypatch.setattr("core.engine._daily_cap_applies", lambda: True)
+
     import core.engine as engine_module
     monkeypatch.setattr(engine_module, "DAILY_MAX_LOSS_RS", 500.0)
 
@@ -2978,6 +2986,12 @@ def test_the_profit_target_no_longer_refuses_the_ranked_lane(monkeypatch):
 def test_the_loss_cap_still_closes_the_door(monkeypatch):
     """His explicit exception -- "this can stay". If this ever fails,
     the bot has no protection against a bad day compounding."""
+    # ---- THE CAP IS LIVE-ONLY FROM 4 SEPTEMBER. ----
+    # config.DAILY_LOSS_CAP_APPLIES_IN_PAPER is False -- "remove the
+    # daily cap -12K per day in paper mode. no use at all in paper
+    # mode". This test is about the BRAKE, so it arms it explicitly
+    # rather than depending on whichever mode the suite runs in.
+    monkeypatch.setattr("core.engine._daily_cap_applies", lambda: True)
     import core.engine as engine_module
     monkeypatch.setattr(engine_module, "DAILY_MAX_LOSS_RS", 500.0)
 
@@ -3303,6 +3317,14 @@ def test_seed_daily_pnl_handles_junk_safely():
 
 def test_daily_loss_halt_uses_the_carried_pnl(monkeypatch):
     """A restart must NOT re-arm the loss switch."""
+    # ---- THE CAP IS LIVE-ONLY FROM 4 SEPTEMBER. ----
+    # config.DAILY_LOSS_CAP_APPLIES_IN_PAPER is False -- "remove the
+    # daily cap -12K per day in paper mode. no use at all in paper
+    # mode". These tests are about the BRAKE, so they arm it
+    # explicitly rather than depending on whichever mode the suite
+    # happens to run in.
+    monkeypatch.setattr("core.engine._daily_cap_applies", lambda: True)
+
     import core.engine as em
     monkeypatch.setattr(em, "DAILY_MAX_LOSS_RS", 8000.0)
     monkeypatch.setattr(em, "ENABLE_VOLUME_FILTER", False)

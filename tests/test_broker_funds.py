@@ -220,15 +220,60 @@ class _Dhan:
                          "sodLimit": self.sod}}
 
 
-def test_paper_now_asks_dhan_instead_of_reading_config():
+def test_paper_never_asks_dhan_at_all():
+    """---- PAPER IS RS 5 LAKH, EVERY DAY. 4 September 2026. ----
+
+        "in paper mode bot must trade with 5 Lakh capital each day &
+         trade with all same rules completely. paper mode do not want
+         to see dhan & its related parts at all."
+
+    On 18 August PAPER started sizing off the real Dhan balance, on
+    the reasoning that a paper week is only worth reading if the
+    constraints are real. Sound, but it made the paper session hostage
+    to the broker's own state -- and 4 September proved it. Dhan's
+    overnight cleanup was still running and three reads inside one
+    hour gave Rs 1,28,096 (8 seats), Rs 35,648 (2 seats) and
+    Rs 4,578 (ZERO seats, no trade all day). The purse is read once at
+    startup and never again, so a session begun in that window is dead
+    for the day through no fault of the strategy.
+
+    The read is NOT MADE -- not made and ignored. No token, no
+    network, nothing for a settling broker to break."""
     from core import broker_funds
     client = _Dhan()
     got = broker_funds.starting_capital(client, mode="PAPER")
-    assert client.calls == 1, "PAPER did not ask the broker at all"
-    assert got == pytest.approx(67648.21)
+    assert client.calls == 0, "PAPER asked the broker"
+    from config import PAPER_STARTING_CAPITAL
+    assert got == pytest.approx(float(PAPER_STARTING_CAPITAL))
 
 
-def test_the_config_figure_is_the_fallback_not_the_source():
+def test_the_paper_purse_is_the_same_every_session():
+    """Two days can only be compared to each other if the capital was
+    the same on both. Repeatability is the point."""
+    from core import broker_funds
+    a = broker_funds.starting_capital(_Dhan(), mode="PAPER")
+    b = broker_funds.starting_capital(_Dhan(fail=True), mode="PAPER")
+    assert a == b
+
+
+def test_paper_capital_is_five_lakh():
+    """His figure, 4 September 2026."""
+    from config import PAPER_STARTING_CAPITAL
+    assert PAPER_STARTING_CAPITAL == 5_00_000.0
+
+
+def test_live_still_asks_and_still_refuses_without_an_answer():
+    """Nothing about LIVE changed. It reads the real balance and
+    raises rather than trading on a constant."""
+    from core import broker_funds
+    client = _Dhan()
+    broker_funds.starting_capital(client, mode="LIVE")
+    assert client.calls == 1, "LIVE stopped asking the broker"
+
+
+def test_the_config_figure_is_now_the_source_in_paper():
+    """It was the FALLBACK from 18 August; from 4 September it is the
+    source, and a broken broker changes nothing."""
     from config import PAPER_STARTING_CAPITAL
     from core import broker_funds
     got = broker_funds.starting_capital(_Dhan(fail=True), mode="PAPER")
@@ -245,8 +290,11 @@ def test_a_config_fallback_is_labelled_as_config_not_as_a_balance():
 
 
 def test_a_real_reading_carries_the_time_it_was_taken():
+    """Unchanged for LIVE, which is where a real reading now happens.
+    PAPER no longer takes one at all -- see
+    test_paper_never_asks_dhan_at_all."""
     from core import broker_funds
-    broker_funds.starting_capital(_Dhan(), mode="PAPER")
+    broker_funds.starting_capital(_Dhan(), mode="LIVE")
     got = broker_funds.last_read()
     assert got["source"] == "dhan"
     assert got["at"], "a balance with no read-time is how this happened"

@@ -257,9 +257,13 @@ def test_a_stop_out_stays_inside_the_daily_loss_cap():
     entry stop is FIXED_STOP_PCT = 3%, costing Rs 1,800, which the cap
     buys 6.7 of -- see test_daily_limits.py for that one.
     """
-    position = config.MTF_MARGIN_PER_POSITION_RS * config.MTF_LEVERAGE
+    # The cap governs REAL money, so measure it against the LIVE
+    # slot -- MTF_MARGIN_PER_POSITION_RS is Rs 50,000 in paper from
+    # 4 September, where the cap is not applied at all.
+    LIVE_SLOT_RS = 15_000.0
+    position = LIVE_SLOT_RS * config.MTF_LEVERAGE
     loss = position * config.HARD_STOP_FROM_ENTRY_PCT
-    assert loss == pytest.approx(MTF_MARGIN_PER_POSITION_RS * 0.10)
+    assert loss == pytest.approx(LIVE_SLOT_RS * 0.10)
     assert 5 <= config.DAILY_MAX_LOSS_RS / loss <= 9
 
 

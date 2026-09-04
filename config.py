@@ -2085,7 +2085,33 @@ MANUAL_ALERT_HISTORY = 400
 # minutes. Re-run it once liveness() refuses a fading stock and the
 # 15-minute exit stops cutting winners -- eight may not still be the
 # right number when winners are held.
-MTF_MARGIN_PER_POSITION_RS = 15_000.0
+# ---- RS 50,000 A SLOT. 4 September 2026. ----
+#
+#     "if 5 Lakh give 25 seats, then change capital alloted from 30 K
+#      to 50K"                                    -- the operator
+#
+# PAPER became a fixed Rs 5 lakh the same morning, and Rs 15,000 a
+# slot gave 25 seats -- more concurrent positions than the selector
+# has ever been shown to justify, and 25 lots of brokerage.
+#
+# At Rs 50,000 of margin and 4x, a position is Rs 2,00,000 of stock
+# and the 3% entry stop costs Rs 6,000. He was shown that the
+# Rs 12,000 daily cap therefore ends the day after TWO stop-outs,
+# against 6.7 at the old slot.
+#
+# ---- AND IT IS PER MODE. 4 September 2026. ----
+# The slot is Rs 50,000 in PAPER, where the purse is a fixed Rs 5 lakh
+# and the point is to test behaviour freely -- "bot/we need to trade
+# as & when opportunity triggers, so in paper mode thats safe to test
+# the behaviour of bot trading".
+#
+# LIVE stays Rs 15,000, which is where he moved it on 3 September
+# because the book was full for 290 of the session's 306 minutes. His
+# real balance is about Rs 1.2 lakh: at Rs 50,000 that is TWO seats
+# and, against the Rs 12,000 live cap, two stop-outs to the end of the
+# day. A paper decision must not shrink the live book.
+_MODE = TRADING_MODE
+MTF_MARGIN_PER_POSITION_RS = 50_000.0 if str(_MODE).upper() == "PAPER" else 15_000.0
 
 # Cached per session: margin rates change rarely, and a live API call on
 # every click would put ~300ms between the operator pressing BUY and the
@@ -3211,7 +3237,47 @@ RECORDER_LAST_MINUTE = "15:28"
 #
 # It blocks NEW ENTRIES only. It has never closed an open position and
 # still does not.
+# ---- THE BAR SCALES WITH THE PURSE. 4 September 2026. ----
+#
+#     "in paper mode change the bar to 50K"        -- the operator
+#
+# Rs 12,000 was chosen on 11 August against a real balance of about
+# Rs 1.2 lakh -- roughly a tenth of the account, and about four failed
+# trades at the slot of the day.
+#
+# On 4 September PAPER became a fixed Rs 5 lakh and the slot became
+# Rs 50,000, so a position is Rs 2,00,000 of stock and the 3% entry
+# stop costs Rs 6,000. Rs 12,000 would have ended a paper day after
+# TWO stop-outs -- not a brake, a hair trigger. Rs 50,000 buys 8.3 of
+# them, which is the same shape as the 6.7 the live number bought
+# yesterday.
+#
+# LIVE is untouched at Rs 12,000, and deliberately so: he chose that
+# figure against his real account and said "keep 12000 as it is" when
+# shown the ratio on 3 September. A paper purse must never move a
+# guardrail that governs real money.
+# Rs 12,000 is the LIVE guardrail and stays his number -- chosen
+# 11 August against his real account, reaffirmed 3 September ("keep
+# 12000 as it is"). It is NOT scaled for paper and is NOT applied in
+# paper at all; see DAILY_LOSS_CAP_APPLIES_IN_PAPER below.
 DAILY_MAX_LOSS_RS = 12000.0
+
+# ---- NO DAILY CAP IN PAPER. 4 September 2026. ----
+#
+#     "remove the daily cap -12K per day in paper mode. no use at all
+#      in paper mode"                              -- the operator
+#
+# The cap exists to stop a real account bleeding. In paper it only
+# truncates the day's evidence: the session ends at lunch and the
+# afternoon's setups are never scored, which is the opposite of what a
+# paper run is for. He wants a full day, every day, so two days can be
+# compared to each other.
+#
+# A FLAG, not float("inf"): the figure is published to the dashboard
+# as daily_loss_rs, and Infinity is not valid JSON -- it would break
+# the desk rather than lift the cap. core/engine.py checks this before
+# it checks the number.
+DAILY_LOSS_CAP_APPLIES_IN_PAPER = False
 
 # The operator's own item-5 number: once the session's realized P&L
 # reaches this, stop taking new entries -- the day's goal is met,
@@ -3579,7 +3645,36 @@ SECTOR_PANIC_MIN_SYMBOLS = 3
 # Rs 10 lakh of imaginary money sizes positions he could never
 # actually take and hands back a P&L he could never actually earn.
 # A paper week is only worth reading if the constraints are real.
-PAPER_STARTING_CAPITAL = 431_116.0
+# ---- PAPER IS RS 5 LAKH, EVERY DAY, AND NEVER ASKS DHAN. ----
+#                                        4 September 2026.
+#
+#     "in paper mode bot must trade with 5 Lakh capital each day &
+#      trade with all same rules completely. paper mode do not want to
+#      see dhan & its related parts at all."      -- the operator
+#
+# On 18 August this became the FALLBACK and PAPER started sizing off
+# the real Dhan balance. That reasoning was sound -- a paper week is
+# only worth reading if the constraints are real -- but it made the
+# paper session hostage to the broker's own state.
+#
+# 4 September proved it. Dhan's overnight cleanup was still running at
+# 07:52 and three reads inside one hour gave:
+#
+#     06:50   Rs 1,28,095.65     -> 8 seats
+#     06:59   Rs    35,647.51    -> 2 seats
+#     07:52   Rs     4,577.97    -> ZERO seats, no trade all day
+#
+# The purse is read ONCE at startup (main.py) and never again, so a
+# session started during that window is dead for the day through no
+# fault of the strategy. A paper run must be repeatable: same capital
+# every morning, so two days can be compared to each other and not to
+# the broker's settlement queue.
+#
+# Every other rule is unchanged. Same seats arithmetic, same gates,
+# same stop, same daily loss cap -- see core/capital.slots(), which
+# divides THIS by MTF_MARGIN_PER_POSITION_RS exactly as it divides a
+# real balance.
+PAPER_STARTING_CAPITAL = 5_00_000.0
 
 # ----------------------------------------------------------
 # MIS (margin intraday) MARGIN MODEL -- rebuilt 2026-07-24 (evening)
