@@ -170,10 +170,80 @@ def _roll_into_session(held):
         day = {"date": held["date"], "buy": 0.0, "sell": 0.0,
                "ticks": 0, "book_ticks": 0}
         _session[held["symbol"]] = day
+    # The day's traded value, for day_traded_cr(). Written here rather
+    # than in observe() so the tick path is untouched.
+    if held.get("vol_last"):
+        _day[held["symbol"]] = (held["date"], held["vol_last"],
+                                held.get("atp"), held.get("ltp"))
     day["buy"] += held["up_qty"]
     day["sell"] += held["down_qty"]
     day["ticks"] += held["ticks"]
     day["book_ticks"] += held.get("book_ticks", 0)
+
+
+# ---- THE VOLUME WAS NEVER MISSING. WE WERE ASKING DHAN TWICE. ----
+#                                            4 September 2026.
+#
+#     "fix that volume unmeasured issue after close. does this stock
+#      become eligible?"                            -- the operator
+#
+# 54 of the 100 rows on the board that day carried NO volume figure --
+# not zero, absent. The board takes it from Dhan's REST quote, which
+# drops fields under load. A stock with no volume fails the 2.5x check
+# by default, so it is never looked at: DOLPHIN was refused 116 times
+# while it ran to its upper circuit, every refusal saying "volume
+# unmeasured".
+#
+# The number was on this machine the whole time. The websocket carries
+# the exchange's own cumulative day volume in every Quote packet, and
+# this recorder has been storing it, per minute, for all 1,455
+# subscribed symbols, all session. Read from the feed instead of the
+# snapshot on 4 September:
+#
+#     MUKKA      Rs 18.54 cr traded, normal 1.09 cr   17.0x
+#                clears the existing 2.5x bar at 09:55, never seen
+#     DOLPHIN    Rs  9.51 cr traded, normal 3.21 cr    3.0x
+#     RHETAN     Rs  6.20 cr traded, normal 33.12 cr   0.2x
+#                still fails -- this is not a way of waving stocks in
+#
+# TURNOVER, NOT SHARES x LAST PRICE. The packet carries ATP, the
+# exchange's own average traded price for the day, so volume x ATP is
+# the actual money that changed hands rather than an estimate that
+# drifts whenever the stock has run.
+#
+# IN MEMORY, NOT A QUERY. The completed minutes are in
+# data/order_flow.db, but the board rebuild already costs 50-344
+# seconds and a SQLite read per symbol would be added to that. This is
+# a dict lookup written when a minute closes.
+_day = {}         # symbol -> (date, cumulative volume, atp, ltp)
+
+
+def day_traded_cr(symbol):
+    """The money that has changed hands in this stock TODAY, in crores.
+
+    Off the feed. None when the feed has not priced it, which the
+    caller must treat as UNKNOWN -- the same posture as everywhere
+    else. A stock the feed cannot speak for is not a quiet stock.
+    """
+    name = str(symbol or "").upper()
+    if not name:
+        return None
+    today = datetime.now().strftime("%Y-%m-%d")
+    with _lock:
+        held = _open.get(name)
+        if held is not None and held.get("date") == today:
+            volume = held.get("vol_last")
+            price = held.get("atp") or held.get("ltp")
+            if volume and price:
+                return float(volume) * float(price) / 1e7
+        got = _day.get(name)
+    if not got or got[0] != today:
+        return None
+    _date, volume, atp, ltp = got
+    price = atp or ltp
+    if not volume or not price:
+        return None
+    return float(volume) * float(price) / 1e7
 
 
 def _blank(symbol, date, minute):

@@ -6694,17 +6694,6 @@ class DashboardState:
         enough of must not be read as quiet.
         """
         out = {}
-        # THE JUMP FIRST. A stock whose volume just multiplied is an
-        # event; one whose day-total is high is a description.
-        try:
-            from core import order_flow
-            for symbol in list(getattr(order_flow, "_recent", {}) or {}):
-                got = order_flow.surge(symbol)
-                if got and got.get("ratio"):
-                    out[symbol] = float(got["ratio"])
-        except Exception as exc:                           # noqa: BLE001
-            diagnostic(f"[RANK] Jump detection unavailable ({exc}); "
-                       f"falling back to the pace ratio alone.")
         try:
             import json as _json
             import os as _os
@@ -6715,13 +6704,33 @@ class DashboardState:
         except Exception:                                  # noqa: BLE001
             return out
         now = datetime.now().strftime("%H:%M")
+        from core.order_flow import day_traded_cr
         for row in (self._compute_gl_rows() or []):
             symbol = str(row.get("symbol") or "").upper()
             volume, price, a = row.get("volume"), row.get("ltp"), adv.get(symbol)
-            if not (symbol and volume and price and a):
+            if not (symbol and a):
                 continue
             try:
-                traded_cr = float(volume) * float(price) / 1e7
+                # ---- ASK THE FEED WHEN THE SNAPSHOT IS SILENT ----
+                #                              4 September 2026.
+                #
+                #     "fix that volume unmeasured issue after close.
+                #      does this stock become eligible?"
+                #
+                # 54 of 100 board rows had no volume that day. The
+                # figure above comes from Dhan's REST quote, which
+                # drops fields; the websocket carried it for all
+                # 1,455 subscribed symbols and lost nothing. MUKKA
+                # was 17.0x its own normal by 09:55 and was never
+                # once looked at.
+                #
+                # SAME RULE, SAME BAR, a source that has the number.
+                # The feed's figure is used ONLY when the snapshot
+                # has none, so a row that already works is untouched.
+                traded_cr = (float(volume) * float(price) / 1e7
+                             if volume and price else day_traded_cr(symbol))
+                if not traded_cr:
+                    continue
                 ratio = pace_ratio(traded_cr, float(a), symbol, now)
                 if ratio is None:
                     ratio = traded_cr / float(a)

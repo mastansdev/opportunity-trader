@@ -87,17 +87,83 @@ def test_genuinely_unreadable_volume_is_still_none():
     assert _row("not a number")["volume"] is None
 
 
-def test_the_surge_seeder_needs_volume():
-    """Asserted on the source. This is the line that silently dropped
-    half the market, and it must keep needing volume -- the fix is to
-    supply the number, never to loosen the check."""
+# ---- THE GUARD IS THE SAME. WHERE IT READS FROM IS NOT. ----
+#                                       4 September 2026.
+#
+# The test that stood here read the source for the literal line
+#
+#     if not (symbol and volume and price and a): continue
+#
+# and its docstring said: "the fix is to supply the number, never to
+# loosen the check." That warning was aimed at exactly the change
+# made on 4 September, and it fired. It deserves an answer rather
+# than a deletion.
+#
+# WHAT CHANGED. The number is now supplied -- core/order_flow.py
+# keeps the exchange's own cumulative day volume off the websocket,
+# for all 1,455 subscribed symbols, and _surging_now() asks it when
+# the REST snapshot is silent. 54 of 100 board rows were silent on
+# 4 September. MUKKA was 17.0x its own normal by 09:55 and was never
+# once looked at.
+#
+# WHY THE STRING COULD NOT SURVIVE. With two possible sources the
+# guard cannot be one expression before the arithmetic; it becomes
+# "compute from whichever source has it, and skip if NEITHER does".
+# The protection is identical and it is now spelled if not traded_cr.
+#
+# SO IT IS ASSERTED ON BEHAVIOUR INSTEAD, which a grep could never
+# do: drive the real method, and prove that a stock no source can
+# speak for gets no ratio -- and, separately, that the new source is
+# actually consulted. A string match would have passed happily on a
+# version where the fallback was never wired in, which is this
+# project's most repeated fault.
+
+
+def _ratios_for(monkeypatch, row, feed_cr):
+    """Run the REAL _surging_now over one board row and one feed reading."""
+    import json
     import os
-    with open(os.path.join("dashboard", "state.py"), encoding="utf-8") as fh:
-        body = fh.read()
-    assert "if not (symbol and volume and price and a):" in body, (
-        "_surging_now no longer guards on volume -- if that guard was "
-        "removed rather than fed, the surge ratio is being computed "
-        "from a missing number")
+
+    from core import order_flow
+    from dashboard.state import DashboardState
+
+    with open(os.path.join("data", "liquidity.json"), encoding="utf-8") as fh:
+        adv = (json.load(fh) or {}).get("adv_cr") or {}
+    symbol = next(s for s in adv if adv[s])       # a real normal-day figure
+    row = dict(row, symbol=symbol)
+
+    monkeypatch.setattr(order_flow, "day_traded_cr", lambda s: feed_cr)
+
+    class _Board:
+        def _compute_gl_rows(self):
+            return [row]
+
+    return DashboardState._surging_now(_Board()), symbol
+
+
+def test_a_stock_no_source_can_measure_still_gets_no_ratio(monkeypatch):
+    """THE guard. Snapshot silent, feed silent -> no ratio, no pool seed.
+    A ratio computed from a missing number is what refused BFUTILITIE
+    1,562 times while it traded at 191x its own normal."""
+    out, symbol = _ratios_for(monkeypatch,
+                              {"ltp": 100.0, "volume": None}, None)
+    assert symbol not in out
+
+
+def test_the_feed_is_actually_consulted_when_the_snapshot_is_silent(monkeypatch):
+    """The other half. Supplying the number is the fix; a guard that
+    merely stays strict while nothing feeds it is the bug again."""
+    out, symbol = _ratios_for(monkeypatch,
+                              {"ltp": 100.0, "volume": None}, 18.54)
+    assert symbol in out, "the feed reading never reached the ratio"
+
+
+def test_the_snapshot_still_wins_when_it_has_the_number(monkeypatch):
+    """A row that already worked must take the identical path. The feed
+    is a fallback, not a replacement."""
+    out, symbol = _ratios_for(monkeypatch,
+                              {"ltp": 100.0, "volume": 5_000_000}, None)
+    assert symbol in out
 
 
 def test_the_surge_rule_is_still_switched_on():
