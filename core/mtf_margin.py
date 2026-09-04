@@ -77,6 +77,12 @@ _MARGIN_FIELDS = (
 )
 
 
+# How often the running total is printed. Every call already logs its
+# own elapsed time; this is the line that answers "is the rebuild slow
+# because of this?" without needing to add up a hundred others.
+SUMMARY_EVERY = 25
+
+
 def parse_margin(response, price, quantity):
     """The margin PERCENTAGE out of a /margincalculator response.
 
@@ -139,6 +145,11 @@ class MtfMarginBook:
         self._calculator = calculator
         self._cache = {}          # symbol -> (pct_or_None, fetched_at)
         self._lock = threading.Lock()
+        # What this book has cost in wall-clock time. Read by
+        # timing_summary(); see margin_pct().
+        self._calls = 0
+        self._failures = 0
+        self._spent_ms = 0.0
         self._cache_seconds = (MTF_MARGIN_CACHE_SECONDS
                                if cache_seconds is None else cache_seconds)
 
@@ -157,7 +168,29 @@ class MtfMarginBook:
             if cached and (now - cached[1]) < self._cache_seconds:
                 return cached[0] if cached[0] else MTF_FALLBACK_MARGIN_PCT
 
+        # ---- HOW LONG DOES THIS ACTUALLY TAKE? 4 September 2026 ----
+        #
+        #     "add that timing"                     -- the operator
+        #
+        # This call sits inside the board rebuild: dashboard/state.
+        # _mtf_for() asks it for every ranked row, so a cold cache
+        # costs one network round trip per stock. The docstring above
+        # says "~300ms" and nobody has ever measured it.
+        #
+        # It matters right now because his static IP is not renewed
+        # and Dhan refuses every call. A refusal that comes back
+        # instantly costs nothing; a refusal that TIMES OUT costs the
+        # full timeout per stock, and a hundred new stocks would be a
+        # hundred timeouts. That is the difference between a rebuild
+        # of 50 seconds and one of 344, and it is a measurement, not
+        # a theory -- so it is measured.
+        #
+        # NO NEW LOG LINES. The elapsed time is added to the two lines
+        # this already prints, plus one summary per SUMMARY_EVERY
+        # calls, so the cost is visible without adding noise to a log
+        # that is already too loud.
         pct = None
+        started = time.monotonic()
         if self._calculator is not None:
             try:
                 response = self._calculator(security_id, price, 1)
@@ -165,17 +198,31 @@ class MtfMarginBook:
             except Exception as exc:                       # noqa: BLE001
                 diagnostic(f"[MTF] {symbol}: margin call failed ({exc}). "
                            f"Sizing on own cash only.")
+        took_ms = (time.monotonic() - started) * 1000.0
 
         with self._lock:
             self._cache[symbol] = (pct, now)
+            self._calls += 1
+            self._spent_ms += took_ms
+            if pct is None:
+                self._failures += 1
+            calls, failures, spent = self._calls, self._failures, self._spent_ms
+
+        if calls % SUMMARY_EVERY == 0:
+            warn(f"[MTF] {calls} margin calls this session, {failures} "
+                 f"unanswered, {spent / 1000.0:.1f}s spent waiting "
+                 f"({spent / calls:.0f}ms each). This is REBUILD time -- "
+                 f"the board asks once per stock and caches for "
+                 f"{self._cache_seconds / 3600:.0f}h.")
 
         if pct is None:
             warn(f"[MTF] {symbol}: no usable MTF margin from Dhan -- "
-                 f"buying with own cash only (no leverage).")
+                 f"buying with own cash only (no leverage). "
+                 f"[{took_ms:.0f}ms]")
             return MTF_FALLBACK_MARGIN_PCT
 
         decision(f"[MTF] {symbol}: margin {pct * 100:.2f}% "
-                 f"(about {1 / pct:.1f}x leverage).")
+                 f"(about {1 / pct:.1f}x leverage). [{took_ms:.0f}ms]")
         return pct
 
     def leverage_for(self, symbol, security_id, price):
@@ -229,9 +276,27 @@ class MtfMarginBook:
         qty = shares_for(price, pct, budget)
         return qty, pct, round(qty * float(price or 0), 2)
 
+    def timing_summary(self):
+        """What asking Dhan has cost this session.
+
+            {"calls": 41, "failures": 41, "spent_ms": 12300.0,
+             "avg_ms": 300.0}
+
+        avg_ms is None before the first call -- an average over
+        nothing is not a number.
+        """
+        with self._lock:
+            calls, failures = self._calls, self._failures
+            spent = self._spent_ms
+        return {"calls": calls, "failures": failures, "spent_ms": spent,
+                "avg_ms": (spent / calls) if calls else None}
+
     def clear(self):
         with self._lock:
             self._cache.clear()
+            self._calls = 0
+            self._failures = 0
+            self._spent_ms = 0.0
 
 
 def dhan_margin_calculator(dhan_client, exchange_segment="NSE_EQ"):
