@@ -758,16 +758,60 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None,
     # still shows BLOCKED with its reason on the board. What is missing
     # is the live refusal, and the fix is to resolve each message's
     # subject ONCE per window instead of once per candidate.
+    # ---- IT COULD ONLY EVER FIRE ON A STOCK THAT WAS RISING. ----
+    #                                     5 September 2026.
+    #
+    #     "recent TBZ stock check that rally. does the bot take this
+    #      stock atleast one time?"
+    #     "yes i think this settles & its a good one"
+    #                                            -- the operator
+    #
+    # 1 September, in the bot's own store, with 12x volume behind it:
+    #
+    #     TBZ: CO PROMOTER SELLS 74.12% STAKE TO GRT JEWELLERS
+    #          FOR Rs 1,033.71 CRORE; OPEN OFFER TO FOLLOW
+    #
+    # matched on PROMOTER SELL and was refused as "the promoter is
+    # selling". It is the opposite: ownership changed hands privately,
+    # not one share reached the market, and the buyer is now obliged to
+    # bid for everyone else's. TBZ went +19.99% then +14.03%, ran 248
+    # to 437 in ten sessions, and the bot bought it on 4 September
+    # after all of it. The module already excepts "OPEN OFFER TO
+    # ACQUIRE"; this headline said "OPEN OFFER TO FOLLOW".
+    #
+    # THE MEASUREMENT THAT SETTLED IT. Of the 75 stocks this refused:
+    #
+    #     60 never got 3% above their previous close -- the chain
+    #        refuses them at MIN_MOVE_FROM_PREV_CLOSE_PCT anyway
+    #     15 did -- and ALL FIFTEEN closed above their open
+    #
+    # and every faller it "caught" -- ADANIPOWER -6.8%, THYROCARE
+    # -7.6%, NETWEB -4.9%, ASTERDM -4.1%, RENUKA -3.1% -- never got 3%
+    # up either. It cannot stop a single faller the chain does not
+    # already stop, so the only thing it can do is refuse risers.
+    #
+    # That is not a close call about a threshold. It is the shape of
+    # the two rules: a stock about to fall is not 3% up making higher
+    # highs on its own volume, so this gate can only ever bite on one
+    # that is.
+    #
+    # THE LABEL STAYS. core/centre.py still reads overhang() and the
+    # board still shows "promoter sold 74% to GRT Jewellers" beside
+    # the stock. He keeps the information and loses the veto.
+    #
+    # What is given up: a rising stock with a REAL distribution
+    # overhang that then collapses. Fifteen is a small number and that
+    # case is not disproven -- it is judged rarer than losing TBZ,
+    # CYIENT, HINDZINC and WELCORP, and this is one flag to put back.
     if SUPPLY_GATE:
         try:
             from core import supply_events
             sold = supply_events.overhang(symbol, now=now)
         except Exception as exc:                           # noqa: BLE001
-            _broke("supply_events -- refusing rather than trading blind", exc)
-            return ("could not check for an offer for sale -- refusing "
-                    "rather than buying into somebody's exit")
+            _broke("supply_events -- the label is missing, not the trade", exc)
+            sold = None
         if sold:
-            return sold["why"]
+            row["supply_note"] = sold["why"]
 
     clock = _clock(now)
     if clock is not None:
