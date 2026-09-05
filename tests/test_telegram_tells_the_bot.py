@@ -197,6 +197,20 @@ def test_the_pushed_count_is_readable(feed):
     assert feed.pushed_count() == 1
 
 
+def test_the_collector_listens_too():
+    """Listening was wired into TelegramFeed.start(), which spawns a
+    thread and is what main.py uses. tools/collector.py never calls
+    start() -- it drives poll() from its own loop -- so the listener
+    would have sat unregistered in the one process he runs by hand every
+    morning. Machinery built and never called, again."""
+    import io as _io
+    src = _io.open("tools/collector.py", encoding="utf-8").read()
+    assert "feed.listen()" in src, "the collector never starts listening"
+    assert "feed.client.pump(" in src, "the wait between passes must listen"
+    assert "_sleep(wait_for)" in src, \
+        "a reader that cannot push must not spin"
+
+
 def test_only_one_thread_owns_the_connection():
     """Two owners and a held event loop is 'this event loop is already
     running', on the path that feeds the ranker."""

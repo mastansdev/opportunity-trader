@@ -329,6 +329,32 @@ def main(once=False, catchup=True):
                 warn(f"  Gap fill failed ({exc}). Live collection is "
                      f"unaffected.")
 
+        # ---- THE COLLECTOR LISTENS TOO. 5 September 2026. ----
+        #
+        #     "shall i run tools/collector ?"       -- the operator
+        #
+        # Asked while the push work was still warm, and the question
+        # exposed the fault: listening was wired into
+        # TelegramFeed.start(), which spawns a thread and is what
+        # main.py uses. THIS process never calls start() -- it drives
+        # feed.poll() from its own loop -- so the listener would have
+        # sat unregistered in the one process he runs by hand every
+        # morning.
+        #
+        # That is the fault this codebase keeps producing: machinery
+        # built, and never called on the path that matters.
+        # trading_gate, surge(), MOVE_DIED, refused_symbols,
+        # _same_story(), and very nearly this.
+        #
+        # Registered once, here, before the loop. The wait between
+        # passes below becomes a wait that LISTENS -- see pump().
+        watching = 0
+        try:
+            watching = feed.listen()
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"  Could not start listening ({exc}). Polling only, "
+                 f"which is the behaviour this process has always had.")
+
         failures = 0
         passes = 0
         while not _STOP["now"]:
@@ -360,7 +386,22 @@ def main(once=False, catchup=True):
             if once:
                 break
             spent = time.time() - started
-            if _sleep(max(0.0, POLL_SECONDS - spent)):
+            wait_for = max(0.0, POLL_SECONDS - spent)
+            # The wait, and it listens if it can. pump() returns False
+            # when push is unavailable or the connection dropped, and
+            # False must never become a busy loop -- so the ordinary
+            # sleep runs instead, which is exactly what this did before.
+            listened = False
+            if watching and wait_for > 0:
+                try:
+                    listened = bool(feed.client.pump(wait_for))
+                except Exception as exc:                   # noqa: BLE001
+                    diagnostic(f"  Listening cycle ended ({str(exc)[:60]}); "
+                               f"polling continues.")
+                    listened = False
+                if _STOP["now"]:
+                    break
+            if not listened and _sleep(wait_for):
                 break
 
     for feed in _FEEDS:
