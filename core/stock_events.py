@@ -619,6 +619,115 @@ KINDS = ("RESULT", "ORDER", "FILING", "NEWS", "FLOW", "CALENDAR",
          "MACRO", "OPINION", "NOISE")
 
 
+# ==================================================================
+# THE HEADLINE SAYS WHOSE STORY IT IS.  5 September 2026.
+# ==================================================================
+#
+# These channels write "SUBJECT: what happened", and the subject is
+# the whole answer. Replayed through the live code, 196 wire headlines
+# whose subject the bot RECOGNISES landed on that subject, all 196 of
+# them -- that half works.
+#
+# It is the ones it does NOT recognise that go wrong, because the only
+# company left standing is whoever else the sentence mentions:
+#
+#   ARTSON LTD: RECEIVES PURCHASE ORDER WORTH 7.17 CR ...
+#     SUPPLY OF 24 VESSELS FOR NTPC NABINAGAR      -> filed as NTPC
+#   U.S. CENTCOM: FACT: NO SHIPS HAVE HIT MINES    -> filed as FACT
+#   U.S CENTCOM: CLAIM: IRAN'S ISLAMIC ...         -> filed as ROUTE
+#   FED'S WARSH: UNDERLYING INFLATION ...          -> filed as HEALTHY
+#   U.S. ENERGY SECRETARY WRIGHT: 17 MLN BARRELS
+#     OIL FLOWED THROUGH STRAIT OF HORMUZ          -> filed as OIL
+#   VANCE ON VENEZUELA: INCREASED OIL PRODUCTION   -> filed as OIL
+#   SOURCE: NSE                                    -> filed as BSE
+#
+# ARTSON won that order; NTPC is where the boilers go. OrderBook Pulse
+# tagged the same order #ARTSON and got it right, so the bot held both
+# answers and believed the wrong one. The rest are geopolitics: a
+# CENTCOM statement became a published reason for a fertiliser company,
+# and a Fed speech for one called HEALTHY.
+#
+# A published reason is MANDATORY before the ranker will evaluate a
+# stock -- so these do not sit on a panel, they OPEN THE DOOR, and
+# there are ten seats behind it.
+#
+# TWO RULES, both narrow on purpose.
+#
+# _SPEAKER -- the subject is a person or an official body. Taken from
+# the traffic above, not invented: a country prefix, a possessive
+# office, "X ON PLACE", or a title. Whatever such a message says about
+# oil, it is not news about Oil India.
+#
+# _COMPANY_SUFFIX -- the subject ends LTD / LIMITED / CORP. That is a
+# company, stated plainly, and if the bot cannot resolve it then the
+# right answer is to file NOTHING rather than to file against someone
+# mentioned downstream. It is deliberately not "any unresolvable
+# subject": "FLY SBS AVIATION" is FLYSBS in the master, spelled without
+# the spaces, and refusing every name the matcher trips over would cost
+# far more than this fixes.
+
+# ---- A COUNTRY IS NOT A SPEAKER. 5 September 2026. ----
+#
+#     "NSE (FII/DII activity table) = our FII & DII amounts ; not BSE
+#      or NSE ... stocks"                       -- the operator
+#
+# The first version of this matched a bare country prefix, and Day
+# Trader Telugu heads its daily flows card
+#
+#     India: Cash Market Flows
+#     Fil -2346 Cr
+#     Dil +4977 Cr
+#
+# so "India:" read as a speaker and the whole card was thrown away --
+# the FII and DII amounts with it. That card is the one he is pointing
+# at, and losing it is worse than the misfiling this rule exists to
+# stop.
+#
+# A country prefix alone proves nothing. What marks a SPEAKER is a
+# person or an office: a possessive ("FED'S WARSH"), a title
+# ("ENERGY SECRETARY WRIGHT"), a named body ("CENTCOM"), or somebody
+# speaking ABOUT a place ("VANCE ON VENEZUELA"). "U.S. CENTCOM" still
+# matches, on CENTCOM. "India: Cash Market Flows" does not, because
+# nothing in it is speaking.
+_SPEAKER = re.compile(
+    r"^\s*(?:"
+    r"[A-Z][A-Za-z.'\- ]{1,28}'S\s+[A-Z][A-Za-z.'\-]{1,20}|"
+    r"[A-Z][A-Za-z.'\- ]{1,28}\s+ON\s+[A-Z][A-Za-z.'\-]{1,20}|"
+    r"[^:]{0,40}\b(?:SECRETARY|MINISTER|PRESIDENT|GOVERNOR|CHAIRMAN|"
+    r"SPOKESMAN|SPOKESPERSON|CENTCOM|PENTAGON|WHITE HOUSE|FED|OPEC|"
+    r"SOURCE|SOURCES|REPORT)\b[^:]{0,20}"
+    r")\s*:", re.I)
+
+_COMPANY_SUFFIX = re.compile(
+    r"\b(LTD|LIMITED|LTD\.|CORP|CORPORATION|INC|PLC)\.?\s*$", re.I)
+
+_WIRE_SUBJECT = re.compile(r"^([A-Z][A-Z&.,'()/ \-]{3,60}?)\s*:\s+(?=\S)")
+
+
+def wire_subject(text):
+    """The name a wire headline states before its colon, or None."""
+    for line in str(text or "").splitlines():
+        line = " ".join(line.split())
+        m = _WIRE_SUBJECT.match(line)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def subject_is_not_a_company(text):
+    """True when the headline's subject is a speaker, or a company
+    plainly named and not one the caller could resolve.
+
+    The caller decides what "resolve" means -- see
+    _events_from_message(), which asks its own matcher. This function
+    only reads the words.
+    """
+    subject = wire_subject(text)
+    if not subject:
+        return False
+    return bool(_SPEAKER.match(subject + ":"))
+
+
 def is_digest(text, companies=None):
     """More than one story in one message.
 
@@ -2209,8 +2318,135 @@ def _events_from_message(matcher, typed, read, body, at, channel,
     except Exception:                                      # noqa: BLE001
         return []
 
+    # ==========================================================
+    # A DIGEST OF NOBODY.  5 September 2026.
+    # ==========================================================
+    #
+    #     "NSE (FII/DII activity table) = our FII & DII amounts ;
+    #      not BSE or NSE ... stocks"           -- the operator
+    #
+    # He is pointing at Day Trader Telugu's daily flows card:
+    #
+    #     India: Cash Market Flows
+    #     Fil -2346 Cr
+    #     Dil +4977 Cr
+    #     ...
+    #     - Nifty 100 DMA of 24028 important level to track
+    #     - Nifty Bank 20 DMA key level to conquer 57548
+    #
+    # Two bulleted technical levels, so is_digest() called it a roundup
+    # and the whole card went -- the FII and DII amounts with it.
+    #
+    # But is_digest() exists for ONE reason, written at the top of this
+    # module: a recap pairs the wrong FIGURE with the wrong COMPANY.
+    # That card names no company. There is no wrong company for it to
+    # land on, so refusing it buys nothing and costs the numbers.
+    #
+    # Counted on the store: 70 messages name no company and are refused
+    # as digests, 66 of them MACRO market context -- West Asia
+    # escalation, the US Treasury Secretary on Hormuz, RBI liquidity,
+    # bond yields, and his flows card.
+    #
+    # THE GUARD THAT STAYS. Zero companies is not enough on its own. A
+    # recap of "#AAA wins an order #BBB reports results #CCC falls 5%"
+    # also resolves to no company, and letting it through filed a
+    # single ORDER event with no company on it --
+    # tests/test_expectation_page.py caught it the same hour.
+    #
+    # Scope does not separate them: that recap classifies MARKET too,
+    # which was the first attempt and it failed on the same test. The
+    # KIND does. MACRO and FLOW are readings of the market itself and
+    # mean nothing about any one company; an ORDER or a RESULT is a
+    # thing that happened TO a company, and one the bot could not name
+    # is a story it does not understand, not market context.
+    #
+    # Measured on the 70: 66 MACRO, 2 ORDER, 1 OPINION, 1 RESULT. This
+    # keeps the 66 and refuses the four, which is the right way round.
+    _MARKET_KINDS = ("MACRO", "FLOW", "CALENDAR")
     if is_digest(body, companies=len(symbols)):
-        return []
+        if symbols:
+            return []
+        try:
+            _kind, _scope = classify(body, grade=grade, has_symbol=False)
+        except Exception:                                  # noqa: BLE001
+            return []
+        if _scope != "MARKET" or _kind not in _MARKET_KINDS:
+            return []
+        diagnostic(f"[EVENT] several stories and no company named -- "
+                   f"kept as {_kind} market context")
+
+    # ==========================================================
+    # THE HEADLINE SAYS WHOSE STORY IT IS.  5 September 2026.
+    # ==========================================================
+    #
+    # See the note beside wire_subject(). These channels write
+    # "SUBJECT: what happened", and when the bot cannot resolve that
+    # subject the only company left standing is whoever the sentence
+    # mentions downstream:
+    #
+    #   ARTSON LTD: RECEIVES ORDER ... FOR NTPC NABINAGAR -> NTPC
+    #   U.S. CENTCOM: FACT: NO SHIPS HAVE HIT MINES       -> FACT
+    #   FED'S WARSH: UNDERLYING INFLATION IS MOVING       -> HEALTHY
+    #   VANCE ON VENEZUELA: INCREASED OIL PRODUCTION      -> OIL
+    #
+    # THIS IS NOT A RARE SHAPE. The universe is NSE -- the master
+    # carries EQ, BE, SM, ST and RR series and nothing else -- and
+    # RedboxGlobal India and Day Trader Telugu both carry news about
+    # BSE-listed companies. ARTSON is one: a real company, a real
+    # order, and correctly absent from a universe the bot may trade.
+    # EVERY such story arrives with a subject that cannot resolve, so
+    # every one of them is a candidate to be filed against whichever
+    # NSE name it happens to name in passing.
+    #
+    # A published reason is MANDATORY before the ranker will evaluate
+    # a stock, so this does not sit on a panel -- it opens the door.
+    #
+    # Two conditions, both narrow:
+    #
+    #   the subject is a SPEAKER -- a country, an office, a title,
+    #   "X on Venezuela". Whatever such a message says about oil, it
+    #   is not news about Oil India.
+    #
+    #   the subject is plainly a COMPANY -- it ends LTD, LIMITED or
+    #   CORP -- and none of the symbols found is it. Then the honest
+    #   answer is silence.
+    #
+    # NOT "any subject that fails to resolve": FLY SBS AVIATION is
+    # FLYSBS in the master, spelled without the spaces, and refusing
+    # every name the matcher trips over would cost more true events
+    # than this saves.
+    subject = wire_subject(body)
+    if subject:
+        if _SPEAKER.match(subject + ":"):
+            # ---- IT LOSES THE STOCK, NOT THE MESSAGE. 5 Sep 2026. ----
+            #
+            # This returned [] and threw the whole post away, which is
+            # right for the attribution and wrong for the content. A
+            # statement by CENTCOM or the Fed is real market context --
+            # the store already holds 3,703 MACRO rows and 154 FLOW
+            # rows, all of them MARKET scope with no symbol, and that
+            # is exactly what these are.
+            #
+            # So the SYMBOLS go and the message stays. Nothing can be
+            # filed against a company, because there is no company in
+            # it; the market-wide reading survives. A MARKET row opens
+            # no door -- REQUIRE_A_REASON_ALWAYS is asked per stock.
+            if symbols:
+                diagnostic(f"[EVENT] '{subject[:40]}' is a speaker, not a "
+                           f"company -- kept as market context, not "
+                           f"filed against {', '.join(symbols[:3])}")
+            symbols = []
+        if _COMPANY_SUFFIX.search(subject):
+            try:
+                its_own = set(matcher.symbols_in(_for_matching(subject))
+                              + matcher.names_in(_for_matching(subject)))
+            except Exception:                              # noqa: BLE001
+                its_own = set()
+            if not its_own & set(symbols):
+                diagnostic(f"[EVENT] '{subject[:40]}' is the subject and "
+                           f"is not in the universe -- not filed against "
+                           f"{', '.join(symbols[:3]) or 'anyone'}")
+                return []
 
     # ---- ONE CARD IS ABOUT ONE COMPANY. 2 August 2026. ----
     #
