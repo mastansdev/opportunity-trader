@@ -3131,7 +3131,39 @@ class Engine:
         })
         if state != "fading":
             return False
+        # ---- THIS CANNOT FIRE, AND SAYS SO. 5 September 2026. ----
+        #
+        # EXIT_REASON_MOVE_DIED appears nowhere in trade_memory: zero
+        # closes in 200 trades. Walked minute by minute over all 58
+        # trades of the five sessions to 4 September, it fired 0 times.
+        #
+        # It is not a threshold that needs tuning, it is unreachable by
+        # construction:
+        #
+        #     liveness() calls a move "fading" at   > 3.0% off its high
+        #     this then demands                     > 4.5% off the extreme
+        #     the trailing stop closes it at          2.5% off its peak
+        #
+        # The trail always gets there first, so a position is gone
+        # before it can be 4.5% off anything. The only other route into
+        # "fading" is the recent-window test, and this bar blocks that
+        # too.
+        #
+        # LEFT IN PLACE, NOT DELETED. He asked for old code to be left
+        # alone, and the rule is sound -- it is the numbers around it
+        # that make it dead. Said out loud once so nobody reads it as a
+        # live protection: a rule that has never fired and cannot fire
+        # is the same trap as a gate nobody calls.
         if off_extreme is None or off_extreme < MOVE_DIED_OFF_EXTREME_PCT:
+            if not getattr(self, "_move_died_unreachable_logged", False):
+                self._move_died_unreachable_logged = True
+                diagnostic(
+                    f"[MOVE_DIED] Never fires. It needs "
+                    f"{MOVE_DIED_OFF_EXTREME_PCT:.1f}% off the extreme "
+                    f"while the trail closes at 2.5% off the peak, so "
+                    f"the trail always wins. Zero closes in 200 trades. "
+                    f"Not a protection -- treat the trail as the only "
+                    f"exit for a finished move.")
             return False
 
         if not self._bot_may_close(symbol, "its move has finished"):
