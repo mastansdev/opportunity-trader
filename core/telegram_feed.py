@@ -45,6 +45,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from datetime import datetime, timedelta
 
 from core.logger import decision, diagnostic, warn
@@ -154,6 +155,42 @@ CATCH_UP_PAGES = 40
 # three channels stopped dead at 30 messages on 1 August. Stated here
 # so neither reader has to guess.
 CATCH_UP_PAGE_SIZE = 100
+
+
+def _boxes_json(boxes):
+    """Word positions -> a compact JSON string, or None.
+
+    Compact on purpose: a busy card is several hundred words and this
+    row is written on every poll. Only the four numbers rows_from_grid()
+    actually reads are kept, and the text itself.
+    """
+    if not boxes:
+        return None
+    try:
+        import json
+        small = [{"t": b.get("text"), "l": b.get("left"),
+                  "y": b.get("top"), "w": b.get("width"),
+                  "h": b.get("height")}
+                 for b in boxes if b.get("text")]
+        return json.dumps(small, separators=(",", ":")) if small else None
+    except Exception:                                      # noqa: BLE001
+        # A picture whose positions cannot be serialised is still a
+        # picture whose TEXT is worth storing. Never let this be the
+        # thing that loses a message.
+        return None
+
+
+def boxes_from_json(blob):
+    """The stored positions, back in the shape rows_from_grid() wants."""
+    if not blob:
+        return []
+    try:
+        import json
+        return [{"text": b.get("t"), "left": b.get("l"), "top": b.get("y"),
+                 "width": b.get("w"), "height": b.get("h")}
+                for b in json.loads(blob)]
+    except Exception:                                      # noqa: BLE001
+        return []
 
 
 def _all_older_than(messages, hours):
@@ -550,6 +587,10 @@ class TelegramFeed:
             pass        # order is an optimisation, never a requirement
 
         self.master_loader = master_loader
+        # Posts Telegram PUSHED, as opposed to ones we asked for.
+        # pushed_count() reads it, so a listener that has gone quiet
+        # and a quiet news day do not look the same.
+        self._pushed = 0
         self.db_path = db_path
         self.keep_hours = keep_hours
         self._lock = threading.Lock()
@@ -603,6 +644,35 @@ class TelegramFeed:
         # typed from what a machine read off a screenshot. See
         # core/image_text.py.
         ("ocr_text", "TEXT"),
+        # ---- WHERE EACH WORD WAS. 5 September 2026. ----
+        #
+        # Tesseract walks a picture COLUMN BY COLUMN, so the flat
+        # transcript of a grid comes out in an order that has nothing to
+        # do with what belongs to what. Earnings Pulse's week-ahead card
+        # is exactly that shape:
+        #
+        #     EARNINGS PULSE - THE WEEK AHEAD
+        #     SAT ... MOLBIO  13,355 Cr  MID CAP
+        #     MON ... SHIPROCKET  9,894 Cr  MID CAP
+        #            BLEL  1,925 Cr  SMALL CAP
+        #
+        # Every company right, every figure right -- and WHICH DAY each
+        # one reports is lost, because the day headers and the cards are
+        # separate columns. On 2 August that put NINE companies
+        # reporting during market hours into the after-the-close bucket.
+        #
+        # core/recap_card.rows_from_grid() fixes it from the word
+        # coordinates, and image_text.words_with_positions() produces
+        # them for free -- image_to_data runs the same recognition pass
+        # image_to_string already did. They were then held in memory for
+        # ninety seconds and thrown away, so nothing could re-group a
+        # card after the fact and nothing could check a bad read.
+        #
+        # Stored as JSON beside the transcript. The bot records
+        # days_since_results on every trade and the results grade gates
+        # entry, so a company put on the wrong day is a stock watched on
+        # the wrong day.
+        ("ocr_boxes", "TEXT"),
     )
 
     def _ensure_db(self):
@@ -1822,6 +1892,101 @@ class TelegramFeed:
     # keeping it CURRENT
     # ------------------------------------------------------------
 
+    # ==============================================================
+    # TELEGRAM TELLS THE BOT.  5 September 2026.
+    # ==============================================================
+    #
+    #     "right now the bot is asking telegram channels for new post
+    #      or reverse ? if telegram tells bot to check then it will be
+    #      easy to bot i think. this will solves the issue of reading
+    #      all empty to only channels posting information"
+    #                                            -- the operator
+    #
+    # It was asking, every 90 seconds, of every channel, whether or not
+    # anything had been published. He is right that Telegram will tell
+    # us instead: NewMessage rides on the connection that is already
+    # open, and a post arrives the moment it is published rather than
+    # up to 90 seconds later. For the three channels where "delay in
+    # getting their data into bot will cost us money", that is the
+    # whole of the lag -- measured 18-29 August, Day Trader Telugu's
+    # median was 5.5 minutes and its p90 24.9.
+    #
+    # THE POLLING STAYS, and this is not belt-and-braces for its own
+    # sake. Telegram pushes to a client that is CONNECTED and queues
+    # nothing for one that is not. A dropped socket, a laptop lid, a
+    # DNS blink -- and everything published in the gap is simply never
+    # sent. poll(), catch_up() and fill_gaps() are what make a restart
+    # whole, and none of them is touched. Push is the fast path; the
+    # poll is the floor.
+
+    def _store_pushed(self, handle, record):
+        """One post, pushed by Telegram, into the store.
+
+        Never raises. This runs inside telethon's event loop, and an
+        exception escaping here would take the loop down -- and with it
+        the polling that is supposed to be the safety net.
+        """
+        try:
+            channel = None
+            for c in self.channels:
+                names = {str(c.get("handle") or "").lstrip("@").lower(),
+                         str(c.get("name") or "").lower()}
+                if str(handle or "").lower() in names:
+                    channel = c
+                    break
+            if channel is None:
+                # A channel that pushed but is not on the list. Storing
+                # it under a name nothing else uses would make a row
+                # that no panel and no matcher ever reads.
+                diagnostic(f"[PUSH] {handle}: not a watched channel, "
+                           f"ignored")
+                return 0
+            stored = self._store(channel, [record])
+            if stored:
+                self._pushed += stored
+                decision(f"[PUSH] {channel.get('name') or handle}: "
+                         f"a new post arrived")
+            return stored
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[PUSH] Could not store a pushed post ({exc}). "
+                 f"The poll will pick it up.")
+            return 0
+
+    def pushed_count(self):
+        """How many posts Telegram has PUSHED this run.
+
+        Zero after an hour of market open means the listener is not
+        delivering and the polling is carrying the whole feed -- which
+        works, and is slower, and should not be discovered by accident.
+        A counter nothing reads is a counter that proves nothing, so
+        this is the reader.
+        """
+        return int(getattr(self, "_pushed", 0) or 0)
+
+    def listen(self):
+        """Ask Telegram to push new posts. Returns how many channels.
+
+        Zero is a normal answer, not a failure: the web-view reader
+        cannot push, and neither can a stub. The caller falls back to
+        an ordinary sleep and everything still works, more slowly.
+        """
+        watch = getattr(self.client, "watch", None)
+        if watch is None:
+            return 0
+        handles = [c.get("handle") or c.get("name") for c in self.channels
+                   if (c.get("handle") or c.get("name"))]
+        try:
+            n = watch(handles, self._store_pushed) or 0
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[PUSH] Could not start listening ({str(exc)[:70]}). "
+                 f"Polling only.")
+            return 0
+        if n:
+            decision(f"[PUSH] Telegram will push new posts from {n} "
+                     f"channel(s) as they are published. Polling "
+                     f"continues behind it.")
+        return n
+
     def start(self, every_seconds=POLL_SECONDS):
         """Poll the channels on a background thread until stop().
 
@@ -1881,26 +2046,67 @@ class TelegramFeed:
         # either costs one cycle; neither can block the other, because
         # sqlite3 serialises the writes and every message is committed
         # as it is stored.
-        def _loop(fast, seconds, label):
-            # First poll already happened in main.py's setup, so wait
-            # before the second one rather than doubling up at startup.
-            while not self._stop.wait(seconds):
-                try:
-                    self.poll(fast=fast, limit=self._next_limit())
-                except Exception as exc:                   # noqa: BLE001
-                    warn(f"[TELEGRAM] {label} poll cycle failed ({exc}) -- "
-                         f"keeping what is already held, retrying in "
-                         f"{seconds}s.")
-
         slow = max(int(every_seconds), int(SLOW_POLL_SECONDS))
-        self._thread = threading.Thread(
-            target=_loop, args=(True, every_seconds, "fast"),
-            name="telegram-feed", daemon=True)
+
+        # ---- ONE THREAD, BECAUSE THE LOOP CAN ONLY HAVE ONE OWNER ----
+        #                                       5 September 2026.
+        #
+        # This was two threads calling poll() on the same telethon
+        # client. That works for ask-and-answer calls -- telethon's sync
+        # wrapper serialises them onto its own event loop, and no error
+        # about it has ever been recorded on any channel.
+        #
+        # It stops working the moment anything HOLDS that loop, which is
+        # exactly what listening for pushed messages does. Two owners
+        # and a held loop is "this event loop is already running", on
+        # the path that feeds the ranker.
+        #
+        # So the two loops become one, and the wait between polls
+        # becomes a wait that LISTENS -- pump(). The thread was going to
+        # sleep for 90 seconds anyway; now Telegram delivers during
+        # those 90 seconds and the client is free again when they are
+        # up. Same cadence, same safety net, nothing new blocked.
+        #
+        # The slow channels keep their own cadence by counting cycles
+        # rather than by having their own thread: every `slow` seconds
+        # of elapsed time, one pass includes them. Their reason is
+        # unchanged -- they are episodic and results-season channels he
+        # has said are not owed a post on a schedule, and walking all
+        # ten every 90 seconds is what made the daily three wait.
+        def _loop():
+            watching = self.listen()
+            last_full = time.monotonic()
+            while not self._stop.is_set():
+                # The wait, and it listens if it can. pump() returns
+                # False when push is unavailable or the connection is
+                # down -- and False must never become a busy loop, so
+                # the ordinary wait runs instead.
+                waited = False
+                if watching:
+                    try:
+                        waited = bool(self.client.pump(every_seconds))
+                    except Exception as exc:               # noqa: BLE001
+                        diagnostic(f"[PUSH] listening cycle ended "
+                                   f"({str(exc)[:60]})")
+                        waited = False
+                if not waited and self._stop.wait(every_seconds):
+                    break
+                if self._stop.is_set():
+                    break
+                due_full = (time.monotonic() - last_full) >= slow
+                try:
+                    self.poll(fast=(None if due_full else True),
+                              limit=self._next_limit())
+                    if due_full:
+                        last_full = time.monotonic()
+                except Exception as exc:                   # noqa: BLE001
+                    warn(f"[TELEGRAM] poll cycle failed ({exc}) -- keeping "
+                         f"what is already held, retrying in "
+                         f"{every_seconds}s.")
+
+        self._thread = threading.Thread(target=_loop, name="telegram-feed",
+                                        daemon=True)
         self._thread.start()
-        self._slow_thread = threading.Thread(
-            target=_loop, args=(None, slow, "full"),
-            name="telegram-feed-slow", daemon=True)
-        self._slow_thread.start()
         decision(f"[TELEGRAM] Watching the daily channels every "
                  f"{every_seconds}s, all channels every {slow}s.")
 
@@ -2686,6 +2892,7 @@ class TelegramFeed:
                 channel.get("kind", "text"),
                 1 if message.get("is_calendar") else 0,
                 ocr or None,
+                _boxes_json(self._ocr_boxes.get(message.get("url"))),
             ))
             # Filed in the same pass that read it. The OCR above is the
             # expensive part and it has just been done; deferring the
@@ -2722,8 +2929,8 @@ class TelegramFeed:
                     "INSERT OR IGNORE INTO messages "
                     "(channel, message_id, at, text, symbols, seen_at,"
                     " grade, filing_url, photos, url, kind, is_calendar,"
-                    " ocr_text) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+                    " ocr_text, ocr_boxes) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
                 conn.commit()
                 added = conn.total_changes - before
                 conn.close()

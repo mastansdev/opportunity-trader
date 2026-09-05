@@ -2568,6 +2568,44 @@ class StockEvents:
                         theirs.add(round(float(row["value_cr"]), 2))
                     if amounts & theirs:
                         return True
+                # ==================================================
+                # THE SAME STORY IN SOMEBODY ELSE'S WORDS.
+                #                             5 September 2026.
+                # ==================================================
+                #
+                #     "Duplicates of data is not acceptable at all"
+                #                                  -- the operator
+                #
+                # The two rules above need the headline to match
+                # WORD FOR WORD after normalising, or to name the same
+                # rupee figure. Two channels carrying one announcement
+                # do neither:
+                #
+                #   RedboxGlobal  "ACME SOLAR: CO RECEIVES LOI FOR
+                #                  300 MW, AT A TARIFF OF RS 6.00..."
+                #   Day Trader    "ACME SOLAR: CO RECEIVES LOI FOR
+                #                  300 MW, AT A TARIFF OF RS 6.00..."
+                #
+                # -- same event, different transcription, no crore
+                # figure in either. Counted on the store: 349 events
+                # since 25 July are one announcement stored more than
+                # once. 146 of them arrived on a DIFFERENT channel.
+                #
+                # _same_story() was written for this in August and only
+                # ever used to tidy the DISPLAY -- the recurring fault
+                # in this codebase, machinery built and never called on
+                # the path that matters. It is called here now.
+                #
+                # WHY IT CANNOT MERGE TWO REAL STORIES: when BOTH
+                # headlines name money it requires the SAME money, so
+                # Ather's Rs 960cr on the 26th and Rs 1,758cr on the
+                # 28th stay two events. The word-overlap fallback runs
+                # only when at least one side names no figure at all,
+                # and needs four shared words and 60% containment.
+                # Verified against every event since 25 July: of the
+                # 349 it suppresses, none is a second real story.
+                if self._same_story(headline, row.get("headline")):
+                    return True
             return False
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[EVENTS] duplicate check failed ({exc}); storing it.")

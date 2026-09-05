@@ -387,8 +387,58 @@ def _read_claude(data, budget=None):
     return "\n".join(parts)
 
 
+def claude_available():
+    """Is the paid reader usable? Only if a key is set.
+
+    Separate from backend(), which answers "which reader do we START
+    with". This answers "is there a second opinion available", and the
+    two are different questions -- see read().
+    """
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return False
+    try:
+        import anthropic                                   # noqa: F401
+    except Exception:                                      # noqa: BLE001
+        return False
+    return True
+
+
 def read(data):
-    """Transcribe image bytes. Never raises."""
+    """Transcribe image bytes. Never raises.
+
+    ==============================================================
+    A SECOND LOOK, NOT A SECOND READER.  5 September 2026.
+    ==============================================================
+
+        "for me all info must be tagged properly & never mis ,
+         duplicate , thats it"                  -- the operator
+
+    Claude vision used to run only when Tesseract was ABSENT. That is
+    backwards: an installed reader that returns nothing is exactly the
+    case where a second opinion is worth paying for, and it was the one
+    case that never got one.
+
+    Measured on data/telegram.db, 30 July to 5 September: of 1,321
+    pictures, 138 came back blank. Most had a caption carrying the news
+    -- but SIX had nothing at all, no caption and no transcript, and
+    those six are gone for good.
+
+    So: the free reader always goes first, on every image, exactly as
+    before. The paid one is asked ONLY when the free one produced
+    nothing usable -- fewer than MIN_USEFUL_CHARS of real writing. On
+    the measured history that is about one image in ten, and on most
+    days none at all.
+
+    WHY NOT ON EVERY IMAGE. It costs money per picture and adds a
+    network round trip to a path that runs during market hours. The
+    free reader is already correct on the thing that matters most:
+    2,489 crore figures were read out of pictures and not one of them
+    is impossible. Paying to re-read what is already right is spending
+    for no gain.
+
+    A blank result stays "" and stays safe. Nothing about a chat feed
+    may stop a trading session.
+    """
     if not data:
         return ""
     which = backend()
@@ -399,8 +449,20 @@ def read(data):
                 else _read_claude(data))
     except Exception as exc:                                # noqa: BLE001
         warn(f"[OCR] Read failed: {exc}")
+        text = ""
+    out = clean(text)
+    if out or which != "tesseract" or not claude_available():
+        return out
+    # The free reader saw nothing worth keeping. Ask the paid one.
+    try:
+        second = clean(_read_claude(data))
+    except Exception as exc:                                # noqa: BLE001
+        diagnostic(f"[OCR] Second look failed: {exc}")
         return ""
-    return clean(text)
+    if second:
+        diagnostic(f"[OCR] Tesseract read nothing; Claude read "
+                   f"{len(second)} characters.")
+    return second
 
 
 def read_url(url):

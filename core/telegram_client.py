@@ -91,6 +91,16 @@ class TelethonReader:
         self.photo_timeout = (self.PHOTO_TIMEOUT if photo_timeout is None
                               else float(photo_timeout))
         self._client = None
+        # Consecutive image timeouts, and the flag that stops asking
+        # once Telegram has made its position clear. On the READER, not
+        # in fetch()'s locals: "images are not being served right now"
+        # is true of the connection, and a pushed message meets the
+        # same wall a fetched one does. See _shape().
+        self._photo_timeouts = 0
+        self._photos_stalled = False
+        # Set by watch(); read by pump(). Nothing else touches them.
+        self._watching = False
+        self._on_push = None
 
     def _photo_bytes(self, client, message, seconds):
         """The image, or None if Telegram did not send it in time.
@@ -255,9 +265,6 @@ class TelethonReader:
         entity = self.resolve(channel)
         handle = str(channel).strip().lstrip("@")
         out = []
-        # Consecutive image timeouts on THIS channel, and the flag that
-        # stops asking once Telegram has made its position clear.
-        timeouts, stalled = 0, False
         # ==========================================================
         # ASK FOR THE POSTS THAT ARE MISSING, BY NAME.  5 Sep 2026.
         # ==========================================================
@@ -355,87 +362,249 @@ class TelethonReader:
             # it again on every run.
             if message is None:
                 continue
-            text = getattr(message, "message", None) or ""
-            photo = getattr(message, "photo", None)
-            if not text and photo is None:
-                continue
+            record = self._shape(client, message, handle)
+            if record is not None:
+                out.append(record)
+        return out
 
-            data = []
-            if photo is not None and self.download_photos and not stalled:
-                try:
-                    blob = self._photo_bytes(client, message,
-                                             self.photo_timeout)
-                    if blob:
-                        data.append(blob)
-                    timeouts = 0
-                except (TimeoutError, asyncio.TimeoutError):
-                    timeouts += 1
-                    diagnostic(f"[TELEGRAM] {handle}: image did not arrive "
-                               f"in {self.photo_timeout:.0f}s "
-                               f"({timeouts}/{self.PHOTO_GIVE_UP_AFTER})")
-                    if timeouts >= self.PHOTO_GIVE_UP_AFTER:
-                        stalled = True
-                        # Said once, loudly, and then the run carries on
-                        # with text. A silent degradation would look
-                        # exactly like a quiet news day.
-                        warn(f"[TELEGRAM] {handle}: Telegram is not serving "
-                             f"images right now -- continuing with text "
-                             f"only. Re-run catch-up later to pick up the "
-                             f"cards.")
-                except Exception as exc:                   # noqa: BLE001
-                    diagnostic(f"[TELEGRAM] {handle}: photo download "
-                               f"failed ({str(exc)[:60]})")
+    def _shape(self, client, message, handle):
+        """One telethon message -> the record the feed stores.
 
-            links = []
-            for entity_obj, value in (message.get_entities_text() or []):
-                url = getattr(entity_obj, "url", None) or value
+        ---- ONE SHAPE, TWO DOORS. 5 September 2026. ----
+
+        This was the body of fetch()'s loop. It is a method because a
+        message now reaches the bot two ways -- PULLED by fetch(), or
+        PUSHED by watch() -- and a record built twice is a record that
+        drifts. The photo bytes, the filing links, the inline-keyboard
+        buttons and the hashtags are the whole reason a message is
+        worth anything downstream, and none of it may depend on which
+        door the message came through.
+
+        Returns None for a message with neither text nor a picture: a
+        poll, a sticker, a service post.
+
+        The image-timeout counters live on the READER rather than in
+        fetch()'s locals, because "Telegram is not serving images right
+        now" is true of the connection, not of one call. A pushed
+        message and a fetched one hit the same wall and should give up
+        together.
+        """
+        text = getattr(message, "message", None) or ""
+        photo = getattr(message, "photo", None)
+        if not text and photo is None:
+            return None
+
+        data = []
+        if photo is not None and self.download_photos \
+                and not self._photos_stalled:
+            try:
+                blob = self._photo_bytes(client, message,
+                                         self.photo_timeout)
+                if blob:
+                    data.append(blob)
+                self._photo_timeouts = 0
+            except (TimeoutError, asyncio.TimeoutError):
+                self._photo_timeouts += 1
+                diagnostic(f"[TELEGRAM] {handle}: image did not arrive "
+                           f"in {self.photo_timeout:.0f}s "
+                           f"({self._photo_timeouts}/"
+                           f"{self.PHOTO_GIVE_UP_AFTER})")
+                if self._photo_timeouts >= self.PHOTO_GIVE_UP_AFTER:
+                    self._photos_stalled = True
+                    # Said once, loudly, and then the run carries on
+                    # with text. A silent degradation would look
+                    # exactly like a quiet news day.
+                    warn(f"[TELEGRAM] {handle}: Telegram is not serving "
+                         f"images right now -- continuing with text "
+                         f"only. Re-run catch-up later to pick up the "
+                         f"cards.")
+            except Exception as exc:                       # noqa: BLE001
+                diagnostic(f"[TELEGRAM] {handle}: photo download "
+                           f"failed ({str(exc)[:60]})")
+
+        links = []
+        for entity_obj, value in (message.get_entities_text() or []):
+            url = getattr(entity_obj, "url", None) or value
+            if url and url.startswith("http"):
+                links.append(url)
+
+        # ---- THE BUTTONS UNDER THE MESSAGE, 1 August 2026 ----
+        #
+        # @WLPulseBot puts its documents on an inline keyboard
+        # rather than in the text:
+        #
+        #     Q4 results filed.  GREAT
+        #     Revenue +8.4% YoY ...
+        #     [ Brief PDF ]  [ Filing ]
+        #
+        # Those are reply_markup buttons, not text entities, so the
+        # loop above cannot see them -- and the filing link is
+        # exactly what turned out to be worth having: on 31 July it
+        # was the only route to half a day's results, because the
+        # announcement watcher polls NSE and those companies file
+        # to BSE.
+        #
+        # A Mini App button carries no plain URL and is skipped: it
+        # is a webview with its own login, and it is where the
+        # watchlist is MANAGED rather than where the data arrives.
+        markup = getattr(message, "reply_markup", None)
+        for row in (getattr(markup, "rows", None) or []):
+            for button in (getattr(row, "buttons", None) or []):
+                url = getattr(button, "url", None)
                 if url and url.startswith("http"):
                     links.append(url)
 
-            # ---- THE BUTTONS UNDER THE MESSAGE, 1 August 2026 ----
-            #
-            # @WLPulseBot puts its documents on an inline keyboard
-            # rather than in the text:
-            #
-            #     Q4 results filed.  GREAT
-            #     Revenue +8.4% YoY ...
-            #     [ Brief PDF ]  [ Filing ]
-            #
-            # Those are reply_markup buttons, not text entities, so the
-            # loop above cannot see them -- and the filing link is
-            # exactly what turned out to be worth having: on 31 July it
-            # was the only route to half a day's results, because the
-            # announcement watcher polls NSE and those companies file
-            # to BSE.
-            #
-            # A Mini App button carries no plain URL and is skipped: it
-            # is a webview with its own login, and it is where the
-            # watchlist is MANAGED rather than where the data arrives.
-            markup = getattr(message, "reply_markup", None)
-            for row in (getattr(markup, "rows", None) or []):
-                for button in (getattr(row, "buttons", None) or []):
-                    url = getattr(button, "url", None)
-                    if url and url.startswith("http"):
-                        links.append(url)
+        permalink = f"https://t.me/{handle}/{message.id}"
+        record = {
+            "id": message.id,
+            "at": message.date,
+            "text": text,
+            "photos": [permalink] if data or photo is not None else [],
+            "photo_data": data,
+            "links": [u for u in links
+                      if "t.me" not in u and "telegram.org" not in u],
+            "hashtags": _HASHTAG.findall(text.upper()),
+            "url": permalink,
+        }
+        record.update(_pulse_fields(text, record["links"]))
+        return record
 
-            permalink = f"https://t.me/{handle}/{message.id}"
-            record = {
-                "id": message.id,
-                "at": message.date,
-                "text": text,
-                "photos": [permalink] if data or photo is not None else [],
-                "photo_data": data,
-                "links": [u for u in links
-                          if "t.me" not in u and "telegram.org" not in u],
-                "hashtags": _HASHTAG.findall(text.upper()),
-                "url": permalink,
-            }
-            record.update(_pulse_fields(text, record["links"]))
-            out.append(record)
-        return out
+    # ==============================================================
+    # TELEGRAM TELLS THE BOT.  5 September 2026.
+    # ==============================================================
+    #
+    #     "right now the bot is asking telegram channels for new post
+    #      or reverse ? if telegram tells bot to check then it will be
+    #      easy to bot i think. this will solves the issue of reading
+    #      all empty to only channels posting information"
+    #                                            -- the operator
+    #
+    # It was asking. POLL_SECONDS is 90 and every channel was asked on
+    # every pass whether or not anything had been published -- about
+    # 400 requests an hour, most of them answering "nothing".
+    #
+    # He is right that Telegram will tell us instead. It is the same
+    # connection, already open and already authorised; NewMessage rides
+    # on it and arrives the moment a post is published.
+    #
+    # WHAT PUSH DOES NOT DO, and why the polling stays: Telegram sends
+    # updates to a client that is CONNECTED. Nothing is queued for a
+    # laptop that is off. So push replaces the asking, never the
+    # catching up -- poll(), catch_up() and fill_gaps() are what make a
+    # restart whole, and they are untouched.
+    #
+    # WHY pump() RATHER THAN run_until_disconnected(): telethon's sync
+    # wrapper owns one event loop, and run_until_disconnected() holds
+    # it forever. This feed already drives that client from TWO threads
+    # -- the fast loop for the daily three, the slow loop for the rest
+    # -- and a held loop breaks both of them with "this event loop is
+    # already running". So the loop is PUMPED in slices instead: the
+    # caller says "run for 90 seconds", pushed messages are delivered
+    # during those 90 seconds, and the client is free again the moment
+    # it returns. A slice replaces a sleep the poller was doing anyway,
+    # so it costs nothing and blocks nothing.
+
+    def watch(self, channels, on_message):
+        """Ask Telegram to push new posts from these channels.
+
+        `on_message(handle, record)` is called for each one, with the
+        same record shape fetch() returns -- see _shape().
+
+        Registering is cheap and idempotent-ish: called again, it
+        replaces the handler rather than stacking a second one.
+        Returns the number of channels being watched, or 0 if push is
+        not available, so the caller can say so rather than assume.
+        """
+        try:
+            from telethon import events
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[TELEGRAM] No push support ({exc}). Polling only.")
+            return 0
+        try:
+            client = self._connect()
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[TELEGRAM] Could not open the connection to listen "
+                 f"({str(exc)[:70]}). Polling only.")
+            return 0
+
+        entities, handles = [], {}
+        for spec in channels or []:
+            try:
+                entity = self.resolve(spec)
+            except Exception as exc:                       # noqa: BLE001
+                # One unreadable channel costs that channel, never the
+                # rest -- the same posture poll() has always had.
+                diagnostic(f"[TELEGRAM] Cannot listen to {spec} "
+                           f"({str(exc)[:50]})")
+                continue
+            entities.append(entity)
+            handles[id(entity)] = str(spec).strip().lstrip("@")
+        if not entities:
+            return 0
+
+        if self._on_push is not None:
+            try:
+                client.remove_event_handler(self._on_push)
+            except Exception:                              # noqa: BLE001
+                pass
+
+        async def _handler(event):
+            # Wrapped whole. This runs inside telethon's loop, and an
+            # exception here would take the loop down and with it the
+            # polling that is meant to be the safety net.
+            try:
+                message = getattr(event, "message", None)
+                if message is None:
+                    return
+                chat = await event.get_chat()
+                handle = (getattr(chat, "username", None)
+                          or getattr(chat, "title", None) or "")
+                record = self._shape(client, message,
+                                     str(handle).lstrip("@"))
+                if record is not None:
+                    on_message(str(handle).lstrip("@"), record)
+            except Exception as exc:                       # noqa: BLE001
+                diagnostic(f"[TELEGRAM] Pushed message not stored: "
+                           f"{str(exc)[:70]}")
+
+        client.add_event_handler(_handler, events.NewMessage(chats=entities))
+        self._on_push = _handler
+        self._watching = True
+        return len(entities)
+
+    def pump(self, seconds):
+        """Run the update loop for a while, delivering pushed posts.
+
+        This is a SLEEP that listens. The caller was going to wait
+        anyway; during the wait Telegram delivers, and when it returns
+        the client is free for the next poll.
+
+        Returns True if it actually listened. False means the caller
+        should fall back to an ordinary sleep -- push is off, the
+        connection is down, or telethon refused -- and False must never
+        become a busy loop, so the caller sleeps on it.
+        """
+        if not self._watching or seconds <= 0:
+            return False
+        try:
+            import asyncio as _asyncio
+            client = self._connect()
+            client.loop.run_until_complete(_asyncio.sleep(float(seconds)))
+            return True
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[TELEGRAM] Listening stopped ({str(exc)[:70]}). "
+                       f"Falling back to polling for this cycle.")
+            return False
 
     def close(self):
         if self._client is not None:
+            try:
+                if self._on_push is not None:
+                    self._client.remove_event_handler(self._on_push)
+            except Exception:                              # noqa: BLE001
+                pass
+            self._on_push = None
+            self._watching = False
             try:
                 self._client.disconnect()
             except Exception:                              # noqa: BLE001

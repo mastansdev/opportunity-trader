@@ -151,8 +151,14 @@ def test_the_api_reader_does_not_drop_photo_only_messages():
 
     77% of that channel is pictures with no caption at all.
     """
+    # ---- IT MOVED TO _shape(). 5 September 2026. ----
+    # This scanned the body of fetch(). When Telegram was allowed to
+    # PUSH messages as well as answer for them, the record-building was
+    # lifted into _shape() so both doors build the identical record --
+    # which is the whole reason that method exists. The invariant below
+    # is unchanged; only its address is.
     src = open("core/telegram_client.py", encoding="utf-8").read()
-    body = src[src.index("    def fetch(self, channel"):]
+    body = src[src.index("    def _shape(self, client, message, handle):"):]
     body = body[:body.index("\n    def ")] if "\n    def " in body else body
     assert "if not text and photo is None:" in body, (
         "a message with a photo and no caption must be kept")
@@ -178,8 +184,14 @@ def test_documents_on_an_inline_keyboard_are_captured():
     a webview with its own login, and it is where the watchlist is
     MANAGED rather than where the data arrives.
     """
+    # ---- IT MOVED TO _shape(). 5 September 2026. ----
+    # This scanned the body of fetch(). When Telegram was allowed to
+    # PUSH messages as well as answer for them, the record-building was
+    # lifted into _shape() so both doors build the identical record --
+    # which is the whole reason that method exists. The invariant below
+    # is unchanged; only its address is.
     src = open("core/telegram_client.py", encoding="utf-8").read()
-    body = src[src.index("    def fetch(self, channel"):]
+    body = src[src.index("    def _shape(self, client, message, handle):"):]
     body = body[:body.index("\n    def ")] if "\n    def " in body else body
     assert "reply_markup" in body, (
         "the bot's documents live on an inline keyboard; a text-only "

@@ -162,14 +162,22 @@ def test_a_timeout_does_not_abandon_the_message_text():
     """A results card's grade, ticker and headline are all in the
     caption. Storing none of it because the image was slow throws
     away the part that was already in hand."""
+    # ---- IT MOVED TO _shape(). 5 September 2026. ----
+    # This read the body of fetch()'s loop. When Telegram was allowed
+    # to PUSH posts as well as answer for them, the record-building was
+    # lifted into _shape() so a pushed message and a fetched one build
+    # the identical record. The counters moved onto the reader with it,
+    # because "images are not being served right now" is true of the
+    # connection and not of one call -- a pushed message hits the same
+    # wall. The invariant this test protects is unchanged.
     src = open("core/telegram_client.py", encoding="utf-8").read()
-    body = src[src.index("for message in client.iter_messages"):]
-    body = body[:body.index("out.append")]
+    body = src[src.index("    def _shape(self, client, message, handle):"):]
+    body = body[:body.index("\n    def ")] if "\n    def " in body else body
     assert "self._photo_bytes(" in body
-    assert "timeouts += 1" in body
-    assert "stalled = True" in body
-    # No `continue` and no `raise` on the timeout path -- the loop has
-    # to fall through to building the record.
+    assert "self._photo_timeouts += 1" in body
+    assert "self._photos_stalled = True" in body
+    # No `continue` and no `raise` on the timeout path -- it has to
+    # fall through to building the record.
     handler = body[body.index("except (TimeoutError"):]
     handler = handler[:handler.index("except Exception")]
     assert "continue" not in handler and "raise" not in handler

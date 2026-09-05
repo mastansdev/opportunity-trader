@@ -99,9 +99,27 @@ def main(apply=False):
         # The counting below is only so this tool can still explain
         # itself. It re-derives what the shared function decided; it
         # does not decide anything of its own.
+        # ---- AND WHERE EACH WORD WAS. 5 September 2026. ----
+        #
+        # This passed no word positions, so every REBUILD of the event
+        # store re-made the bug the positions exist to prevent:
+        # Tesseract walks a grid column by column, and Earnings Pulse's
+        # week-ahead card is a grid. Nine companies reporting during
+        # market hours went into the after-the-close bucket on 2 August
+        # for exactly this reason.
+        #
+        # The live path has always carried them (core/telegram_feed's
+        # _ocr_boxes). They are stored on the row now, so the rebuild
+        # can read them back instead of quietly producing a worse answer
+        # than the session that first read the picture.
+        boxes = None
+        if "ocr_boxes" in row.keys():
+            from core.telegram_feed import boxes_from_json
+            boxes = boxes_from_json(row["ocr_boxes"]) or None
         events = events_from_message(
             matcher, text=row["text"], ocr_text=read, at=row["at"],
-            channel=row["channel"], url=row["url"], grade=row["grade"])
+            channel=row["channel"], url=row["url"], grade=row["grade"],
+            word_boxes=boxes)
 
         if not events:
             if not body:

@@ -27,6 +27,7 @@ front of the order wins.
 """
 
 import threading
+import time
 
 import pytest
 
@@ -155,38 +156,66 @@ def test_one_channel_failing_does_not_cost_the_others(feed, monkeypatch):
 
 # ------------------------------------------------- two loops, both stopped
 
-def test_both_loops_start_and_both_stop(feed, monkeypatch):
-    """A daemon thread nobody joins is how a session hangs on Ctrl+C."""
+def test_the_loop_starts_and_stops(feed, monkeypatch):
+    """A daemon thread nobody joins is how a session hangs on Ctrl+C.
+
+    ---- ONE LOOP NOW, NOT TWO. 5 September 2026. ----
+
+    This asserted that a SECOND thread was alive. Both threads called
+    poll() on the same telethon client, which is fine for ask-and-answer
+    calls -- the sync wrapper serialises them onto its own event loop.
+    It stops being fine the moment anything HOLDS that loop, and that is
+    exactly what listening for pushed messages does: two owners and a
+    held loop is "this event loop is already running", on the path that
+    feeds the ranker.
+
+    So the two became one and the wait between polls became a wait that
+    LISTENS. The rule the two threads existed to protect is unchanged
+    and is checked by the tests above and below: the daily three are
+    read on every cycle, the rest on the slow cadence, and the full pass
+    is never faster than the daily one.
+    """
     monkeypatch.setattr(feed, "poll", lambda **kw: 0)
     before = threading.active_count()
     feed.start(every_seconds=0.05)
     assert feed._thread is not None and feed._thread.is_alive()
-    assert feed._slow_thread is not None and feed._slow_thread.is_alive()
     feed.stop()
-    assert feed._thread is None and feed._slow_thread is None
+    assert feed._thread is None
     assert threading.active_count() <= before + 1
 
 
 def test_the_full_pass_is_never_faster_than_the_daily_one(feed, monkeypatch):
-    """Two loops reading the same channels at the same rate is just the
-    old behaviour with an extra thread."""
+    """Reading every channel at the daily cadence is the old behaviour
+    that made the daily three wait for the other seven.
+
+    ---- MEASURED, NOT SPIED ON. 5 September 2026. ----
+
+    This read the two threads' arguments. There is one thread now -- see
+    test_the_loop_starts_and_stops -- and the cadence is decided by
+    elapsed time inside it, so the arguments say nothing. What the
+    thread actually DOES is the better test anyway, and it is what this
+    checks: many daily passes, few full ones.
+    """
     assert SLOW_POLL_SECONDS >= POLL_SECONDS
 
-    seconds = []
-    real = threading.Thread
-
-    class _Spy(real):
-        def __init__(self, *a, **kw):
-            if kw.get("args"):
-                seconds.append(kw["args"][1])
-            super().__init__(*a, **kw)
-            self.daemon = True
-
-    monkeypatch.setattr(telegram_feed.threading, "Thread", _Spy)
-    monkeypatch.setattr(feed, "poll", lambda **kw: 0)
-    feed.start(every_seconds=POLL_SECONDS)
+    passes = []
+    monkeypatch.setattr(feed, "poll",
+                        lambda **kw: passes.append(kw.get("fast")) or 0)
+    # 50ms cycle, one second before a full pass is due: the daily
+    # channels get read many times over and every channel about twice.
+    # Whole seconds for the slow one because start() takes int() of it.
+    monkeypatch.setattr(telegram_feed, "SLOW_POLL_SECONDS", 1)
+    feed.start(every_seconds=0.05)
+    time.sleep(2.2)
     feed.stop()
-    assert seconds == [POLL_SECONDS, SLOW_POLL_SECONDS]
+
+    daily = [p for p in passes if p is True]
+    full = [p for p in passes if p is None]
+    assert daily, "the daily channels were never read"
+    assert full, "the full pass never ran"
+    assert len(daily) > len(full), \
+        "every channel is being read at the daily cadence -- which is "\
+        "what made the daily three queue behind the other seven"
 
 
 # ------------------------------------------------- and it says how late
