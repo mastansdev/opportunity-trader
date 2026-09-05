@@ -1245,6 +1245,28 @@ class DashboardState:
             # F&O, positions.
             "result_tags": self._result_tags_today(),
             "result_details": self.result_details(),
+            # ---- WHAT IS STILL STANDING. 5 September 2026. ----
+            #
+            #     "this is not measurement on intraday or long term
+            #      move, this is real company order & this 'Rs 15,840
+            #      crore order, fourteen sessions ago' is worth
+            #      tracking"                      -- the operator
+            #
+            # WORTH TRACKING, not worth trading. Asked of the memory
+            # before this was built: the median session after an ORDER
+            # is +0.01%, and keeping one alive as a GATE admits one or
+            # two extra candidates a day with a median of -0.02% --
+            # into a queue already 84 to 400 deep against five seats.
+            # So nothing about what the bot may BUY changes here.
+            # STALE_REASON_HOURS is still 24.
+            #
+            # This is a sentence, on the same one-map-per-symbol
+            # footing as result_tags above and for the same reason:
+            # when WELCORP is up 4.7% he should be able to read
+            # "Rs 15,840 cr order, 10 sessions ago" beside it and
+            # decide himself, instead of reading "nothing published"
+            # while the cause sits in this bot's own store.
+            "standing_causes": self._standing_causes(),
         }
 
         # ---- THE READING GOES ON EVERY ROW HE CAN SEE. 31 Aug ----
@@ -1267,6 +1289,36 @@ class DashboardState:
             (snapshot.get("gainers_losers") or {}).get("gainers"),
             ranked.get("refused_rows"))
         return snapshot
+
+    # A standing cause is days old and cannot change within a minute.
+    # Measured warm: 610 ms for 36 stocks, because naming a company in
+    # a headline walks the whole name index. On a one-second board loop
+    # that is not a feature, it is a stall -- the same lesson as
+    # REASON_CACHE_SECONDS and the shortlist cache before it.
+    STANDING_CAUSE_CACHE_SECONDS = 300
+
+    def _standing_causes(self):
+        """{symbol: {"text", "value_cr", "sessions_ago", ...}}.
+
+        Never raises. A memory lookup that fails must cost the sentence
+        and nothing else -- the board still draws, and every price and
+        every gate is untouched by it.
+        """
+        import time as _time
+        now = _time.time()
+        held = getattr(self, "_standing_cache", None)
+        when = getattr(self, "_standing_cache_at", 0.0)
+        if held is not None and (now - when) < self.STANDING_CAUSE_CACHE_SECONDS:
+            return held
+        try:
+            from core.cause_effect import standing_causes
+            got = standing_causes() or {}
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[MEMORY] standing causes unavailable: {exc}")
+            got = {}
+        self._standing_cache = got
+        self._standing_cache_at = now
+        return got
 
     def _result_tags_today(self):
         """{symbol: "EXCELLENT"|"GOOD"|"AVOID"} for everything that

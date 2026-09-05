@@ -1902,9 +1902,31 @@ def strip_x_header(body):
 # occurrence is not a match. These need a "$" or "#" prefix, or the
 # company name spelled out, before the link is made. Nothing is
 # deleted from the stored text -- only the SYMBOL match is withheld.
+#
+# ---- TWO MORE, FOUND THE SAME WAY. 5 September 2026. ----
+#
+# Looking for what should be shown beside a moving stock turned these
+# up, and they are the same fault as CURRENT and TOTAL above:
+#
+#   LANDMARK   3 messages, 0 tagged, and TWO are the English word --
+#              "ADANI PORTS: ACHIEVES LANDMARK MILESTONE" and
+#              "TARIL SECURED A LANDMARK ORDER FROM NPCIL". The
+#              second put Welspun's Rs 15,840 cr order on Landmark
+#              Cars, because the filing preamble says "we wish to
+#              inform the Exchange of a landmark..."
+#
+#   WEALTH    21 messages, 0 tagged, and SEVENTEEN are the word --
+#              "Plutus Wealth Management", "Nuvama Wealth", "HSBC
+#              joins PEs in race for Nuvama Wealth".
+#
+# Both cost nothing to add: neither has ever appeared as a hashtag,
+# and the real companies spell themselves out -- LANDMARK CARS and
+# WEALTH FIRST PORTFOLIO MANAGERS -- which the NAME index still
+# matches.
 _WORD_TICKERS = ("VALUE", "TOTAL", "CURRENT", "GLOBAL", "TECH", "METAL",
                  "ENERGY", "DIVIDEND", "FOCUS", "QUALITY", "GROWTH",
-                 "ALPHA", "MOMENTUM", "CONSUMER", "INFRA")
+                 "ALPHA", "MOMENTUM", "CONSUMER", "INFRA",
+                 "LANDMARK", "WEALTH")
 _BARE_WORD = re.compile(
     r"(?<![#$\w])(" + "|".join(_WORD_TICKERS) + r")(?![\w])")
 

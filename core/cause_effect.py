@@ -75,6 +75,8 @@ import os
 import sqlite3
 from datetime import datetime
 
+from core.logger import diagnostic
+
 DB_PATH = os.path.join("data", "cause_effect.db")
 EVENTS_DB = os.path.join("data", "stock_events.db")
 DAILY_DB = os.path.join("data", "daily_candles.db")
@@ -523,6 +525,398 @@ def recall(symbol, days=30, db_path=None):
     return [{"date": r[0], "kind": r[1], "grade": r[2], "value_cr": r[3],
              "subject_1d": r[4], "subject_3d": r[5], "peers_1d": r[6],
              "headline": r[7]} for r in rows]
+
+
+# ==================================================================
+# WHAT IS STILL STANDING.  5 September 2026.
+# ==================================================================
+#
+#     "this is not measurement on intraday or long term move, this is
+#      real company order & this 'Rs 15,840 crore order, fourteen
+#      sessions ago' is worth tracking"        -- the operator
+#
+# WORTH TRACKING, not worth trading -- and the difference is the whole
+# design of this function. Asked of the memory before building it:
+#
+#     what followed, by kind        n      median next session
+#     ORDER                       454                   +0.01%
+#     NEWS                      4,150                   -0.20%
+#     RESULT                    2,092                   -0.81%
+#
+# The event alone is worth nothing. And the big-order band does not
+# survive inspection: nine rows above Rs 10,000 cr, of which THREE are
+# real orders -- the rest are an investor presentation classified as an
+# order, an acquisition rumour, and Welspun's own filing landed on
+# Landmark. Three is not a rule.
+#
+# Keeping such an order alive as a GATE was measured too: at Rs 10,000
+# cr held ten sessions it admits 68 extra stock-days, 11 of which move
+# more than 3%, median -0.02%. One to two candidates a day, mostly
+# going nowhere, into a queue that already runs 84 to 400 deep against
+# five seats. More candidates is not the constraint.
+#
+# So this changes nothing about what the bot may buy. STALE_REASON_
+# HOURS stays at 24 and core/why_moving.py is untouched. This is a
+# SENTENCE for the board, so that when WELCORP is up 4.7% he reads
+# "Rs 15,840 cr order, 14 sessions ago" beside it and decides himself.
+#
+# THE CASE IT IS FOR. On 20 August the store recorded the largest order
+# in Welspun's history. On 3, 4 and 5 September the stock was up 4.7 to
+# 5.9% on four to six times normal volume and the board said:
+#
+#     "up 4.7% and never in the pool: nothing published, volume 4.1"
+#
+# The cause was a fortnight old and sitting in this bot's own store.
+# Nothing was published TODAY, and that is a true sentence that reads
+# as a false one.
+
+# A real order, in rupees the company would call material. Not a
+# measured threshold -- there is nothing to measure it against, see
+# above -- but a floor low enough to catch what he would want to see
+# and high enough that routine supply contracts do not fill the board.
+STANDING_MIN_CR = 500.0
+
+# Roughly a trading month. The Welspun order was 14 sessions old when
+# he asked about it, so a window that could not hold 14 would answer
+# the wrong question.
+STANDING_DAYS = 30
+
+# Only causes that COMMIT the company to something. A news headline
+# ages; an order is still on the books.
+STANDING_KINDS = ("ORDER",)
+
+
+def standing_cause(symbol, on=None, events_db=None, min_cr=None,
+                   days=None):
+    """The biggest committed cause still standing for this stock.
+
+    Returns {"value_cr", "sessions_ago", "date", "headline", "text"}
+    or None. `text` is the sentence for the board, in his words:
+
+        "Rs 15,840 cr order, 14 sessions ago"
+
+    Reads the EVENT store, not cause_effect.db, so it is current
+    without a rebuild. Never raises: a board that cannot draw because
+    a memory lookup failed is worse than a board with no memory.
+    """
+    name = str(symbol or "").upper()
+    if not name:
+        return None
+    floor = STANDING_MIN_CR if min_cr is None else float(min_cr)
+    window = STANDING_DAYS if days is None else int(days)
+    today = on or datetime.now().date()
+    if isinstance(today, str):
+        try:
+            today = datetime.fromisoformat(today[:10]).date()
+        except ValueError:
+            today = datetime.now().date()
+    try:
+        conn = sqlite3.connect(events_db or EVENTS_DB)
+        rows = conn.execute(
+            "SELECT date(at), value_cr, headline FROM events "
+            "WHERE symbol = ? AND kind IN (%s) AND value_cr >= ? "
+            "AND date(at) >= date(?, ?) AND date(at) <= date(?) "
+            "ORDER BY value_cr DESC, date(at) ASC"
+            % ",".join("?" * len(STANDING_KINDS)),
+            (name,) + STANDING_KINDS
+            + (floor, today.isoformat(), f"-{window} day",
+               today.isoformat())).fetchall()
+        conn.close()
+    except Exception as exc:                               # noqa: BLE001
+        diagnostic(f"[MEMORY] standing_cause({name}) failed: {exc}")
+        return None
+    if not rows:
+        return None
+
+    # ---- THE HEADLINE MUST NAME THIS COMPANY. 5 September 2026. ----
+    #
+    # The first run of this put the same sentence on four stocks:
+    #
+    #     WELCORP     Rs 15,840 cr order, 9 sessions ago   correct
+    #     WEALTH      Rs 15,840 cr order, 9 sessions ago
+    #     NUVAMA      Rs 15,840 cr order, 9 sessions ago
+    #     LANDMARK    Rs 15,840 cr order, 9 sessions ago
+    #
+    # LANDMARK's row is Welspun's own filing -- "Pursuant to Regulation
+    # 30 of the SEBI (Listing Obligations..." -- a preamble that names
+    # nobody, landed on a second company.
+    #
+    # This is a sentence he READS. A false one on his screen is worse
+    # than no sentence at all, because he would act on it. So the same
+    # rule the event path got today applies here: the story has to say
+    # whose it is. The row is kept only if the headline carries the
+    # symbol or the distinctive first word of the company's name --
+    # "WELSPUN CORP: CO. SECURES LARGEST-EVER SINGLE ORDER" names
+    # Welspun, and the SEBI preamble names nobody.
+    # ---- AND IT IS RE-READ WITH TODAY'S RULES. 5 Sep 2026. ----
+    #
+    # The store holds rows filed by older code, and two of them would
+    # have gone straight onto his screen as facts:
+    #
+    #   JNPR    Rs 26,231 cr order   -- an Investor Presentation, and
+    #                                   26,231 is a MW capacity target
+    #   NUVAMA  Rs 15,840 cr order   -- an acquisition approach, and
+    #                                   the figure is not its own
+    #
+    # Today's classifier calls both NEWS with no amount, so the bug is
+    # fixed at the source and only history is wrong. History is
+    # exactly what a memory reads, though, so the row is re-read as it
+    # is drawn: if the current rules would not call this an ORDER with
+    # this amount, it is not shown. The store is left alone -- these
+    # age out of the window on their own, and rewriting stored events
+    # to make a display tidy is how a record stops being a record.
+    picked = None
+    for day, value, headline in rows:
+        if not _headline_names(name, headline):
+            continue
+        if not _still_reads_as_an_order(headline, value):
+            diagnostic(f"[MEMORY] {name}: a stored 'Rs {value:,.0f} cr "
+                       f"order' does not read as one today -- not shown")
+            continue
+        picked = (day, value, headline)
+        break
+    if picked is None:
+        return None
+    day, value, headline = picked
+
+    # SESSIONS, not days. "Fourteen sessions ago" is what he said and
+    # what a trader counts; a fortnight of calendar days spans two
+    # weekends and reads as older than it is.
+    ago = _sessions_between(day, today)
+    if ago is None:
+        return None
+    return _sentence(name, day, value, headline, ago)
+
+
+def _sentence(symbol, day, value, headline, ago):
+    """One standing cause, as something to read.
+
+    ---- HOW BIG IT IS AGAINST THE COMPANY. 5 September 2026. ----
+
+        "check the % of that order to their market cap. this reveal
+         the significance of the order book. ex simple = 100 cr order
+         for 200 MCAP & 10000 MCAP company 1st is 50% & the other is
+         1%"                                      -- the operator
+
+    He is right and the store proves it. Ranked by RUPEES the top of
+    the list was JNPR's investor presentation, where the figure was a
+    megawatt target. Ranked by SHARE OF THE COMPANY the two that
+    actually ran come near the top, and RAILTEL's Rs 630 cr -- small
+    in rupees, a quarter of the company -- stops being invisible.
+
+    The share is added only when the size is known. It is FREE FLOAT,
+    which is what NSE publishes in bulk and covers about 500 of the
+    1,976 symbols on file, so it is labelled rather than implied. See
+    core/market_cap.py.
+    """
+    value = float(value or 0.0)
+    share = None
+    try:
+        from core import market_cap
+        share = market_cap.share_of_company(symbol, value)
+    except Exception:                                      # noqa: BLE001
+        share = None
+    text = (f"Rs {value:,.0f} cr order, "
+            f"{ago} session{'s' if ago != 1 else ''} ago")
+    if share is not None:
+        # The share goes FIRST in the phrase, because it is the half
+        # that tells him whether to care. An order larger than the
+        # whole company is shown as it is -- that is the store saying
+        # the row is wrong, and hiding it would hide the most useful
+        # thing this measure does.
+        text = (f"Rs {value:,.0f} cr order = {share:.0f}% of the "
+                f"company, {ago} session{'s' if ago != 1 else ''} ago")
+    return {
+        "date": day,
+        "value_cr": value,
+        "sessions_ago": ago,
+        "headline": headline,
+        "pct_of_company": share,
+        "cap_basis": "free float" if share is not None else None,
+        "text": text,
+    }
+
+
+_NAME_NOISE = {"LIMITED", "LTD", "THE", "INDIA", "INDIAN", "CO",
+               "COMPANY", "CORP", "CORPORATION", "AND", "OF", "PVT",
+               "PRIVATE", "NEW", "GROUP"}
+
+
+def _still_reads_as_an_order(headline, value_cr):
+    """Would today's rules call this an order of this size?
+
+    See the note at the call site. Fails OPEN -- a classifier that
+    cannot be consulted must not silence a real cause.
+    """
+    try:
+        from core.stock_events import amount_in_crore, classify
+        kind, _scope = classify(str(headline or ""), has_symbol=True)
+        if kind != "ORDER":
+            return False
+        amount = amount_in_crore(str(headline or ""))
+    except Exception:                                      # noqa: BLE001
+        return True
+    if amount is None:
+        # The headline states no figure of its own. Welspun's does not
+        # -- it says "USD 1.8 BILLION" and the crore figure came from
+        # the conversion -- so this cannot be a refusal on its own.
+        return True
+    # Within a rupee or two of what was stored. A different number
+    # means the stored one came from somewhere else in the message.
+    return abs(float(amount) - float(value_cr or 0)) <= max(
+        1.0, float(value_cr or 0) * 0.02)
+
+
+_MATCHER = None
+
+
+def _matcher():
+    """The same matcher the events path uses, built once.
+
+    Deliberately not a private copy of the rules. Everything learned
+    about naming a company today lives in that matcher -- the word
+    tickers, the fund exclusion, the state names -- and a second
+    implementation here would drift from it within the week.
+    """
+    global _MATCHER
+    if _MATCHER is None:
+        from core.master_loader import MasterLoader
+        from core.telegram_feed import TelegramFeed
+        loader = MasterLoader()
+        loader.load()
+        _MATCHER = TelegramFeed(master_loader=loader)
+    return _MATCHER
+
+
+def _headline_names(symbol, headline, matcher=None):
+    """Does this headline actually name this company?
+
+    ---- ASKED OF THE LIVE MATCHER. 5 September 2026. ----
+
+    The first version looked for the ticker or a word of the company
+    name in the text, and passed two rows it should have refused:
+
+        LANDMARK  "we wish to inform the Exchange of a landmark..."
+        WEALTH    "HSBC joins PEs in race for Nuvama Wealth"
+
+    Both because the ticker IS an ordinary English word, which is the
+    fault _WORD_TICKERS has existed for since 6 August -- and a second
+    naming rule written here could not know that. So this asks the
+    matcher instead, and inherits every guard it has.
+
+    Old rows are why this is needed at all: the store still holds
+    events filed before those guards, and a sentence he READS must be
+    checked as it is drawn, not as it was stored.
+
+    Fails OPEN: if the matcher cannot be built, an unchecked sentence
+    is better than a lost one.
+    """
+    text = str(headline or "")
+    if not text.strip():
+        return False
+    name = str(symbol or "").upper()
+    try:
+        from core.stock_events import _for_matching
+        m = matcher or _matcher()
+        body = _for_matching(text)
+        found = set(m.symbols_in(body)) | set(m.names_in(body))
+    except Exception:                                      # noqa: BLE001
+        return True
+    return name in found
+
+
+def standing_causes(on=None, events_db=None, min_cr=None, days=None):
+    """{symbol: sentence} for every stock carrying a standing cause.
+
+    One pass, because the board draws this beside any symbol it shows
+    and asking per symbol would be 1,800 queries a cycle. Same rules as
+    standing_cause() -- the headline must name the company and must
+    still read as an order of that size today.
+    """
+    floor = STANDING_MIN_CR if min_cr is None else float(min_cr)
+    window = STANDING_DAYS if days is None else int(days)
+    today = on or datetime.now().date()
+    if isinstance(today, str):
+        try:
+            today = datetime.fromisoformat(today[:10]).date()
+        except ValueError:
+            today = datetime.now().date()
+    try:
+        conn = sqlite3.connect(events_db or EVENTS_DB)
+        rows = conn.execute(
+            "SELECT symbol, date(at), value_cr, headline FROM events "
+            "WHERE kind IN (%s) AND value_cr >= ? AND symbol IS NOT NULL "
+            "AND symbol != '' AND date(at) >= date(?, ?) "
+            "AND date(at) <= date(?) ORDER BY value_cr DESC, date(at) ASC"
+            % ",".join("?" * len(STANDING_KINDS)),
+            STANDING_KINDS + (floor, today.isoformat(),
+                              f"-{window} day", today.isoformat())
+        ).fetchall()
+        conn.close()
+    except Exception as exc:                               # noqa: BLE001
+        diagnostic(f"[MEMORY] standing_causes failed: {exc}")
+        return {}
+
+    out = {}
+    for symbol, day, value, headline in rows:
+        name = str(symbol or "").upper()
+        if not name or name in out:
+            continue                       # biggest first, so keep it
+        if not _headline_names(name, headline):
+            continue
+        if not _still_reads_as_an_order(headline, value):
+            continue
+        ago = _sessions_between(day, today)
+        if ago is None:
+            continue
+        out[name] = _sentence(name, day, value, headline, ago)
+    return out
+
+
+_SESSION_CACHE = {}
+
+
+def _sessions_cached(daily_db=None):
+    """The session list, read once.
+
+    ---- 4.7 SECONDS FOR 36 SENTENCES. 5 September 2026. ----
+
+    standing_causes() called _sessions_between() per row and that read
+    every distinct date out of daily_candles.db each time -- 36 full
+    scans of a 218 MB store to answer "how many sessions ago". The
+    board rebuilds on a one-second loop; five seconds inside it is not
+    a slow feature, it is a broken one.
+
+    The list only changes when a session ends, so it is cached under
+    the store's own path. See core/board_rebuild -- the same lesson,
+    twice.
+    """
+    key = daily_db or DAILY_DB
+    if key not in _SESSION_CACHE:
+        _SESSION_CACHE[key] = _sessions(daily_db)
+    return _SESSION_CACHE[key]
+
+
+def _sessions_between(day, today, daily_db=None):
+    """Trading sessions from `day` to `today`, or None if unknown.
+
+    Falls back to calendar days when the candle store cannot be read --
+    an approximate age beats no sentence at all, and it is only ever
+    displayed.
+    """
+    try:
+        sessions = _sessions_cached(daily_db)
+        after = [s for s in sessions
+                 if day < s <= today.isoformat()]
+        if after:
+            return len(after)
+    except Exception:                                      # noqa: BLE001
+        pass
+    try:
+        when = datetime.fromisoformat(str(day)[:10]).date()
+        return max(0, (today - when).days)
+    except Exception:                                      # noqa: BLE001
+        return None
 
 
 def sector_shock(sector=None, since=None, limit=20, db_path=None):
