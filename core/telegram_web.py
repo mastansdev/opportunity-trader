@@ -233,7 +233,13 @@ class TelegramWebReader:
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             return response.read().decode("utf-8", errors="replace")
 
-    def fetch(self, channel, limit=30, before=None):
+    def fetch(self, channel, limit=30, before=None, ids=None):
+        # `ids` exists so this stays a drop-in for the API reader. The
+        # public web view serves pages and cannot answer "give me post
+        # 3741", so it says so instead of returning a page that was not
+        # asked for. See core/telegram_client.FallbackReader.fetch().
+        if ids:
+            return []
         """Recent messages from one public channel.
 
         `channel` is the handle without the @ -- "earnings_pulse".

@@ -616,6 +616,26 @@ class TelegramFeed:
                 " filing_url TEXT, photos TEXT, url TEXT, kind TEXT,"
                 " is_calendar INTEGER DEFAULT 0,"
                 " PRIMARY KEY (channel, message_id))")
+            # ---- WHAT WAS ASKED FOR AND NEVER CAME. 5 Sep 2026. ----
+            #
+            # Telegram numbers SERVICE posts in the same sequence as
+            # real ones -- somebody joins, a message is pinned, the
+            # channel photo changes -- and the reader skips anything
+            # with no text and no picture. Those ids can never be
+            # stored, so a gap filler with no memory would ask for the
+            # same dead numbers on every run, for ever, at somebody
+            # else's server.
+            #
+            # Three tries and the id is left alone. That is enough for
+            # a genuine post that was rate-limited on the first two
+            # attempts, and it stops the pointless traffic that would
+            # otherwise look exactly like a bot hammering an API --
+            # which is the one thing he has said must never happen.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS gap_attempts ("
+                " channel TEXT, message_id INTEGER, tries INTEGER,"
+                " first_try TEXT, last_try TEXT, outcome TEXT,"
+                " PRIMARY KEY (channel, message_id))")
             conn.commit()
             self._migrate(conn)
             conn.close()
@@ -730,6 +750,47 @@ class TelegramFeed:
     _NAME_SUFFIX = {"LIMITED", "LTD", "PVT", "PRIVATE", "CORP",
                     "CORPORATION", "COMPANY", "CO", "AND", "THE", "OF"}
 
+    # ==============================================================
+    # A STATE IS NOT A COMPANY.  5 September 2026.
+    # ==============================================================
+    #
+    #     "for me all info must be tagged properly & never mis ,
+    #      duplicate , thats it"                    -- the operator
+    #
+    # names_in() recognises a company by the FIRST TWO WORDS of its
+    # name, and two words is normally a good safeguard -- "Aarti" alone
+    # would tag half the exchange. It fails completely when those two
+    # words are a place:
+    #
+    #     TAMIL NADU NEWSPRINT & PAPERS   ->  pair (TAMIL, NADU)
+    #
+    # so ANY message mentioning the state named the paper mill. Counted
+    # on the store: 18 events filed against TNPL, and EIGHT of them are
+    # the state --
+    #
+    #     "Ops at arm Del Monte Food, Tamil Nadu plant halted"  SUNDROP
+    #     "Network partner stores in Rajasthan, Tamil Nadu"     OLAELEC
+    #     "US FDA conducted inspection at arm in Tamil Nadu"    CAPLIN
+    #     "CO SECURES 119.85 CRORE ORDER FROM NHAI FOR ..."     BRGIL
+    #
+    # Every one of those is a reason on a stock that had no news. A
+    # false reason is worse than a missing one: it opens the door -- a
+    # published reason is MANDATORY before the bot will even evaluate a
+    # stock -- so a paper mill was being put in front of the ranker on
+    # days when somebody else built a road.
+    #
+    # Where the first two words are a place, the THIRD word is required.
+    # TAMIL NADU NEWSPRINT still matches on all three; "Tamil Nadu
+    # plant" no longer matches anything. A company whose name is ONLY a
+    # place keeps its pair -- there is no third word to ask for, and
+    # nothing else it could be.
+    _PLACE_PAIRS = frozenset({
+        ("TAMIL", "NADU"), ("ANDHRA", "PRADESH"), ("MADHYA", "PRADESH"),
+        ("UTTAR", "PRADESH"), ("HIMACHAL", "PRADESH"),
+        ("ARUNACHAL", "PRADESH"), ("WEST", "BENGAL"),
+        ("JAMMU", "KASHMIR"), ("NEW", "DELHI"), ("NAVI", "MUMBAI"),
+    })
+
     def _name_index(self):
         """Two ways to recognise a company by the name on a card.
 
@@ -760,7 +821,7 @@ class TelegramFeed:
         """
         if self._names is not None:
             return self._names
-        pairs, solo = {}, {}
+        pairs, solo, triples = {}, {}, {}
         if self.master_loader is not None:
             try:
                 symbols = self.master_loader.all_symbols(include_blocked=True)
@@ -829,7 +890,13 @@ class TelegramFeed:
                 if not words:
                     continue
                 if len(words) >= 2:
-                    pairs.setdefault((words[0], words[1]), symbol)
+                    head = (words[0], words[1])
+                    if head in self._PLACE_PAIRS and len(words) >= 3:
+                        # See _PLACE_PAIRS. The pair is a state, so it
+                        # names nothing on its own.
+                        triples.setdefault(head + (words[2],), symbol)
+                    else:
+                        pairs.setdefault(head, symbol)
                 elif len(tokens) == 1 and len(words[0]) >= 5:
                     # The whole name, not a rare fragment of a longer
                     # one. Five characters because shorter than that is
@@ -884,7 +951,7 @@ class TelegramFeed:
                                 (tokens_raw[0], tokens_raw[1]), symbol)
                         continue
                     solo.setdefault(words[0], symbol)
-        self._names = {"pairs": pairs, "solo": solo}
+        self._names = {"pairs": pairs, "solo": solo, "triples": triples}
         return self._names
 
     @staticmethod
@@ -905,7 +972,8 @@ class TelegramFeed:
             return []
         index = self._name_index()
         pairs, solo = index.get("pairs") or {}, index.get("solo") or {}
-        if not pairs and not solo:
+        triples = index.get("triples") or {}
+        if not pairs and not solo and not triples:
             return []
         every = re.findall(r"[A-Za-z]{3,}", str(text).upper())
         words = [w for w in every if w not in self._NAME_SUFFIX]
@@ -927,6 +995,18 @@ class TelegramFeed:
                     if symbol not in found and self._like(first, a) \
                             and self._like(second, b):
                         found.append(symbol)
+        # THREE words, for the names whose first two are a state. See
+        # _PLACE_PAIRS -- "Tamil Nadu plant" must match nothing, and
+        # "Tamil Nadu Newsprint" must still match TNPL.
+        if triples:
+            for source in (words, every):
+                for a, b, c in zip(source, source[1:], source[2:]):
+                    for key, symbol in triples.items():
+                        if symbol in found:
+                            continue
+                        if self._like(a, key[0]) and self._like(b, key[1]) \
+                                and self._like(c, key[2]):
+                            found.append(symbol)
         for word in words:
             symbol = solo.get(word)
             if symbol and symbol not in found:
@@ -1931,6 +2011,235 @@ class TelegramFeed:
             # Not knowing the mark means reading a page we may already
             # hold. That is slower. Losing the channel is wrong.
             return None
+
+    # ==============================================================
+    # NOTHING MISSED -- THE HOLES, BY NAME.  5 September 2026.
+    # ==============================================================
+    #
+    #     "for me all info must be tagged properly & never mis ,
+    #      duplicate , thats it"                      -- the operator
+    #
+    # Counted on the store that morning: 183 posts published and never
+    # collected. Every long run of them was a weekend --
+    #
+    #     RedboxGlobal India   76 missing   29 Aug 11:04 -> 31 Aug 18:07
+    #     Earnings 360         10 missing   26 Aug 07:56 -> 27 Aug 07:10
+    #     Earnings Pro          9 missing   26 Aug 07:35 -> 27 Aug 07:10
+    #     Earnings Pulse        7 missing   26 Aug 03:38 -> 27 Aug 10:08
+    #
+    # -- the laptop off from Saturday to Monday, and catch_up() unable
+    # to close a hole that sits BELOW the newest id it holds. It walks
+    # backwards and stops after two pages that add nothing, and the page
+    # on either side of a weekend hole is ground already held, so it
+    # stopped every time with the hole still open. Four weeks of that.
+    #
+    # A page walk cannot ask the question. This can: the store knows it
+    # holds 3711 and 3788 and nothing between, so it asks for 3712..3787
+    # by name. One request, up to a hundred posts, nothing walked past.
+
+    def missing_ids(self, channel_name, within_hours=None, cap=200):
+        """Post ids published on this channel that were never collected.
+
+        A hole is a run of numbers between two posts we DO hold. Only
+        holes inside the retention window are reported: `_prune()` keeps
+        `keep_hours`, and fetching a post that the same run deletes
+        would be work done to throw away.
+
+        Ids already asked for three times are left out -- see the
+        gap_attempts note in _ensure_db().
+        """
+        window = self.keep_hours if within_hours is None else within_hours
+        try:
+            with self._lock:
+                conn = sqlite3.connect(self.db_path)
+                rows = conn.execute(
+                    "SELECT CAST(message_id AS INTEGER), at FROM messages "
+                    "WHERE channel = ? AND message_id IS NOT NULL "
+                    "ORDER BY 1", (channel_name,)).fetchall()
+                try:
+                    spent = {int(r[0]) for r in conn.execute(
+                        "SELECT message_id FROM gap_attempts "
+                        "WHERE channel = ? AND tries >= 3",
+                        (channel_name,))}
+                except sqlite3.Error:
+                    spent = set()
+                conn.close()
+        except Exception:                                  # noqa: BLE001
+            # Not knowing the holes means not filling them this run.
+            # It must never mean losing the channel.
+            return []
+
+        # core/feed_clock.to_ist() is the ONE converter in this codebase
+        # and the reason is written out beside _all_older_than(): the
+        # stored stamps carry "+00:00", and an arm that discards the
+        # offset instead of applying it makes a live feed look five and
+        # a half hours stale. Naive after, because the cutoff is naive.
+        cutoff = datetime.now() - timedelta(hours=window)
+        held = []
+        for mid, at in rows:
+            if mid is None:
+                continue
+            try:
+                from core.feed_clock import to_ist
+                moment = to_ist(at)
+                when = None if moment is None else moment.replace(tzinfo=None)
+            except Exception:                              # noqa: BLE001
+                when = None
+            held.append((int(mid), when))
+        held.sort()
+
+        # ---- A HOLE THIS CHANNEL COULD NOT HAVE PUBLISHED IS ----
+        #      NOT A HOLE. 5 September 2026.
+        #
+        # Two holes, both real numbers, one of them meaningless:
+        #
+        #   RedboxGlobal India   76 ids over 55 hours   346 posts on file
+        #   WLPulseBot           57 ids over 33 hours     3 posts on file
+        #
+        # The first is a weekend. RedboxGlobal publishes about 43 posts
+        # a day, so 55 hours of silence should hold roughly a hundred --
+        # 76 fits, and every one of them is a post the bot never read.
+        #
+        # The second is not a gap at all. @WLPulseBot is a BOT, and a
+        # bot chat numbers every message in a shared conversation, most
+        # of them nothing to do with this feed. It has published three
+        # things in three days. Fifty-seven missing posts in a day and a
+        # half is not a channel that went quiet, it is id numbers that
+        # were never this channel's to begin with. Asking Telegram for
+        # them is fifty-seven questions with no answer, on every run --
+        # exactly the traffic pattern that gets a reader rate-limited,
+        # and he has been clear that must never happen.
+        #
+        # So each channel is measured against ITSELF: its own posts, its
+        # own days, its own rate. Nothing is pooled across channels --
+        # Day Trader Telugu posts ninety a day and Earnings Pulse three,
+        # and one number for both would be wrong for both.
+        #
+        # Three times the expected count is the bar, which is generous
+        # on purpose: a results-day evening genuinely does run several
+        # times the average, and the cost of asking is one request while
+        # the cost of not asking is a post lost for good.
+        # THREE posts, not five. WLPulseBot has published three things
+        # in three days and it is the exact channel this guard is for --
+        # a bar it cannot clear leaves it unguarded. Three points make a
+        # shaky rate, which is why the bar above it is three TIMES the
+        # expected count rather than the count itself.
+        rate_per_hour = None
+        dated = [w for _m, w in held if w is not None]
+        if len(dated) >= 3:
+            hours = (max(dated) - min(dated)).total_seconds() / 3600.0
+            if hours >= 1.0:
+                rate_per_hour = len(held) / hours
+
+        gaps = []
+        for (a, at_a), (b, at_b) in zip(held, held[1:]):
+            if b - a <= 1:
+                continue
+            # The OLDER edge decides. A hole whose older side is already
+            # past the retention edge is a hole in history, not a hole
+            # in the news.
+            if at_a is not None and at_a < cutoff:
+                continue
+            size = b - a - 1
+            # Small holes are always asked about. One or two missing ids
+            # is the ordinary shape of a service message -- somebody
+            # joined, a post was pinned -- and one question settles it.
+            if size > 3 and rate_per_hour and at_a and at_b:
+                span = (at_b - at_a).total_seconds() / 3600.0
+                could_have = max(1.0, rate_per_hour * span)
+                if size > could_have * 3:
+                    diagnostic(
+                        f"[GAPFILL] {channel_name}: ids {a + 1}-{b - 1} "
+                        f"({size}) span {span:.1f}h, and this channel "
+                        f"publishes {rate_per_hour:.1f}/h. Not its post "
+                        f"numbers -- not asking.")
+                    continue
+            for mid in range(a + 1, b):
+                if mid not in spent:
+                    gaps.append(mid)
+            if len(gaps) >= cap:
+                break
+        return gaps[:cap]
+
+    def _note_gap_attempt(self, channel_name, ids, arrived):
+        """Remember what was asked for, so a dead id is asked for at
+        most three times. `arrived` is the set of ids that came back."""
+        if not ids:
+            return
+        now = datetime.now().isoformat(timespec="seconds")
+        try:
+            with self._lock:
+                conn = sqlite3.connect(self.db_path)
+                for mid in ids:
+                    got = int(mid) in arrived
+                    conn.execute(
+                        "INSERT INTO gap_attempts "
+                        "(channel, message_id, tries, first_try, last_try,"
+                        " outcome) VALUES (?, ?, 1, ?, ?, ?) "
+                        "ON CONFLICT(channel, message_id) DO UPDATE SET "
+                        "tries = tries + 1, last_try = excluded.last_try, "
+                        "outcome = excluded.outcome",
+                        (channel_name, int(mid), now, now,
+                         "arrived" if got else "nothing there"))
+                conn.commit()
+                conn.close()
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[GAPFILL] Could not record the attempt: {exc}")
+
+    def fill_gaps(self, cap_per_channel=200):
+        """Ask for every missing post by name. Returns how many arrived.
+
+        Never raises. A gap fill that fails leaves the store exactly as
+        it was, and the holes are still there to be asked for next run.
+        """
+        if self.client is None:
+            return 0
+        filled = 0
+        for channel in self.channels:
+            name = channel.get("name") or channel.get("handle")
+            handle = channel.get("handle") or name
+            if not handle:
+                continue
+            wanted = self.missing_ids(name, cap=cap_per_channel)
+            if not wanted:
+                continue
+            decision(f"    {str(name)[:22]:22} {len(wanted):3} post(s) "
+                     f"missing -- asking for them by id")
+            got = []
+            # A hundred at a time is Telegram's own batch size for this
+            # request. Asking for more in one call is not faster and is
+            # the shape of thing that draws a rate limit.
+            for start in range(0, len(wanted), 100):
+                batch = wanted[start:start + 100]
+                try:
+                    got.extend(self.client.fetch(handle, ids=batch) or [])
+                except TypeError:
+                    # A reader with no `ids` argument -- the public web
+                    # view, or a stub. Nothing to do here; say it once.
+                    diagnostic(f"[GAPFILL] {name}: this reader cannot ask "
+                               f"for named posts. Holes left open.")
+                    got = []
+                    break
+                except Exception as exc:                   # noqa: BLE001
+                    warn(f"[GAPFILL] {name}: {str(exc)[:80]}. "
+                         f"Keeping what arrived.")
+                    break
+            arrived = {int(m["id"]) for m in got
+                       if str(m.get("id") or "").isdigit()}
+            self._note_gap_attempt(name, wanted, arrived)
+            if got:
+                # skip_known=False for the same reason catch_up() uses
+                # it: these ids sit BELOW the newest id on file, and the
+                # skip is keyed on that.
+                added = self._store(channel, got, skip_known=False)
+                filled += added
+                decision(f"    {str(name)[:22]:22} {added:3} recovered, "
+                         f"{len(wanted) - len(arrived):3} were never posts "
+                         f"(service messages or deleted)")
+        if filled:
+            decision(f"[GAPFILL] Recovered {filled} post(s) that had been "
+                     f"published and never collected.")
+        return filled
 
     def catch_up(self, max_pages=CATCH_UP_PAGES):
         """Read backwards until we reach what we already have.

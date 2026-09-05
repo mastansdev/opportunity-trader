@@ -169,7 +169,7 @@ def test_the_rating_words_are_not_mistaken_for_companies(rows):
 def test_the_store_is_never_handed_a_grade_from_this_card():
     src = open("core/stock_events.py", encoding="utf-8").read()
     block = src[src.find("if is_recap_card(body):"):]
-    block = block[:block.find("if is_digest(body):")]
+    block = block[:block.find("if is_digest(body, companies=")]
     assert '"grade": None' in block
 
 

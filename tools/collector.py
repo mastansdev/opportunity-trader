@@ -297,6 +297,37 @@ def main(once=False, catchup=True):
             except Exception as exc:                       # noqa: BLE001
                 warn(f"  Catch-up failed ({exc}). Live collection is "
                      f"unaffected.")
+            # ---- AND THEN THE HOLES IT CANNOT REACH. 5 Sep 2026. ----
+            #
+            #     "for me all info must be tagged properly & never mis ,
+            #      duplicate , thats it"              -- the operator
+            #
+            # catch_up() walks backwards and stops after two pages that
+            # add nothing new. That closes a gap at the EDGE of what is
+            # held and cannot close one in the MIDDLE, because the pages
+            # either side of a weekend hole are ground already held.
+            #
+            # Counted the morning he said it: 183 posts published and
+            # never collected, and every long run of them was a weekend
+            # -- RedboxGlobal India alone had 76 missing between Saturday
+            # 29 August and Monday 31 August, sitting there for a week
+            # while catch_up() reported itself finished on every run.
+            #
+            # fill_gaps() asks a different question: the store knows it
+            # holds 3711 and 3788 and nothing between, so it asks for
+            # those posts BY NAME. One request per hundred, nothing
+            # walked past, and an id that never arrives is asked for
+            # three times and then left alone -- see
+            # core/telegram_feed.missing_ids().
+            #
+            # It runs AFTER catch_up() on purpose: the walk is what
+            # brings in everything published since the last run, and
+            # this is only for what the walk stepped over.
+            try:
+                feed.fill_gaps()
+            except Exception as exc:                       # noqa: BLE001
+                warn(f"  Gap fill failed ({exc}). Live collection is "
+                     f"unaffected.")
 
         failures = 0
         passes = 0

@@ -253,7 +253,7 @@ def test_the_row_never_repeats_the_publishers_grade_as_evidence():
     what the support tally exists to prevent."""
     src = open("core/stock_events.py", encoding="utf-8").read()
     block = src[src.find("if is_sentiment_page(body):"):]
-    block = block[:block.find("if is_digest(body):")]
+    block = block[:block.find("if is_digest(body, companies=")]
     assert '"grade": None' in block
 
 

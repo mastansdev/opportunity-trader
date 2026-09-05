@@ -483,6 +483,29 @@ DIGEST = re.compile(r"recap|daily highlights|stocks in (news|focus)|"
 _BULLETS = re.compile(r"[•]\s+|^\s*[\-\*]\s+", re.M)
 _TICKERS = re.compile(r"#[A-Z][A-Z0-9&\-]{2,}")
 
+# ---- A ROUNDUP STARTS EACH LINE WITH A NEW SUBJECT ----
+#                                        5 September 2026.
+#
+# Day Trader Telugu's morning roundup, as the reader sees it:
+#
+#     Stocks in News
+#     KPI Green - CFO Salim Yahoo ceases as CFO and KMP from Sept 2
+#     KSH Intl. - Received Unit 3 factory licence renewal till 2030
+#     FACT - Received communication from the Chemicals Ministry
+#
+# Three companies, three stories, and NOT ONE of the signals already
+# here fires: no bullets, no #tickers, no emoji. Measured on the store,
+# eight such messages were caught by the heading alone -- "stocks in
+# news" -- which is the thread the whole thing was hanging by.
+#
+# This counts the shape instead: a short Capitalised name, a dash or a
+# colon, then a real sentence. Two of them is a roundup whatever the
+# heading says, and a card has none -- measured, 0 of 108.
+_LEDES = re.compile(
+    r"^[ \t]*([A-Z][A-Za-z&.'()/-]*(?:[ ][A-Z0-9][A-Za-z&.'()/-]*){0,4})"
+    r"[ \t]*[-\u2013\u2014:][ \t]+(?=[A-Za-z(])(?=.{12,})",
+    re.M)
+
 # News Pulse separates stories with a leading emoji rather than a bullet
 # or a heading, so a single post can carry six unrelated items:
 #
@@ -534,20 +557,88 @@ KINDS = ("RESULT", "ORDER", "FILING", "NEWS", "FLOW", "CALENDAR",
          "MACRO", "OPINION", "NOISE")
 
 
-def is_digest(text):
+def is_digest(text, companies=None):
     """More than one story in one message.
 
-    Three signals, any of which is enough: it calls itself a recap, it
-    is a bullet list, or it names three or more different tickers. The
-    last one is the reliable one -- a single story is about a single
-    company, whatever formatting it arrives in.
+    Four signals, any of which is enough: it calls itself a recap, it is
+    a bullet list, it separates stories with emoji, or two of its lines
+    START a new subject ("KPI Green - CFO ceases"). Plus the oldest and
+    most reliable: three or more different tickers.
+
+    ==============================================================
+    ONE COMPANY IS NOT A ROUNDUP.  5 September 2026.
+    ==============================================================
+
+        "for me all info must be tagged properly & never mis ,
+         duplicate , thats it"                    -- the operator
+
+    `companies` is how many companies the caller RESOLVED in this
+    message. Given it, a message about ONE company is never a roundup,
+    whatever it looks like -- and that closes a trap that was one
+    settings change away from going off.
+
+    THE TRAP. Day Trader Telugu posts single-company cards that the
+    picture-reader currently transcribes as:
+
+        STSCK IN NEWS  VEDANTA  e Reappoints Arun Misra as Executive
+        Director  e Vedanta Semiconductors...
+
+    108 of them on record. Two things about that text are accidents:
+    "STSCK" is a misread of STOCKS, and those "e" characters are
+    bullets the reader could not resolve. Both accidents are the only
+    reason the cards survive today -- "stocks in news" IS in DIGEST,
+    and two bullets IS a roundup by the rule above.
+
+    Improve the reading -- one API key does it -- and the heading and
+    the bullets both resolve, all 108 become "roundups", and every
+    single-company story from that channel is refused. Silently. No
+    error, no log line. Vedanta, Tata Power, JSW Energy, United
+    Spirits, Zee: gone from the door that decides what the bot may even
+    look at.
+
+    WHY THE COUNT IS THE RIGHT TEST. Measured through the live path on
+    5 September, with the refusal disabled so it reported what it FOUND:
+
+        the 9 roundups   ->  8 of them name 0 companies, 1 names 2
+        the 108 cards    ->  1 company each
+
+    A card names its company once, at the top, and every bullet after
+    is about that same company. Bullets, headings and emoji are
+    decoration; the number of subjects is the thing itself.
+
+    THE TWO GUARDS ON THE ESCAPE, because a roundup can resolve to one
+    company by accident -- eight stories of which only SWIGGY is a name
+    the bot knows, which is exactly how a Crocs revenue figure was once
+    filed against Swiggy:
+
+      1. no lede structure. Two lines that each start a new subject
+         means several stories even if only one name resolved.
+      2. the company must be named EARLY -- in the first 120
+         characters. A card's subject is its heading. A name buried in
+         the middle of a list is a mention, not a subject.
+
+    Without `companies` this behaves exactly as it did before, so
+    tools/ and every existing caller are unaffected.
     """
     body = text or ""
+    # EXACTLY ONE, never zero. A message the bot cannot name a company
+    # in is not a card -- it is a message about something that could not
+    # be identified, and tests/test_expectation_page.py caught the
+    # difference the moment this was written too loosely: a recap of
+    # #AAA, #BBB and #CCC resolves to NO master symbol, and letting it
+    # through filed "Daily Highlights #AAA wins an order #BBB reports
+    # results" as a single ORDER event with no company on it. Zero is
+    # not one. The escape exists to protect a subject, so there has to
+    # be a subject.
+    if companies == 1 and len(_LEDES.findall(body)) < 2:
+        return False
     if DIGEST.search(body):
         return True
     if len(_BULLETS.findall(body)) >= 2:
         return True
     if len(_STORY_MARKS.findall(body)) >= 3:
+        return True
+    if len(_LEDES.findall(body)) >= 2:
         return True
     return len(set(_TICKERS.findall(body))) >= 3
 
@@ -2041,14 +2132,22 @@ def _events_from_message(matcher, typed, read, body, at, channel,
     # A digest carries several stories and the extractor pairs the
     # wrong number with the wrong company. A wrong figure is worse
     # than none.
-    if is_digest(body):
-        return []
-
+    #
+    # ---- COUNT THE COMPANIES BEFORE JUDGING. 5 September 2026. ----
+    #
+    # This asked is_digest() FIRST and resolved the companies after, so
+    # the one fact that actually settles the question -- how many
+    # companies is this about -- was not available when the question was
+    # asked. Swapping the two lines is the whole change; see the note in
+    # is_digest() for the 108 single-company cards it saves.
     try:
         symbols = list(dict.fromkeys(
             matcher.symbols_in(_for_matching(body))
             + matcher.names_in(_for_matching(body))))
     except Exception:                                      # noqa: BLE001
+        return []
+
+    if is_digest(body, companies=len(symbols)):
         return []
 
     # ---- ONE CARD IS ABOUT ONE COMPANY. 2 August 2026. ----

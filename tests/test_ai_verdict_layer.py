@@ -239,7 +239,7 @@ def test_the_algo_grade_is_not_stored_a_second_time():
     one opinion as two sources."""
     src = open("core/stock_events.py", encoding="utf-8").read()
     block = src[src.find("if is_verdict_card(body):"):]
-    block = block[:block.find("if is_digest(body):")]
+    block = block[:block.find("if is_digest(body, companies=")]
     assert '"grade": None' in block
 
 

@@ -307,5 +307,5 @@ def test_the_card_is_read_before_the_digest_rule_drops_it():
     wrong company -- it was silently dropping every concall card."""
     src = open("core/stock_events.py", encoding="utf-8").read()
     concall_at = src.find("if is_concall_card(body):")
-    digest_at = src.find("if is_digest(body):")
+    digest_at = src.find("if is_digest(body, companies=")
     assert 0 < concall_at < digest_at

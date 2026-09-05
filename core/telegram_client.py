@@ -216,8 +216,14 @@ class TelethonReader:
             f"channel use its exact title as shown in the app, and make "
             f"sure this account has joined it.")
 
-    def fetch(self, channel, limit=30, before=None, since_id=None):
+    def fetch(self, channel, limit=30, before=None, since_id=None,
+              ids=None):
         """Recent messages from one channel, newest first.
+
+        `ids` asks for NAMED POSTS and nothing else. See the
+        note beside the kwargs below -- it is what fills a hole
+        in the middle of a range, which no page walk can do
+        reliably.
 
         `since_id` is the newest post id already on file. Telegram
         filters on it SERVER-SIDE, so a post we have read is never
@@ -252,12 +258,48 @@ class TelethonReader:
         # Consecutive image timeouts on THIS channel, and the flag that
         # stops asking once Telegram has made its position clear.
         timeouts, stalled = 0, False
-        kwargs = {"limit": limit} if limit else {}
-        if before:
+        # ==========================================================
+        # ASK FOR THE POSTS THAT ARE MISSING, BY NAME.  5 Sep 2026.
+        # ==========================================================
+        #
+        #     "for me all info must be tagged properly & never mis ,
+        #      duplicate , thats it"                  -- the operator
+        #
+        # Measured on the store the day he said it, 183 posts had been
+        # published and never collected. They were not scattered: they
+        # sat in runs, and every run was a weekend.
+        #
+        #     RedboxGlobal India   76 missing, 29 Aug 11:04 -> 31 Aug 18:07
+        #     Earnings 360         10 missing, 26 Aug 07:56 -> 27 Aug 07:10
+        #     Earnings Pro          9 missing, 26 Aug 07:35 -> 27 Aug 07:10
+        #     Business Pulse        9 missing, 27 Jul 12:30 -> 29 Jul 09:32
+        #
+        # catch_up() walks BACKWARDS a page at a time and stops after two
+        # pages that add nothing. That closes a gap at the END of what we
+        # hold. It cannot reliably close one in the MIDDLE, because the
+        # page either side of the hole is ground we already have -- so
+        # the walk declares itself finished while the hole is still open.
+        # That is not a tuning problem. A page walk is the wrong shape of
+        # question.
+        #
+        # The right question is the one the store can already answer
+        # exactly: ids 3712 to 3787 are missing, fetch those. Telegram
+        # answers it in ONE request for up to a hundred posts, sends
+        # nothing we already hold, and walks past nothing.
+        #
+        # `ids` therefore overrides everything else. A request for named
+        # posts is not a page and has no limit, no offset and no
+        # watermark -- mixing them would silently return something other
+        # than what was asked for.
+        if ids:
+            kwargs = {"ids": [int(i) for i in ids]}
+        else:
+            kwargs = {"limit": limit} if limit else {}
+        if before and not ids:
             # Telethon counts BACKWARDS from an id, which is what the
             # web reader's ?before= does.
             kwargs["offset_id"] = int(before)
-        if since_id:
+        if since_id and not ids:
             # ---- IT ASKED FOR WHAT IT ALREADY HAD. 30 Aug 2026. ----
             #
             #     "incase daytrader posted img at 30/08/2026 07:20:05 &
@@ -307,6 +349,12 @@ class TelethonReader:
             if not before:
                 kwargs["reverse"] = True
         for message in client.iter_messages(entity, **kwargs):
+            # A named id that has been DELETED comes back as None. That
+            # is a real answer -- the post is gone, not missing -- and
+            # skipping it here is what stops the gap filler asking for
+            # it again on every run.
+            if message is None:
+                continue
             text = getattr(message, "message", None) or ""
             photo = getattr(message, "photo", None)
             if not text and photo is None:
@@ -587,8 +635,21 @@ class FallbackReader:
         # Channels told about once, not every ninety seconds.
         self._no_web_view = set()
 
-    def fetch(self, channel, limit=30, before=None, since_id=None):
+    def fetch(self, channel, limit=30, before=None, since_id=None,
+              ids=None):
         handle = channel if isinstance(channel, str) else str(channel)
+        # ---- THE WEB VIEW CANNOT ANSWER THIS ONE. 5 Sep 2026. ----
+        #
+        # t.me/s/<channel> serves pages, not posts. There is no way to
+        # ask it for id 3741 and nothing else. A gap fill that silently
+        # fell back to it would return a PAGE and store whatever was on
+        # it, which is the opposite of "ask for exactly what is
+        # missing" -- so the request is refused rather than approximated.
+        # The caller treats an empty answer as "not filled this run",
+        # which is true and harmless: the hole is still in the store and
+        # the next run with a working API asks again.
+        if ids and self.primary is None:
+            return []
         if self.primary is not None:
             # ---- "DOES NOT TAKE THAT ARGUMENT" IS NOT "FAILED". ----
             #      30 August 2026.
@@ -604,13 +665,24 @@ class FallbackReader:
             # cannot take it is retried without it rather than
             # written off.
             extra = {"since_id": since_id} if since_id else {}
+            if ids:
+                # Named posts are not a page. Nothing else may travel
+                # with the request -- see TelethonReader.fetch().
+                extra = {"ids": list(ids)}
             try:
                 try:
+                    if ids:
+                        return self.primary.fetch(handle, **extra)
                     return self.primary.fetch(handle, limit=limit,
                                               before=before, **extra)
                 except TypeError:
                     if not extra:
                         raise
+                    if ids:
+                        # An older reader with no `ids` argument. Filling
+                        # the hole is not possible; guessing at it with a
+                        # page is worse than leaving it open.
+                        return []
                     return self.primary.fetch(handle, limit=limit,
                                               before=before)
             except Exception as exc:                       # noqa: BLE001
