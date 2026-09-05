@@ -436,9 +436,44 @@ OPINION = re.compile(r"brokerage call|stock pick|recommend|target price|"
                      r"'?(buy|sell|hold|underperform|outperform)'? rating", re.I)
 
 # More than one story in one message. See the module docstring.
+# ---- A SECTOR NOTE IS ABOUT THE MARKET, NOT A COMPANY. ----
+#                                     5 September 2026.
+#
+#     "this 'SECTORS TO WATCH OMCs, Paint, Aviation...' statement is
+#      generalised one which suit the whole market regime. if war news
+#      or trump statement & escalation then whole market regime will
+#      shift & crude price surge damages the sectors mentioned omcs,
+#      paints, aviation. if de-escalates this statement is positive.
+#      whats so complex in this?"                 -- the operator
+#
+# Nothing, and the publisher says so in the heading. This message:
+#
+#     SECTORS TO WATCH OMCs, Paint, Aviation-Oil Declines For 3rd
+#     Session  Cochin Shipyard, Mazgaon Dock, GRSE-India plans to add
+#     100 new vessels  Block Deal Today-Groww, Welspun Corp...
+#
+# is three stories about a dozen companies, and it was filed as NEWS
+# against COCHINSHIP, ATULAUTO, ASHOKLEY and WELCORP -- one event
+# each, as though somebody had published something about that company.
+#
+# is_digest() missed it because the companies are named in plain
+# English rather than as #TICKERS, so the three-ticker test found
+# none, and "sectors to watch" was not among the headings that mark a
+# roundup. Six events across four stocks.
+#
+# WHY IT MATTERS BEYOND SIX ROWS: a regime note is not evidence about
+# one company. Crude rising is bad for OMCs, paints and aviation
+# TOGETHER, and good for them together when it falls. Reading it as
+# "something was published about WELCORP" is the same mistake as
+# reading a takeover as a promoter dumping stock -- text about the
+# market, filed as text about a company.
+#
+# A single-company story is untouched: "STSCK IN NEWS WELSPUN CORP Co
+# & Perma-Pipe sign MoU" carries no roundup heading and still files.
 DIGEST = re.compile(r"recap|daily highlights|stocks in (news|focus)|"
                     r"top \d+|\bhighlights\b|earnings & results|"
-                    r"editors'? *picks|the week ahead", re.I)
+                    r"editors'? *picks|the week ahead|"
+                    r"sectors? to watch", re.I)
 
 # A bullet list is a digest whatever it calls itself. The first run
 # recorded "Crocs Inc. reported Q2 FY26 revenue of $1.18 billion" against
