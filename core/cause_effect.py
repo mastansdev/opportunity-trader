@@ -123,6 +123,24 @@ CREATE TABLE IF NOT EXISTS cause_effect (
     threat_20d  REAL,
     subject_10d REAL,
     subject_20d REAL,
+    -- ---- VOLUME IS THE MAGNITUDE. 5 September 2026. ----
+    --
+    --     "volume tells us the magnitue. the only thing markets can
+    --      grab without ask is volume & order flow pressure on which
+    --      side."                              -- the operator
+    --
+    -- Two order wins sit in this store looking identical:
+    --
+    --     WELCORP    21 Aug   Rs 15,840 cr   next day  +4.21%
+    --     ANTELOPUS   1 Sep   onshore block  next day +20.00%
+    --
+    -- ANTELOPUS traded 12,446,135 shares that day against a normal of
+    -- about 50,000 -- 262 TIMES. Welspun did not. The headlines cannot
+    -- tell them apart and the volume can, so the volume is stored with
+    -- the cause. It is measured against the stock's OWN prior median,
+    -- never against another stock.
+    vol_x       REAL,
+    vol_x_next  REAL,
     threat_n    INTEGER,
     headline    TEXT,
     UNIQUE(date, symbol, kind, headline)
@@ -152,6 +170,54 @@ def _sessions(daily_db=None):
             "SELECT DISTINCT date FROM daily_bars ORDER BY date")]
     finally:
         conn.close()
+
+
+VOLUME_NORMAL_DAYS = 20      # what "normal" means for one stock
+
+
+def _volumes(symbols, daily_db=None):
+    """{symbol: [(date, volume), ...]} in date order."""
+    if not symbols:
+        return {}
+    conn = sqlite3.connect("file:" + (daily_db or DAILY_DB) + "?mode=ro",
+                           uri=True)
+    out = {}
+    try:
+        marks = ",".join("?" * len(symbols))
+        for sym, date, vol in conn.execute(
+                f"SELECT symbol, date, volume FROM daily_bars "
+                f"WHERE symbol IN ({marks}) AND volume IS NOT NULL "
+                f"ORDER BY symbol, date", tuple(symbols)):
+            out.setdefault(sym, []).append((date, float(vol)))
+    finally:
+        conn.close()
+    return out
+
+
+def _volume_multiple(series, on_date, ahead=0):
+    """How many times its OWN normal this stock traded, or None.
+
+    Normal is the MEDIAN of the prior VOLUME_NORMAL_DAYS sessions --
+    the median, because one earlier event day in the window would
+    raise a mean and hide the very spike being measured.
+    """
+    if not series:
+        return None
+    dates = [d for d, _v in series]
+    try:
+        i = dates.index(on_date)
+    except ValueError:
+        return None
+    j = i + ahead
+    if j >= len(series):
+        return None
+    prior = [v for _d, v in series[max(0, i - VOLUME_NORMAL_DAYS):i] if v > 0]
+    if len(prior) < 5:
+        return None
+    normal = _median(prior)
+    if not normal or normal <= 0:
+        return None
+    return series[j][1] / normal
 
 
 def _closes(symbols, daily_db=None):
@@ -335,6 +401,7 @@ def build(events_db=None, daily_db=None, db_path=None, since=None,
                      threat_tag, threatened, headline))
 
     closes = _closes(sorted(wanted), daily_db)
+    volumes = _volumes(sorted(wanted), daily_db)
 
     out = _connect(db_path)
     written = 0
@@ -357,6 +424,8 @@ def build(events_db=None, daily_db=None, db_path=None, since=None,
                 t1, t3, t10, t20 = (
                     _median([_forward(closes[t], sessions, date, n)
                              for t in hot]) for n in (1, 3, 10, 20))
+            vx = _volume_multiple(volumes.get(symbol), date, 0)
+            vxn = _volume_multiple(volumes.get(symbol), date, 1)
             s10 = _forward(mine, sessions, date, 10)
             s20 = _forward(mine, sessions, date, 20)
             if s1 is None and p1 is None and t1 is None:
@@ -366,11 +435,12 @@ def build(events_db=None, daily_db=None, db_path=None, since=None,
                 "(date, symbol, kind, grade, value_cr, sector, subject_1d, "
                 " subject_3d, peers_1d, peers_3d, peer_count, threat_tag, "
                 " threat_1d, threat_3d, threat_10d, threat_20d, "
-                " subject_10d, subject_20d, threat_n, headline) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " subject_10d, subject_20d, vol_x, vol_x_next, threat_n, "
+                " headline) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (date, symbol, kind, grade, value_cr, sector, s1, s3,
                  p1, p3, len(usable), threat_tag, t1, t3, t10, t20,
-                 s10, s20, len(hot), str(headline or "")[:300]))
+                 s10, s20, vx, vxn, len(hot), str(headline or "")[:300]))
             written += out.total_changes and 1 or 0
             if progress and written and written % 500 == 0:
                 progress(written)
