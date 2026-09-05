@@ -53,6 +53,7 @@ Author : H&M Opportunity Trader
 
 import csv
 import os
+import re
 from datetime import datetime, timedelta
 
 from core.logger import decision, diagnostic, warn
@@ -105,10 +106,88 @@ _ETF_SUFFIXES = ("BEES",)                    # NIFTYBEES, GOLDBEES, LIQUIDBEES
 _ETF_TOKENS = ("ETF", "GSEC", "SDL", "SGB")  # unambiguous fund markers
 
 
-def looks_like_a_fund(symbol):
+# ---- THE COMPANY NAME IS THE HONEST SIGNAL. 5 September 2026. ----
+#
+# The symbol test below cannot see a fund whose ticker is an ordinary
+# word, and the master carries eleven of them:
+#
+#     HEALTHY     ADITYA BIRLA SUN LIFE MF - ... NIFTY ...
+#     HEALTHCARE  MIRAE ASSET MUTUAL FUND - NIFTY 500 HEALTHCARE ETF
+#     SILVER      ADITYA BIRLA SUN LIFE MUTUAL FUND - SILVER ETF
+#     DEFENCE     MIRAE ASSET MUTUAL FUND - BSE INDIA DEFENCE ETF
+#     SMALLCAP, CONSUMER, DIVIDEND, ENERGY, METAL, TECH, VALUE
+#
+# So "AAYUSH WELLNESS: LAUNCHES LUNG CARE TABLETS TO ENTER Rs 18,913
+# CR RESPIRATORY HEALTHCARE MARKET" was filed against a Mirae Asset
+# ETF, and a Telugu post about gold prices against an Aditya Birla
+# silver fund. 22 messages across the store were matched to a fund.
+#
+# A FUND CANNOT HAVE NEWS. It wins no orders, files no results, holds
+# no board meetings. Every rule in this bot is about a company that
+# something HAPPENED to, so a fund in the news matcher can only ever
+# be a wrong answer -- which is why this is a category test and not
+# another entry on a list of English words. The next ETF called POWER
+# or BANK is handled without anyone noticing.
+#
+# NOT the same question as SUBSCRIBE. A blocked COMPANY still belongs
+# in the matcher -- "being barred from trading ACMESOLAR is no reason
+# to fail to notice that it just reported excellent results", as
+# core/telegram_feed._known_symbols() puts it. A fund is not blocked,
+# it is not a company.
+# ---- "ASSET MANAGEMENT" IS A BUSINESS. 5 September 2026. ----
+#
+#     "ABSLAMC = ADITYA BIRLA SUN LIFE AMC LIMITED"
+#                                          -- the operator
+#
+# He said it the minute this shipped, and he was right. An AMC is a
+# listed OPERATING COMPANY -- it reports results, holds board meetings
+# and wins mandates like any other. The FUND is the product it sells.
+# HDFCAMC, ICICIAMC, CRAMC and ABSLAMC survived only because the master
+# abbreviates them ("HDFC AMC LIMITED"), which is luck, not a rule.
+#
+# One did not:
+#
+#     GAJA   GAJA ALTERNATIVE ASSET MANAGEMENT LIMITED
+#
+# and GAJA reports on 10 September -- it is on the calendar the results
+# gate reads. Silencing its news would have been a real loss for a
+# phrase that describes an industry, not a product.
+#
+# So "ASSET MANAGEMENT" is gone. Every actual fund in the master says
+# MUTUAL FUND or ETF on the tin, which is what the rest of this matches.
+_FUND_NAME = re.compile(
+    r"MUTUAL FUND|\bMF\b|\bETF\b|EXCHANGE TRADED|INDEX FUND|"
+    r"\bBEES\b|SOVEREIGN GOLD", re.I)
+
+
+def looks_like_a_fund(symbol, name=None):
     """Fallback ETF/SGB detector for when NSE's own list is unavailable.
-    Deliberately narrow -- NSE's live list is the primary defence; this
-    only catches the names no real company would carry."""
+
+    The SYMBOL test is deliberately narrow -- NSE's live list is the
+    primary defence, and this only catches names no real company would
+    carry. The NAME test, when a name is given, is the reliable one:
+    a fund says what it is on the tin.
+
+    ---- THE NAME DECIDES WHEN THERE IS ONE. 5 September 2026. ----
+
+    The symbol test is a substring match, and `"SDL" in "SSDL"` is
+    True -- so SARASWATI SAREE DEPOT LIMITED read as a state
+    development loan. Harmless while this only wrote a proposal for a
+    human to review; not harmless once core/telegram_feed began asking
+    which symbols may carry news.
+
+    Tightening the substring does not work either: ETF has to match at
+    the end of GOLDETF and SDL must not match at the end of SSDL, and
+    nothing about the letters tells those apart.
+
+    The NAME does, every time. "MIRAE ASSET MUTUAL FUND - GOLD ETF"
+    against "SARASWATI SAREE DEPOT LIMITED" is not a close call. So
+    when a name is given it is the whole answer, and the symbol
+    guesswork is only reached when there is nothing better -- which is
+    what "fallback" meant all along.
+    """
+    if name and str(name).strip():
+        return bool(_FUND_NAME.search(str(name)))
     s = (symbol or "").upper()
     if s.endswith(_ETF_SUFFIXES):
         return True

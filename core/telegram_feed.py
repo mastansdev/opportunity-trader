@@ -808,9 +808,58 @@ class TelegramFeed:
                                for s in self.master_loader.all_symbols()}
                 except Exception:                          # noqa: BLE001
                     symbols = set()
+            # ---- A FUND CANNOT HAVE NEWS. 5 September 2026. ----
+            #
+            # The master carries 29 ETFs and mutual funds, and eleven
+            # of them have a ticker that is an ordinary English word:
+            #
+            #   HEALTHCARE  MIRAE ASSET MF - NIFTY 500 HEALTHCARE ETF
+            #   HEALTHY     ADITYA BIRLA SUN LIFE MF - ... NIFTY ...
+            #   SILVER      ADITYA BIRLA SUN LIFE MF - SILVER ETF
+            #   DEFENCE     MIRAE ASSET MF - BSE INDIA DEFENCE ETF
+            #   SMALLCAP, CONSUMER, DIVIDEND, ENERGY, METAL, TECH, VALUE
+            #
+            # So "AAYUSH WELLNESS: LAUNCHES LUNG CARE TABLETS TO ENTER
+            # Rs 18,913 CR RESPIRATORY HEALTHCARE MARKET" was filed
+            # against a Mirae Asset ETF, and a Telugu post about gold
+            # against an Aditya Birla silver fund. 22 messages on the
+            # store were matched to a fund.
+            #
+            # A fund wins no orders, files no results and holds no
+            # board meetings. Every rule in this bot is about something
+            # that HAPPENED to a company, so a fund in the news matcher
+            # can only ever be a wrong answer. That is why this is a
+            # CATEGORY test rather than a longer list of English words
+            # -- the next ETF called POWER or BANK is handled without
+            # anyone noticing.
+            #
+            # NOT the same question as SUBSCRIBE: a blocked COMPANY
+            # stays in the matcher, for the reason written below. A
+            # fund is not blocked, it is not a company.
+            funds = set()
+            if self.master_loader is not None:
+                try:
+                    from core.universe_builder import looks_like_a_fund
+                    for s in symbols:
+                        rec = self.master_loader.get_by_symbol(s) or {}
+                        if looks_like_a_fund(s, rec.get("COMPANY NAME")):
+                            funds.add(s)
+                except Exception as exc:                   # noqa: BLE001
+                    # Not knowing which are funds means matching a few
+                    # wrongly. Losing the whole index would mean
+                    # matching nothing, which is far worse.
+                    diagnostic(f"[TELEGRAM] Could not identify funds "
+                               f"({exc}); none excluded.")
+                    funds = set()
+            if funds:
+                diagnostic(f"[TELEGRAM] {len(funds)} fund(s) kept out of "
+                           f"the news matcher: "
+                           f"{', '.join(sorted(funds)[:8])}")
             self._symbols_tagged = {s for s in symbols
-                                    if s not in NOT_A_MENTION}
+                                    if s not in NOT_A_MENTION
+                                    and s not in funds}
             self._symbols = {s for s in self._symbols_tagged if len(s) >= 3}
+            self._fund_symbols = funds
         return self._symbols_tagged if hashtag else self._symbols
 
     # Words that end a company name and identify nothing: the legal
@@ -905,6 +954,16 @@ class TelegramFeed:
                 except Exception:                          # noqa: BLE001
                     continue
                 name = str(record.get("COMPANY NAME") or "").upper()
+                # A fund is not a company -- see _known_symbols(). Kept
+                # out of the NAME index too, or "MIRAE ASSET" and
+                # "ADITYA BIRLA" would match every mention of the fund
+                # houses themselves.
+                try:
+                    from core.universe_builder import looks_like_a_fund
+                    if looks_like_a_fund(symbol, name):
+                        continue
+                except Exception:                          # noqa: BLE001
+                    pass
                 # ---- A PLACEHOLDER IS NOT A NAME. 2 August 2026. ----
                 #
                 #     "what ever the stocks we are not maintained in
