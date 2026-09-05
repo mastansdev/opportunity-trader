@@ -51,7 +51,13 @@ def _why(alert_only):
 
 def test_a_disarmed_bot_says_so():
     why = _why(alert_only=True)
-    assert "not trading" in why, why
+    # ---- THE REAL CAUSE MOVED. 5 September 2026. ----
+    # It used to be "the bot is not trading" -- the alert-only state,
+    # retired with the collapse to two. The bot always trades now, so
+    # a full book that cannot free a seat has a different real cause,
+    # and the point of this test is that the message names whichever
+    # one is true rather than blaming the stock.
+    assert "slot rotation is OFF" in why, why
     assert "not decisively better" not in why, (
         "this blames the stock for the bot being switched off")
 

@@ -263,7 +263,11 @@ def test_the_score_still_rides_on_the_routing_record():
     """Off the card is not out of the system -- otherwise the question
     "does a higher score pay" could never be answered."""
     src = (ROOT / "core" / "auto_entry.py").read_text(encoding="utf-8")
-    assert src.count('"score": _num(row.get("score"))') >= 3, (
+    # ---- ONE FEWER LANE. 5 September 2026. ----
+    # The alert-only branch -- alert him, take no trade -- was removed
+    # with the collapse to two, and it built one of these rows. Three
+    # became two; every remaining routing row still carries the score.
+    assert src.count('"score": _num(row.get("score"))') >= 2, (
         "a routing row is not carrying the score it was sorted by")
 
 

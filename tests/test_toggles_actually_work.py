@@ -40,8 +40,17 @@ TOKEN = "operator-token-for-the-test"
 class _Engine:
     """Enough Engine for the two switches to act on."""
 
+    # ---- THE SWITCH IS execution.live NOW. 5 September 2026. ----
+    # alert_only was retired with the collapse to two. The double
+    # keeps the constructor argument so these tests read unchanged --
+    # OFF is alert_only=True is live=False -- but what the endpoint
+    # actually moves, and what this asserts on, is execution.live.
+    class _Execution:
+        def __init__(self, live):
+            self.live = live
+
     def __init__(self, alert_only=True):
-        self.alert_only = alert_only
+        self.execution = _Engine._Execution(not alert_only)
         # ---- THE SWITCH ACTS ON THIS NOW. 31 August 2026. ----
         # "keep simple ON = REAL TRADES . OFF = PAPER TRADES". The bot
         # always trades; execution.live decides whose money, and the
@@ -85,7 +94,7 @@ class _State:
         self.engine = engine
 
     def get_snapshot(self):
-        return {"bot_trading": {"on": not self.engine.alert_only,
+        return {"bot_trading": {"on": bool(self.engine.execution.live),
                                 "known": True}}
 
     def refresh(self):
@@ -166,7 +175,7 @@ def test_it_survives_being_pressed_repeatedly(rig):
     client, engine, _ = rig
     for _ in range(3):
         press(client, "/api/bot_trading/on")
-    assert engine.alert_only is False
+    assert engine.execution.live is True
     for _ in range(3):
         press(client, "/api/bot_trading/off")
     assert engine.execution.live is False
@@ -368,4 +377,4 @@ def test_he_can_still_override_it(rig):
     client, engine, _ = rig
     got = client.post(f"/api/bot_trading/on?token={TOKEN}&force=1").json()
     assert got["success"] is True, "force=1 did not arm it"
-    assert engine.alert_only is False, "it said success and did nothing"
+    assert engine.execution.live is True, "it said success and did nothing"

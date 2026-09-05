@@ -3961,80 +3961,56 @@ def test_the_gate_still_blocks_when_switched_back_on(monkeypatch):
 # was full. Nothing compared them -- there is no ranking between
 # candidates, only per-stock gates and arrival order.
 
-def test_alert_only_does_not_buy():
+# ---- THE ALERT-ONLY STATE IS GONE. 5 September 2026. ----
+#
+#     "go ahead, collapse them into two."          -- the operator
+#
+# Three tests stood here asserting that alert_only=True made the bot
+# alert and buy nothing. That was the third state he abolished on
+# 31 August after it produced 65 alerts and 0 trades over ten days,
+# and the flag was retired on 5 September with the collapse to two.
+#
+# They are not deleted. They are turned around to assert what is true
+# now, because the interesting question is no longer "does the flag
+# work" but "can an old caller silently get the old behaviour" -- and
+# the answer must be no, loudly.
+
+
+def test_alert_only_is_accepted_and_ignored():
+    """199 callers still pass it. It must not silently do nothing --
+    a caller asking for a state that no longer exists deserves to be
+    told, and the bot must trade anyway."""
     engine = _engine(alert_only=True)
+    engine.breakout_armed = True
     _feed_orb_range(engine, high=110.0)
-    # Same sequence as test_breakout_close_triggers_a_paper_buy: the third
-    # tick lands in a NEW minute, which is what closes the 112 candle.
     engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
     engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
     engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-    assert not engine.open_positions, \
-        "alert-only mode bought something"
+    assert "TCS" in engine.open_positions, (
+        "alert_only=True still silenced the bot -- the third state is "
+        "back")
 
 
-def test_alert_only_still_raises_an_alert_naming_the_stock():
-    """Silence is the failure mode to avoid. trade_controller's pause
-    already skips entries -- but SILENTLY, by design ("no log line"),
-    because it fires on every candle close. The whole point here is to be
-    told, so this is a separate path that speaks."""
-    engine = _engine(alert_only=True)
-    _feed_orb_range(engine, high=110.0)
-    # Same sequence as test_breakout_close_triggers_a_paper_buy: the third
-    # tick lands in a NEW minute, which is what closes the 112 candle.
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-    alerts = engine.get_manual_alerts()
-    assert alerts, "the signal was dropped in silence"
-    assert any(a.get("symbol") == "TCS" for a in alerts)
-    text = " ".join(str(a.get("message", "")) for a in alerts)
-    assert "ALERT ONLY" in text, "he cannot tell whether the bot acted"
-
-    # ---- THE WORDING CHANGED, THE MEANING DID NOT. 19 Aug 2026 ----
-    # This asserted "would have been entered". He asked for a fixed
-    # field order instead:
-    #
-    #     "TIME  SYMBOL BUY REASON QTY  ENTRY - TARGET - EXIT -
-    #      TRAILING POINTS"
-    #
-    # So the hypothetical is now carried by ALERT ONLY above, and what
-    # this test actually needs to guarantee is that the alert still
-    # names the price and the size it would have taken -- an alert
-    # without those is a notification, not a trade he can act on.
-    assert "entry" in text
-    assert "qty" in text
-    assert "exit" in text
+def test_the_engine_has_no_alert_only_attribute_any_more():
+    """The flag itself, not just its effect. While it existed, the
+    dashboard button read it and reported 'placing REAL orders'
+    whichever way the switch was set."""
+    engine = _engine()
+    assert not hasattr(engine, "alert_only"), (
+        "the retired flag is back on the Engine")
 
 
-def test_alert_only_ignores_a_full_book():
-    """THE bug this nearly shipped with.
+def test_passing_it_says_so_out_loud(caplog):
+    """Silently swallowing it would be the same class of lie the whole
+    of 4-5 September was spent removing. Read off the logger rather
+    than stdout -- core/logger.py writes through its own handlers."""
+    import logging
 
-    The slot cap returns BEFORE the alert point. The operator is carrying
-    10 positions into the next session and MAX_OPEN_POSITIONS is 10, so
-    the book is full at 09:15 -- every signal would have died at the cap
-    and alert-only mode would have produced ZERO alerts all day. A silent
-    bot looks exactly like a quiet market.
-
-    Capacity limits how much money is committed. In alert-only mode
-    nothing is committed, so they do not apply.
-    """
-    engine = _engine(alert_only=True)
-    # Fill the book well past any cap.
-    for i in range(12):
-        engine.open_positions[f"FILLER{i}"] = {
-            "security_id": str(100 + i), "qty": 1, "entry_price": 100.0,
-            "direction": "LONG", "entry_reason": "test",
-        }
-    _feed_orb_range(engine, high=110.0)
-    # Same sequence as test_breakout_close_triggers_a_paper_buy: the third
-    # tick lands in a NEW minute, which is what closes the 112 candle.
-    engine.process_tick("TCS", "1", 108.0, _t(9, 31, 0))
-    engine.process_tick("TCS", "1", 112.0, _t(9, 31, 30))
-    engine.process_tick("TCS", "1", 111.0, _t(9, 32, 0))
-    assert any(a.get("symbol") == "TCS" for a in engine.get_manual_alerts()), \
-        "a full book silenced the alert -- capacity must not gate telling"
-
+    with caplog.at_level(logging.WARNING, logger="opportunity_trader"):
+        _engine(alert_only=True)
+    assert any("IGNORED" in r.getMessage() for r in caplog.records), (
+        "a caller asked for a state that no longer exists and was not "
+        "told")
 
 def test_alert_only_off_still_trades():
     """The switch must be a switch, not a one-way door."""

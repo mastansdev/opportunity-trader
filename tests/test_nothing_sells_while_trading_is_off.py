@@ -32,65 +32,114 @@ import inspect
 from core.engine import Engine
 
 
-def test_rotation_checks_the_switch_before_it_sells():
-    """Read the function. The alert_only guard must come FIRST --
-    before the churn cap, before any strength maths, and long before
-    anything can reach an order."""
-    src = inspect.getsource(Engine._maybe_rotate_out)
-    body = src[src.find('"""', src.find('"""') + 3):]
-    guard = body.find("alert_only")
-    assert guard > 0, (
-        "rotation does not look at alert_only at all -- this is the "
-        "7 August bug")
-    for later in ("_rotations_today", "_weakest", "strength"):
-        at = body.find(later)
-        if at > 0:
-            assert guard < at, (
-                f"the alert_only guard comes AFTER {later} -- something "
-                f"can act before the switch is honoured")
+# ---- THE GUARD MOVED, THE LESSON DID NOT. 5 September 2026. ----
+#
+# These read core/engine._maybe_rotate_out() for an alert_only check.
+# That flag was retired on 5 September with the collapse to two -- and
+# removing it reopened this exact bug for about an hour, caught by
+# this file, which is the reason it exists.
+#
+# The replacement names the condition the old flag only approximated.
+# On a SELL, trading/execution._route() asks _who_opened(): a position
+# opened for real sells for real. So the dangerous combination is
+#
+#     the holder was opened for real   -> its sell would be REAL
+#     the switch is now OFF            -> the buy would be PAPER
+#
+# which is the one-legged trade of 7 August. Rotation refuses exactly
+# that, and refuses on any state it cannot establish.
 
 
-def test_the_guard_returns_false_not_none():
-    """False means 'no slot freed'. None would read as falsy in some
-    callers and truthy in others."""
-    src = inspect.getsource(Engine._maybe_rotate_out)
-    block = src[src.find("alert_only"):]
-    block = block[:block.find("\n\n")]
-    assert "return False" in block
+def _bot(opened, live_now):
+    """An Engine with only what _maybe_rotate_out() reaches for."""
+    class _Execution:
+        live = live_now
+
+        def _who_opened(self, _symbol):
+            return opened
+
+    class _Monitor:
+        """Enough of a snapshot for _symbol_strength() to answer. The
+        guard sits after the strength maths -- before any order, but
+        after the reads -- so the double has to get that far."""
+
+        def get_snapshot(self):
+            return {"KALYANKJIL": {"last_price": 100.0, "volume": 1,
+                                   "ohlc": {"close": 99.0}},
+                    "HEROMOTOCO": {"last_price": 100.0, "volume": 1,
+                                   "ohlc": {"close": 99.0}},
+                    "ANYTHING": {"last_price": 200.0, "volume": 1,
+                                 "ohlc": {"close": 100.0}}}
+
+    bot = Engine.__new__(Engine)
+    bot.execution = _Execution()
+    bot.circuit_monitor = _Monitor()
+    bot._trend_cache = None
+    bot._rotations_today = 0
+    bot._rotation_cap_logged = False
+    bot.open_positions = {"KALYANKJIL": {"qty": 500, "direction": "LONG"},
+                          "HEROMOTOCO": {"qty": 50, "direction": "LONG"}}
+
+    # The strength maths runs before the guard and needs a working
+    # snapshot, a confirmation count and a weakest-holder pick. Doubled
+    # so this test is about ONE thing: whether a real position can be
+    # sold while the switch is off.
+    bot._symbol_strength = lambda sym, d: 1.0 if sym == "ANYTHING" else 0.0
+    bot._confirmation_count = lambda sym: 0
+    bot._weakest_holder_for_rotation = lambda: ("KALYANKJIL", 0.0)
+    return bot
 
 
-def test_rotation_refuses_and_says_so(monkeypatch):
-    """Drive it. Switch off -> no sell, and he is told why."""
+def test_a_real_position_is_not_sold_while_the_switch_is_off(monkeypatch):
+    """THE 7 August bug: five live SELLs and zero BUYs that morning."""
     said = []
     import core.engine as engine_module
     monkeypatch.setattr(engine_module, "decision", said.append)
 
-    bot = Engine.__new__(Engine)
-    bot.alert_only = True                      # the switch is OFF
-    bot._rotations_today = 0
-    bot.open_positions = {"KALYANKJIL": {"qty": 500, "direction": "LONG"},
-                          "HEROMOTOCO": {"qty": 50, "direction": "LONG"}}
+    got = _bot(opened="live", live_now=False)._maybe_rotate_out(
+        "ANYTHING", "LONG", None)
 
-    got = bot._maybe_rotate_out("ANYTHING", "LONG", None)
-
-    assert got is False, "it freed a slot with trading switched off"
+    assert got is False, "it freed a slot by selling a real position"
     assert any("OFF" in line for line in said), (
         "it refused silently -- he must be able to see why")
 
 
-def test_it_still_rotates_when_the_switch_is_ON():
-    """A switch, not a removal. With trading armed the guard must not
-    be what stops it."""
+def test_a_paper_position_is_not_blocked_by_this_guard():
+    """Both legs would be paper, so nothing is one-legged. Refusing
+    here would stop rotation being TESTED on paper at all, which is
+    what he asked to do on 5 September."""
     import inspect
     src = inspect.getsource(Engine._maybe_rotate_out)
-    guard = src[src.find("if getattr(self, \"alert_only\""):]
-    guard = guard[:guard.find("return False") + 12]
-    assert "alert_only" in guard
-    # Exactly ONE executable check on the switch -- everything below
-    # it is the normal strength logic, untouched. Comments mentioning
-    # alert_only do not count; my own tests have asserted against
-    # prose in docstrings before and passed while the code was wrong.
-    code = "\n".join(l for l in src.splitlines()
-                     if not l.strip().startswith("#"))
-    assert code.count("alert_only") == 1, (
-        "more than one alert_only check crept into rotation")
+    guard = src[src.index("BOTH LEGS OR NEITHER"):]
+    guard = guard[:guard.index("return False") + 12]
+    assert 'opened != "paper"' in guard, (
+        "the guard no longer distinguishes a paper position, so paper "
+        "rotation can never be tested")
+
+
+def test_the_guard_comes_before_anything_can_reach_an_order():
+    import inspect
+    src = inspect.getsource(Engine._maybe_rotate_out)
+    body = src[src.find('"""', src.find('"""') + 3):]
+    guard = body.find("BOTH LEGS OR NEITHER")
+    assert guard > 0, "the one-legged-trade guard is gone -- 7 August"
+    for later in ("_bot_may_close", "self._exit("):
+        at = body.find(later)
+        if at > 0:
+            assert guard < at, (
+                f"the guard comes AFTER {later} -- an order can leave "
+                f"before the check runs")
+
+
+def test_an_unknowable_state_refuses():
+    """Fails closed: if it cannot establish who opened the position,
+    it does not rotate."""
+    class _Broken:
+        live = False
+
+        def _who_opened(self, _symbol):
+            raise RuntimeError("no record")
+
+    bot = _bot(opened="live", live_now=False)
+    bot.execution = _Broken()
+    assert bot._maybe_rotate_out("ANYTHING", "LONG", None) is False

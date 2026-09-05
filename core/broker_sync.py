@@ -509,8 +509,23 @@ class BrokerSync:
             # observes and records; it does not reach into his account.
             # The positions still appear in the book for book-keeping,
             # they simply get no stop and no management.
-            _off = bool(getattr(self.engine, "alert_only", True)) \
-                if self.engine is not None else True
+            # ---- IT FOLLOWS THE REAL SWITCH NOW. 5 Sep 2026. ----
+            #
+            # This read engine.alert_only, which by then was permanently
+            # False -- so "OFF means the bot does not reach into his
+            # account" had quietly stopped being true, and a PAPER
+            # session could rest REAL stops at Dhan on positions he had
+            # opened by hand.
+            #
+            #     "paper mode do not want to see dhan & its related
+            #      parts at all"
+            #     "paper mode only reaches dhan for MTF calculation.
+            #      nothing touches apart from that"     -- the operator
+            #
+            # execution.live is the switch. Unknown is OFF: a session
+            # whose state cannot be read does not touch his account.
+            _execution = getattr(self.engine, "execution", None)
+            _off = not bool(getattr(_execution, "live", False))
             if _off and self.adopt_with_stops:
                 if not getattr(self, "_adopt_off_logged", False):
                     self._adopt_off_logged = True

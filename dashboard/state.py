@@ -1393,25 +1393,47 @@ class DashboardState:
             "control = bot trading on / off"
             "it must follow me . not i needs to go back on bot."
 
-        Read live off engine.alert_only, so the button can never drift
-        from what the engine is doing.
+        ---- THE BUTTON WAS READING A DEAD FLAG. 5 Sep 2026. ----
+
+            "ON real mode is not working. i clicked on both new & old
+             dahsboards just to check but not worked. only OFF working
+             2 times after clicking OFF"          -- the operator
+
+        It read engine.alert_only, which stopped being the switch on
+        31 August and was permanently False from then on. So this
+        returned on=True and "placing REAL orders" whichever way the
+        switch was actually set -- the button could not drift from the
+        engine because it was not looking at the engine's switch at
+        all.
+
+        execution.live is what trading/execution._route() reads, so it
+        is what the button shows. Unknown stays unknown: a state that
+        cannot be established is not reported as ON.
         """
         engine = getattr(self, "engine", None)
         if engine is None:
             return {"on": False, "known": False,
                     "note": "no engine -- nothing can trade"}
-        alert_only = getattr(engine, "alert_only", None)
-        if alert_only is None:
+        execution = getattr(engine, "execution", None)
+        live = getattr(execution, "live", None) if execution is not None else None
+        if live is None:
             return {"on": False, "known": False,
                     "note": "the engine did not say"}
         held = len(getattr(engine, "open_positions", {}) or {})
+        try:
+            from config import TRADING_MODE
+            mode = str(TRADING_MODE).upper()
+        except Exception:                                  # noqa: BLE001
+            mode = "UNKNOWN"
         return {
-            "on": not alert_only,
+            "on": bool(live),
             "known": True,
             "open_positions": held,
-            "note": ("placing REAL orders" if not alert_only else
-                     "watching only -- it alerts and records, "
-                     "places nothing"),
+            "mode": mode,
+            "note": (("placing REAL orders" if mode == "LIVE" else
+                      f"switch is ON, but this process is {mode} -- "
+                      f"orders are simulated") if live else
+                     "OFF -- the bot keeps trading, on paper"),
             # Said out loud on the page, because it is the one thing
             # about this switch that will surprise him.
             "resets_on_restart": True,

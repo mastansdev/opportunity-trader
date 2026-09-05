@@ -177,7 +177,21 @@ def test_the_bot_trades_in_both_positions():
     _gate = inspect.getsource(apply_switch)
     assert "apply_switch" in body, (
         "the endpoint no longer moves the switch through the gate")
-    assert "engine.alert_only = False" in _gate
+    # ---- THE FLAG IT CHECKED FOR IS RETIRED. 5 September 2026. ----
+    #
+    # This asserted apply_switch clears engine.alert_only, so that a
+    # feed-guard disarm could be undone from the dashboard. Two things
+    # have since changed and both remove the need:
+    #
+    #   the guard no longer disarms anything -- main.py wires it as
+    #   _LiveGuard(disarm=None): "Nothing may turn trading off but him"
+    #
+    #   alert_only is gone entirely (the collapse to two, 5 Sep). The
+    #   switch writes execution.live and nothing else, so there is no
+    #   second flag left for anything to get stuck on.
+    #
+    # What must remain true is that the switch MOVES, from one place.
+    assert "execution.live = bool(on)" in _gate
     assert "execution.live = bool(on)" in _gate
 
 

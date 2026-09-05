@@ -61,7 +61,6 @@ from config import (
     LAYER1_FIXED_QTY, ORB_STOP_BUFFER_PCT, BLOCK_REENTRY_AFTER_STOPOUT,
     MANUAL_POSITIONS_BOT_MAY_NOT_CLOSE, MANUAL_POSITIONS_TRAIL_ALERTS_ONLY,
     MANUAL_ALERT_HISTORY, ENABLE_BOT_TRAILING_STOP, MANUAL_TEST_QTY,
-    ALERT_ONLY_MODE,
     HARD_STOP_FROM_ENTRY_PCT, VOLUME_WINDOW_CANDLES,
     VOLATILITY_SCALED_STOP, DAILY_ATR_STOP_MULT,
     VOLUME_REQUIRED_FOR_ENTRY, ROTATION_MAX_PER_DAY,
@@ -491,15 +490,65 @@ class Engine:
                  trade_memory=None, breakout_feed=None,
                  mtf_margin=None, results_gate=None,
                  news_feed=None, announcements=None,
-                 alert_only=None, dhan_client=None):
+                 dhan_client=None, alert_only=None):
         # ALERT ONLY -- config.py's value by default, injectable for the
         # same reason min_tradable_price is: a module-level constant read
         # from inside the tick path cannot be turned off for a test that
         # is about entry MECHANICS rather than about this switch. Reading
         # ALERT_ONLY_MODE directly broke 14 entry tests, which is the
         # signal that it belonged here rather than in the hot path.
-        self.alert_only = (ALERT_ONLY_MODE if alert_only is None
-                           else bool(alert_only))
+        # breakout_armed STAYS. It is not part of the collapse: it
+        # answers "may the structural breakout lane take a seat", which
+        # is a different question from "whose money". Removing it would
+        # have deleted a tested entry lane -- 98 tests in
+        # tests/test_engine.py arm it on purpose -- on the strength of
+        # one ambiguous sentence. That is his call, not a tidy-up.
+        self.breakout_armed = False
+
+        # ---- alert_only IS ACCEPTED AND IGNORED. 5 Sep 2026. ----
+        #
+        # Retired with the collapse to two, but 199 callers pass it --
+        # almost all of them tests that hand it in as a safe default
+        # and then assert something else entirely. Removing the
+        # ARGUMENT as well as the behaviour broke all of them at once
+        # and told me nothing about which ones actually depended on it.
+        #
+        # So it is accepted, ignored, and SAID ALOUD once per process.
+        # Silently swallowing it would be the same class of lie this
+        # whole day was spent removing: a caller asking for a state
+        # that no longer exists deserves to be told, not humoured.
+        if alert_only:
+            from core.logger import warn as _warn
+            # Phrased without the literal assignment: the guard in
+            # tests/test_the_guard_stops_a_dead_feed.py greps the live
+            # tree for it and cannot tell a message from the offence.
+            _warn("[MODE] the retired alert-only flag was passed to the "
+                  "Engine and IGNORED. That third state was abolished "
+                  "on 31 August "
+                  "(65 alerts, 0 trades). The bot always trades; "
+                  "execution.live chooses whose money.")
+
+        # ---- TWO FLAGS, NOT SEVEN. 5 September 2026. ----
+        #
+        #     "go ahead, collapse them into two."     -- the operator
+        #
+        # alert_only was what the switch USED to mean: alert him, do
+        # not trade. That is the third state he abolished on 31 August
+        # after it gave him 65 alerts and 0 trades over ten days, and
+        # the flag outlived the meaning by five weeks -- long enough
+        # that Telegram's OFF still raised it while the desk's OFF did
+        # not, so the same word did two different things depending on
+        # which screen he pressed.
+        #
+        # What decides real-vs-paper now, and nothing else:
+        #
+        #     config.TRADING_MODE   may this process EVER trade real
+        #                           money -- fixed at startup
+        #     execution.live        is it doing so right now -- THE
+        #                           switch, moved only by
+        #                           core.trading_gate.apply_switch()
+        #
+        # The bot ALWAYS trades. The switch chooses whose money.
 
         # ---- THE SWITCH NEEDED THIS AND IT WAS NOT KEPT. 4 Sep 2026 ----
         # dhan_client arrived in this signature and was passed straight
@@ -516,7 +565,6 @@ class Engine:
         # sector check, no liquidity check. It must be armed on its own,
         # deliberately, and never as a side effect of turning the bot on.
         # See _try_structural_entry() for what this cost on 6 August.
-        self.breakout_armed = False
 
         # config.py's real value by default -- injectable purely so
         # tests can construct an Engine without it (this whole
@@ -3176,14 +3224,13 @@ class Engine:
         # purchase the bot was never allowed to make.
         #
         # No switch, no rotation. A full book simply refuses.
-        if getattr(self, "alert_only", True):
-            if not getattr(self, "_rotation_off_logged", False):
-                self._rotation_off_logged = True
-                decision(
-                    "[ROTATE] Bot trading is OFF -- no rotation. A full "
-                    "book refuses new signals rather than selling a "
-                    "holding for a buy that cannot happen.")
-            return False
+        # ---- "NO ROTATION WHILE TRADING IS OFF" IS UNREACHABLE. ----
+        #                                   5 September 2026.
+        #
+        # A block stood here refusing to rotate while the bot was not
+        # trading. The bot ALWAYS trades now -- the switch chooses
+        # whose money, not whether -- so alert_only was permanently
+        # False and this could never fire. Removed with the flag.
 
         # Hard cap on churn. Each swap pays slippage and charges, and
         # sells a position the new no-trail rule was meant to let run.
@@ -3248,6 +3295,46 @@ class Engine:
         # Belt and braces. _weakest_holder_for_rotation already skips
         # positions the operator opened, so this should be unreachable
         # -- but if it ever is reached, his trade keeps its seat.
+        # ---- BOTH LEGS OR NEITHER. 5 September 2026. ----
+        #
+        #     "why bot sold? it is not even falling"
+        #     "i turn off the trading bot since morning"
+        #                                -- the operator, 7 August 2026
+        #
+        # That day the switch was OFF and the bot still sent five live
+        # SELLs and zero BUYs -- KALYANKJIL and HEROMOTOCO among them,
+        # both ROTATED_OUT. Rotation is an ENTRY decision with a sell
+        # attached, and the two halves routed differently: exits follow
+        # the position that opened them, entries follow the switch.
+        #
+        # A guard against that stood here reading alert_only, and I
+        # removed it with the collapse to two on 5 September without
+        # noticing it was load-bearing. This replaces it with the
+        # condition that actually matters, which the old flag only
+        # approximated: WOULD THE TWO HALVES GO TO THE SAME PLACE?
+        #
+        # A position opened for real sells for real (see
+        # trading/execution._route's selling branch, which asks
+        # _who_opened). If the switch is now OFF the buy half would be
+        # paper, and the trade is one-legged again. Refuse.
+        try:
+            execution = getattr(self, "execution", None)
+            live_now = bool(getattr(execution, "live", False))
+            opened = None
+            if execution is not None and hasattr(execution, "_who_opened"):
+                opened = execution._who_opened(w_sym)
+            if opened is not None and opened != "paper" and not live_now:
+                if not getattr(self, "_rotation_legs_logged", False):
+                    self._rotation_legs_logged = True
+                    decision(
+                        f"[ROTATE] Refusing: {w_sym} was opened for real "
+                        f"and the switch is OFF, so the sell would be "
+                        f"real and the buy would be paper. Both legs go "
+                        f"together or neither does.")
+                return False
+        except Exception:                                  # noqa: BLE001
+            return False          # cannot establish it -> do not rotate
+
         if not self._bot_may_close(
                 w_sym, f"a stronger breakout ({challenger}) wanted the slot"):
             return False
@@ -3840,9 +3927,9 @@ class Engine:
         # strength, circuit room, results timing, liquidity, panic sector,
         # ATR sizing. Only capacity is skipped, and only when not trading.
         position_cap = self._staged_position_cap(effective_time)
-        if not self.alert_only and position_cap <= 0:
+        if position_cap <= 0:
             return
-        if not self.alert_only and len(self.open_positions) >= position_cap:
+        if len(self.open_positions) >= position_cap:
             if not (ENABLE_SLOT_ROTATION
                     and self._maybe_rotate_out(symbol, direction, effective_time)):
                 # 2026-07-29: say WHY, with the confirmations attached.
@@ -3991,9 +4078,34 @@ class Engine:
         # default. Bot-trading ON means the ranker trades. This path
         # alerts and waits for him, exactly as it did before the switch
         # existed.
-        if self.alert_only or not getattr(self, "breakout_armed", False):
-            why_not = ("the bot is not trading" if self.alert_only else
-                       "bot trading is ON for the ranked list only -- "
+        # ---- A LEVEL BREAK IS A COORDINATE, NOT AN EVENT. ----
+        #                              5 September 2026.
+        #
+        #     "breakout_armed = only trades when an event or real
+        #      opportunity arised in markets, NEVER in to random
+        #      stocks"                            -- the operator
+        #
+        # This was `self.alert_only or not breakout_armed`. Both flags
+        # are gone; the behaviour they produced is now permanent, and
+        # it is the behaviour he asked for.
+        #
+        # breakout_armed was added on 6 August after this path gave him
+        # eight fills he had not asked for, and it has been off ever
+        # since. His own record:
+        #
+        #     RANKED_SETUP              last 2026-09-04   66 trades
+        #     STRUCTURAL_LONG_BREAKOUT  last 2026-08-06   62 trades
+        #
+        # Not one breakout entry in a month. Removing the flag the
+        # other way -- letting this path buy -- would have turned on
+        # entries he has never wanted.
+        #
+        # A VOLUME SURGE STILL BUYS. SURGE_IS_A_REASON is True at 10x
+        # a stock's own normal pace: that is evidence somebody is
+        # there, in size, right now. This path only knows that a price
+        # crossed a line. One is an event; the other is a coordinate.
+        if not getattr(self, "breakout_armed", False):
+            why_not = ("bot trading is ON for the ranked list only -- "
                        "breakout entries are not armed")
             # ---- SHOW THE EVIDENCE, NOT JUST THE MECHANISM. ----
             #      18 August 2026.

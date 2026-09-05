@@ -2388,6 +2388,21 @@ MAX_OPEN_POSITIONS = 3
 # (trading/execution.py), and it starts on PAPER at every restart --
 # so a process that comes back while he is away comes back simulated,
 # which is the same protection this flag was giving.
+# ---- RETIRED. 5 September 2026. ----
+#
+#     "go ahead, collapse them into two."        -- the operator
+#
+# This was the bot's third state: alert him, place nothing. It was
+# abolished on 31 August after producing 65 alerts and 0 trades over
+# ten days, and the flag it set on the Engine was removed on 5
+# September along with breakout_armed. Nothing in core/, dashboard/ or
+# trading/ reads this any more; two tools still print it.
+#
+# What decides real-vs-paper, and nothing else:
+#
+#     TRADING_MODE     may this process EVER place real orders
+#     execution.live   is it doing so right now -- THE switch, moved
+#                      only by core.trading_gate.apply_switch()
 ALERT_ONLY_MODE = False
 
 

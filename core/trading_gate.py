@@ -13,7 +13,7 @@ WHAT WAS WRONG. The answer to "is this order real?" was spread across
 three things that never checked each other:
 
     config.TRADING_MODE     "PAPER" / "LIVE", read once at startup
-    engine.alert_only       the dashboard switch, flipped at runtime
+    execution.live          the switch, flipped at runtime
     core.broker_funds       whether Dhan actually answered
 
 The desk's switch says "ON -- real / OFF -- paper", but ON in a PAPER
@@ -104,7 +104,7 @@ def may_place_real_orders(engine):
     """THE gate. (True|False, why) -- and False means PAPER, not idle.
 
     Both must hold:
-        the switch is ON        engine.alert_only is False
+        the switch is ON        execution.live is True
         the broker answered     recently, per broker_is_reachable()
 
     The process mode is honoured as an outer bound: a process started
@@ -116,10 +116,19 @@ def may_place_real_orders(engine):
         return False, (f"the process is in {mode or 'an unreadable mode'} "
                        f"-- every order this session is paper")
 
-    alert_only = getattr(engine, "alert_only", None) if engine else None
-    if alert_only is None:
+    # ---- IT WAS READING THE WRONG FLAG. 5 September 2026. ----
+    #
+    # This asked engine.alert_only, which is what the switch USED to
+    # mean. By the time anything called this function, that flag was
+    # permanently False -- so it reported "the switch is ON" whether it
+    # was on or off. Only the MESSAGE was ever wrong, never the
+    # routing, because trading/execution._route() reads execution.live
+    # and always has. Corrected with the collapse to two.
+    execution = getattr(engine, "execution", None) if engine else None
+    live = getattr(execution, "live", None) if execution is not None else None
+    if live is None:
         return False, "the engine did not say whether the switch is on"
-    if alert_only:
+    if not live:
         return False, "the switch is OFF -- paper"
 
     ok, why = broker_is_reachable()
@@ -176,16 +185,10 @@ def apply_switch(engine, on):
     if execution is None:
         return False, "no execution path in this session"
 
-    # THE THIRD STATE STAYS DEAD. Neither position of this switch may
-    # set alert_only. The bot always trades; the switch chooses whose
-    # money and nothing else.
-    engine.alert_only = False
+    # THE ONE ASSIGNMENT. alert_only and breakout_armed were retired on
+    # 5 September: the bot always trades, and the breakout path always
+    # alerts and never buys. There is nothing else to set.
     execution.live = bool(on)
-
-    # This switch arms the RANKER, never the breakout. 6 August 2026:
-    # he turned it on having been told the ranker's rules and got eight
-    # breakout fills, because both paths read one flag.
-    engine.breakout_armed = False
 
     if not on:
         return True, "OFF -- every order is paper."

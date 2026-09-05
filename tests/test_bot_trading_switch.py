@@ -38,9 +38,28 @@ import inspect
 from dashboard.state import DashboardState
 
 
+# ---- THE BUTTON READS execution.live NOW. 5 September 2026. ----
+#
+#     "ON real mode is not working. i clicked on both new & old
+#      dahsboards just to check but not worked. only OFF working
+#      2 times after clicking OFF"              -- the operator
+#
+# _bot_trading() read engine.alert_only, which stopped being the
+# switch on 31 August and was permanently False afterwards -- so the
+# button reported "placing REAL orders" whichever way the switch was
+# set. The double models what the engine actually carries: an
+# execution with a .live flag.
+class _FakeExecution:
+    def __init__(self, live):
+        self.live = live
+
+
 class FakeEngine:
-    def __init__(self, alert_only=True, held=0):
-        self.alert_only = alert_only
+    def __init__(self, alert_only=True, held=0, live=None):
+        # alert_only kept as the parameter name so the existing tests
+        # read unchanged: OFF is alert_only=True is live=False.
+        self.execution = _FakeExecution(
+            (not alert_only) if live is None else live)
         self.open_positions = {f"S{i}": {} for i in range(held)}
 
 
@@ -56,13 +75,30 @@ def state(engine):
 def test_watching_reads_as_off():
     got = state(FakeEngine(alert_only=True))._bot_trading()
     assert got["on"] is False and got["known"] is True
-    assert "places nothing" in got["note"]
+    # ---- OFF IS NOT "PLACES NOTHING". 5 September 2026. ----
+    # It was, and that is the third state he abolished on 31 August
+    # after 65 alerts and 0 trades. OFF now means the bot trades
+    # exactly as it would with real money, on paper -- which is the
+    # whole point: a day that produces a record.
+    assert "paper" in got["note"].lower()
+    assert "keeps trading" in got["note"]
 
 
-def test_trading_reads_as_on_and_says_so_plainly():
+def test_trading_reads_as_on_and_says_so_plainly(monkeypatch):
+    """ON in a LIVE process says REAL. ON in a PAPER process says so
+    too -- and says it is still simulated, because that is the thing
+    that would otherwise surprise him."""
+    import config
+
+    monkeypatch.setattr(config, "TRADING_MODE", "LIVE")
     got = state(FakeEngine(alert_only=False))._bot_trading()
     assert got["on"] is True
     assert "REAL" in got["note"]
+
+    monkeypatch.setattr(config, "TRADING_MODE", "PAPER")
+    got = state(FakeEngine(alert_only=False))._bot_trading()
+    assert got["on"] is True
+    assert "PAPER" in got["note"] and "simulated" in got["note"]
 
 
 def test_it_reads_the_engine_not_the_config():
@@ -160,7 +196,18 @@ def test_it_sets_the_live_switch_not_alert_only():
     assert "apply_switch" in body, (
         "the endpoint no longer moves the switch through the gate")
     assert "execution.live = bool(on)" in _gate
-    assert "engine.alert_only = False" in _gate
+    # The docstring explains the retired flags by name -- read the
+    # code, not the prose. Same trap as the guard that fired on its
+    # own documentation tonight.
+    import ast
+
+    _tree = ast.parse(_gate.lstrip())
+    _fn = _tree.body[0]
+    if (_fn.body and isinstance(_fn.body[0], ast.Expr)
+            and isinstance(_fn.body[0].value, ast.Constant)):
+        _fn.body = _fn.body[1:]
+    assert "alert_only" not in ast.unparse(_fn), (
+        "apply_switch is writing the retired flag again")
 
 
 def test_it_does_not_write_the_config_file():

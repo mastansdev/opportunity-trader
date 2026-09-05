@@ -1044,7 +1044,33 @@ function drawOpen(d){
     + '<th class="num">P&amp;L</th><th>Stop &mdash; how close</th><th>Why you own it</th>'
     + (IS_OPERATOR ? '<th></th>' : '') + '</tr></thead><tbody>'
     + rows.map(function(r){
-      var px = num(r.ltp || r.current_price), entry = num(r.entry_price);
+      /* ---- THE PRICE ON THE TICK, NOT ON THE SNAPSHOT. 4 Sep 2026 ----
+         "live pnl is not working why? as the price moves pnl must move
+          right. now its showing as stagnant one"
+
+         It was not stagnant, it was five minutes old. The snapshot the
+         page draws from is rebuilt by dashboard/state._build(), and on
+         4 September that took 50 to 344 seconds -- ranked 94s and
+         shortlist 21s between them, everything else under 5s.
+
+         But this function is ALREADY called on every price frame
+         (ws.onmessage, above), and LIVE[] already holds every price
+         the feed has pushed at PRICE_PUSH_SECONDS = 0.25. It simply
+         redrew the same stale numbers each time. So the fix is not to
+         make the rebuild faster -- it is to read the price that was
+         already here.
+
+         P&L is recomputed from that price rather than taken from the
+         snapshot, because a live price beside a stale P&L is worse
+         than either alone: the two disagree and neither says so. */
+      var lv = LIVE[String(r.symbol || "").toUpperCase()];
+      var snapPx = num(r.ltp || r.current_price || r.last_price);
+      var px = (num(lv) !== null && num(lv) > 0) ? num(lv) : snapPx;
+      var entry = num(r.entry_price);
+      var qty = num(r.qty);
+      var pnlNow = (px !== null && entry !== null && qty !== null)
+        ? (px - entry) * qty
+        : num(r.live_pnl !== undefined ? r.live_pnl : r.pnl);
       var stop = num(r.stop || r.trailing_stop || r.initial_stop);
       var near = (px && stop && px > stop) ? Math.max(0, Math.min(100,
         100 - ((px - stop) / px * 100) * 12)) : 0;
@@ -1052,7 +1078,7 @@ function drawOpen(d){
         + '<td class="num">'+esc(r.qty)+'</td>'
         + '<td class="num">'+inr2(entry)+'</td>'
         + '<td class="num">'+inr2(px)+'</td>'
-        + '<td class="num">'+pnl(r.pnl)+'</td>'
+        + '<td class="num">'+pnl(pnlNow)+'</td>'
         + '<td class="n" style="font-size:11.5px">'
         + (stop===null ? '<span class="down">no stop</span>'
            : inr2(stop) + (px ? ' · '+((px-stop)/px*100).toFixed(1)+'% away' : '')

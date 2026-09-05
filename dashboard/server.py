@@ -1363,7 +1363,6 @@ def build_app(dashboard_state, trade_controller, master_loader,
             # ranker's rules and got eight breakout fills instead,
             # because both paths read alert_only. The breakout has its
             # own switch now, and this one always leaves it off.
-            engine.breakout_armed = False
 
             # ---- THE PURSE FOLLOWS THE SWITCH. 4 September 2026. ----
             #
@@ -1510,35 +1509,30 @@ def build_app(dashboard_state, trade_controller, master_loader,
                          "positions either way; this arms the RANKED "
                          "list only -- breakout entries stay on alert")}
 
-    @app.post("/api/breakout_trading/{state}")
-    def breakout_trading(state: str, request: Request):
-        """THE SECOND SWITCH, and it is separate on purpose.
-
-        The structural breakout path buys a level break. It does not
-        check that the stock is up 1%, that it is above its own open,
-        that there is a written reason for the move, that it beats its
-        sector, or that it is liquid enough for his size. Those are the
-        RANKER's gates and the breakout has none of them.
-
-        On 6 August one switch armed both and produced eight fills he
-        did not want. So this exists, off by default, and turning the
-        bot on never turns it on.
-        """
-        _require_operator(request)
-        engine = getattr(dashboard_state, "engine", None)
-        if engine is None:
-            return {"success": False, "error": "no engine in this session"}
-        want = str(state).lower() in ("on", "true", "1", "enable")
-        if want and getattr(engine, "alert_only", True):
-            return {"success": False,
-                    "error": "turn bot trading ON first -- the breakout "
-                             "cannot trade while the bot is watching"}
-        engine.breakout_armed = want
-        decision(f"[DASHBOARD] Breakout entries {'ARMED' if want else 'OFF'}"
-                 f" -- these have no ranker gates.")
-        trade_controller.note_action(
-            True, f"Breakout entries {'ON' if want else 'OFF'}")
-        return {"success": True, "breakout_armed": want}
+    # ---- THE SECOND SWITCH IS GONE. 5 September 2026. ----
+    #
+    #     "yes remove breakout_armed too"
+    #     "breakout_armed = only trades when an event or real
+    #      opportunity arised in markets, NEVER in to random stocks"
+    #                                           -- the operator
+    #
+    # POST /api/breakout_trading/{state} stood here and armed the
+    # structural breakout path, which buys a level break with none of
+    # the ranker's gates -- no reason, no volume test, no liquidity
+    # floor. It was added off-by-default on 6 August after that path
+    # gave him eight fills he had not asked for, and his own record
+    # shows it never bought again:
+    #
+    #     RANKED_SETUP              last 2026-09-04   66 trades
+    #     STRUCTURAL_LONG_BREAKOUT  last 2026-08-06   62 trades
+    #
+    # The path now alerts and never buys, permanently, in
+    # Engine._try_structural_entry(). An endpoint that arms something
+    # unarmable is a lever connected to nothing, and a lever connected
+    # to nothing is worse than no lever: it says the capability exists.
+    #
+    # A volume surge still buys -- SURGE_IS_A_REASON, 10x a stock's
+    # own normal pace. That is an event. A level break is a coordinate.
 
     @app.websocket("/ws")
     async def ws_endpoint(websocket: WebSocket):

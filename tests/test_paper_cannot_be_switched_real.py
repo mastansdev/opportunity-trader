@@ -124,14 +124,29 @@ def test_arming_asks_the_gate_before_the_switch_moves():
     assert i < j, "the gate is asked AFTER the switch is already set"
 
 
-def test_neither_position_of_the_switch_raises_alert_only():
-    """The third state stays dead. ON and OFF both leave it False."""
+def test_the_switch_writes_exactly_one_flag():
+    """The collapse to two. alert_only and breakout_armed were retired
+    on 5 September; apply_switch sets execution.live and nothing else,
+    so there is no second flag for the two screens to disagree over."""
     import inspect
 
     from core.trading_gate import apply_switch
     src = inspect.getsource(apply_switch)
-    assert "engine.alert_only = False" in src
-    assert "alert_only = True" not in src
+    assert "execution.live = bool(on)" in src
+    # The docstring EXPLAINS the retired flags by name, so strip it
+    # along with the comments and look only at what executes. (The
+    # same trap tests/test_the_guard_stops_a_dead_feed.py fell into
+    # tonight: a guard that fires on its own documentation.)
+    import ast
+
+    tree = ast.parse(src.lstrip())
+    fn = tree.body[0]
+    if (fn.body and isinstance(fn.body[0], ast.Expr)
+            and isinstance(fn.body[0].value, ast.Constant)):
+        fn.body = fn.body[1:]
+    body = ast.unparse(fn)
+    assert "alert_only" not in body, "the third state is back"
+    assert "breakout_armed" not in body, "the second switch is back"
 
 
 def test_the_gate_itself_still_fails_closed():

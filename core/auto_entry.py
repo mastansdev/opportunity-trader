@@ -855,10 +855,6 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None,
             # Same fault as "[CARRY] ... stop None" and the false
             # "silent" feed warning: a sentence asserting something
             # the code never established.
-            if getattr(engine, "alert_only", True):
-                return (f"book full ({len(held)} of {max_positions}) and "
-                        f"the bot is not trading -- no seat can be freed "
-                        f"while trading is OFF")
             if not ENABLE_SLOT_ROTATION:
                 return (f"book full ({len(held)} of {max_positions}) and "
                         f"slot rotation is OFF -- no seat can be freed")
@@ -1034,6 +1030,19 @@ def price_now(row, price_of):
     return row
 
 
+def detail_or_symbol(row, symbol):
+    """The one-line description of a pick, for an alert. Falls back to
+    the symbol -- a missing description must not cost him the alert."""
+    bits = [symbol]
+    move = _num(row.get("change_pct"))
+    if move is not None:
+        bits.append(f"up {move:.1f}%")
+    vol = _num(row.get("volume_x")) or _num(row.get("volume_ratio"))
+    if vol:
+        bits.append(f"on {vol:.1f}x volume")
+    return " ".join(bits)
+
+
 def take(rows, engine, now=None, security_id_of=None, held=None,
          traded_today=None,
          max_positions=None, alert=None, enter=None, price_of=None,
@@ -1049,7 +1058,6 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
     """
     out = []
     held = set(str(s).upper() for s in (held or []))
-    alert_only = bool(getattr(engine, "alert_only", True))
 
     # ---- BEST FIRST, NOT FIRST FIRST. 5 August 2026. ----
     #
@@ -1125,12 +1133,67 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                 r["jump_x"] = float(got["ratio"])
                 r["jump_at"] = got.get("minute")
 
-    rows = sorted(
-        [r for r in (rows or []) if isinstance(r, dict)],
-        key=lambda r: (-(_num(r.get("jump_x")) or 0.0),
-                       -(_num(r.get("volume_x"))
-                         or _num(r.get("volume_ratio")) or 0.0),
-                       -(_num(r.get("score")) or 0.0)))
+    # ---- THE SEAT GOES TO WHOEVER IS ALIVE NOW. 5 Sep 2026. ----
+    #
+    #     "whenever a free seat is available that is not meant to fill
+    #      any eligible candidate at 09:30 to fill at 12:45 time ...
+    #      bot needs to search for the best candidate right that time
+    #      not 1 hour back best candidate"       -- the operator
+    #
+    # He is right, and the old code did exactly what he described. It
+    # sorted by volume_x and score -- both read off the board, both
+    # describing a move that ALREADY HAPPENED -- and only then walked
+    # the list re-checking liveness one row at a time. So liveness was
+    # a FILTER and the stale ratio was the SORT. A stock surging this
+    # second but ranked eighth by cumulative volume got the seat only
+    # if the seven above it were all dead.
+    #
+    # 4 September is what that costs. The book filled 10 of 10 by
+    # 09:16:38 -- the whole day's capital in 83 seconds -- and then:
+    #
+    #     first 83 seconds   11 trades   8 won  3 lost   +Rs 13,157
+    #     everything after   16 trades   6 won 10 lost   -Rs  1,363
+    #
+    # RESPONIND ignited at 10:07 and was bought at 13:26, 48 paise
+    # below the top of its move, for -Rs 4,833. Entering at the
+    # ignition replays at +Rs 8,170. The stock was right; the hour was
+    # not, because the seat was not free and the list was not re-asked.
+    #
+    # SO EVERY ROW IS RE-PRICED FIRST, THEN SORTED. price_now() used to
+    # run inside the loop, which meant the ordering could never see the
+    # live reading. It runs over the whole field here, and the sort key
+    # is what the field is doing RIGHT NOW.
+    #
+    # WHAT LIVENESS IS, kept exactly as core/ranker.liveness() defines
+    # it -- nothing new is invented and no threshold is added:
+    #
+    #     alive   at or near its own high, still moving his way
+    #     fading  well off the high, or the recent window has died
+    #     None    cannot say -- which never sorts last, because a
+    #             stock the feed cannot speak for is not a dead one
+    #
+    # Within "alive", the tie goes to the stock DOING MORE right now --
+    # the bigger recent move, then the one closest to its own high.
+    # Volume and score still break ties, so nothing that used to
+    # matter has been thrown away; it has been demoted below the
+    # question he actually asked.
+    for r in (rows or []):
+        if isinstance(r, dict):
+            price_now(r, price_of)
+
+    def _how_alive(r):
+        state = str(r.get("state") or "").lower()
+        rank = {"alive": 0, "fading": 2}.get(state, 1)   # unknown sits between
+        recent = _num(r.get("recent_pct")) or 0.0
+        hi, ltp = _num(r.get("day_high")), _num(r.get("ltp"))
+        off_high = abs((ltp - hi) / hi * 100.0) if (hi and ltp and hi > 0) else 99.0
+        return (rank, -recent, off_high,
+                -(_num(r.get("volume_x"))
+                  or _num(r.get("volume_ratio")) or 0.0),
+                -(_num(r.get("score")) or 0.0))
+
+    rows = sorted([r for r in (rows or []) if isinstance(r, dict)],
+                  key=_how_alive)
 
     # ---- A SEAT YOU ARE NOT USING CANNOT RUN OUT. 18 Aug 2026. ----
     #
@@ -1159,20 +1222,55 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
     #      confirmation only they need to executed"
     #
     # He is the one taking it. His capacity is not this number.
-    seats = None if alert_only else max_positions
+    # ---- THE BOT ALWAYS TRADES. 5 September 2026. ----
+    # This was `None if alert_only else max_positions` -- unlimited
+    # picks when the bot was only alerting, because his own capacity
+    # is not the seat count. alert_only is retired (see Engine's
+    # __init__), so the seat limit always applies.
+    seats = max_positions
 
     for row in rows:
         if not isinstance(row, dict):
             continue
         symbol = str(row.get("symbol") or "").upper()
 
-        # PRICED BY THE TICK, NOT THE SNAPSHOT. Done per row and as
-        # late as possible -- the last thing before the gates read it.
-        row = price_now(row, price_of)
+        # Already priced off the tick, above, before the sort -- the
+        # ordering has to see the live reading or it cannot rank by it.
         why = refuse_reason(row, engine, now=now, held=held,
                             max_positions=seats,
                             traded_today=traded_today)
         if why:
+            # ---- A FULL BOOK MUST NOT SILENCE HIM. 5 Sep 2026. ----
+            #
+            #     "i do not want to miss / loose any info even by
+            #      mistake"                        -- his standing rule
+            #
+            # Until the collapse to two, the only path that alerted on
+            # a pick it could not take was the ALERT-ONLY lane, and
+            # that lane went with the flag. Nothing else alerted on a
+            # capacity refusal, so removing it would have left him
+            # hearing nothing for most of the day: on 4 September the
+            # book was full 10 of 10 by 09:16:38 and stayed at 9 or 10
+            # until the close.
+            #
+            # A refusal ABOUT THE STOCK stays silent -- he does not
+            # want to be told that a stock he was never going to buy
+            # was not bought. A refusal about CAPACITY is different:
+            # the stock passed everything and lost to an accident of
+            # timing, which is the one refusal he can act on himself.
+            # "already holding it -- no pyramiding" is about the
+            # STOCK and must stay silent; "already holding 5 of 5" is
+            # about the BOOK. One substring caught both, which is why
+            # this matches the shapes rather than a word.
+            lost_a_seat = ("book full (" in why
+                           or " of " in why and "already holding" in why)
+            if lost_a_seat and alert is not None:
+                try:
+                    alert(symbol, "ranked-buy",
+                          f"{detail_or_symbol(row, symbol)} -- NO SEAT: "
+                          f"{why}. It passed every other gate.")
+                except Exception as exc:                   # noqa: BLE001
+                    _broke("alert (he never saw this pick)", exc)
             _journal_pick(engine, row, False, why)
             out.append({"symbol": symbol, "taken": False, "why": why,
                         "score": _num(row.get("score"))})
@@ -1220,24 +1318,14 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                   f"\nexit {plan['stop']}"
                   + (f"\ntrailing {_trail}" if _trail else ""))
 
-        # ---- ALERT_ONLY_MODE IS UNTOUCHED BY THIS CHANGE ----
-        # Connecting the two halves and switching the safety off are
-        # separate decisions and must never ride in together.
-        if alert_only:
-            if alert is not None:
-                try:
-                    alert(symbol, "ranked-buy",
-                          detail + " -- ALERT ONLY: the bot is not "
-                                   "trading. Use the dashboard BUY.")
-                except Exception as exc:                   # noqa: BLE001
-                    _broke("alert (he never saw this pick)", exc)
-            _journal_pick(engine, row, False,
-                          "ALERT ONLY -- alerted, operator decides")
-            out.append({"symbol": symbol, "taken": False,
-                        "score": _num(row.get("score")),
-                        "why": "ALERT ONLY -- bot not trading, "
-                               "operator decides"})
-            continue
+        # ---- THE ALERT-ONLY LANE IS GONE. 5 September 2026. ----
+        #
+        # A branch stood here that alerted him and took no trade, for
+        # when the bot "was not trading". That state was abolished on
+        # 31 August -- 65 alerts and 0 trades over ten days is what it
+        # produced -- and the flag guarding it was retired with the
+        # collapse to two. The bot always trades; the switch chooses
+        # whose money. Removed with the flag it depended on.
 
         security_id = None
         if security_id_of is not None:

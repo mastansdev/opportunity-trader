@@ -136,10 +136,22 @@ def test_the_dashboard_switch_is_what_re_arms(monkeypatch):
     assert "apply_switch" in src, (
         "the endpoint no longer moves the switch through the gate")
     src = _gate
-    assert "engine.alert_only = False" in src, (
-        "the switch no longer clears alert_only, so a guard disarm can "
-        "no longer be undone from the dashboard and the message above "
-        "is now wrong")
+    # ---- THE FLAG IT CHECKED FOR IS RETIRED. 5 September 2026. ----
+    #
+    # This asserted apply_switch clears engine.alert_only, so that a
+    # feed-guard disarm could be undone from the dashboard. Two things
+    # have since changed and both remove the need:
+    #
+    #   the guard no longer disarms anything -- main.py wires it as
+    #   _LiveGuard(disarm=None): "Nothing may turn trading off but him"
+    #
+    #   alert_only is gone entirely (the collapse to two, 5 Sep). The
+    #   switch writes execution.live and nothing else, so there is no
+    #   second flag left for anything to get stuck on.
+    #
+    # What must remain true is that the switch MOVES, from one place.
+    assert "execution.live = bool(on)" in src, (
+        "apply_switch no longer moves the switch")
 
 
 def test_a_disarmed_guard_that_is_not_armed_says_nothing(monkeypatch):
