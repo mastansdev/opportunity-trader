@@ -316,8 +316,35 @@ def check(now=None, telegram_db=TELEGRAM_DB, results_db=RESULTS_DB):
                 "select count(*) from results_events "
                 "where date(results_date) >= date(?)", (today,))
     reporting = int(due[0][0]) if due and due[0] else 0
+    # ---- IT KNOWS, OR IT DOES NOT. 5 September 2026. ----
+    #
+    # This asked WHEN the calendar was last refreshed. The question it
+    # is actually for is whether the bot knows who reports today, and
+    # those came apart the moment the calendar started reading the
+    # Earnings Pulse channel: on 5 September the NSE stamp said
+    # 31 August and the store held MOLBIO for that very day.
+    #
+    # So it asks what it means. If a name is on file for today, the bot
+    # knows one -- and it says whose, because "the calendar is fine" is
+    # not information and he checks this line every morning.
+    #
+    # It still BLOCKS when something is due and nothing is known, which
+    # is the case the check was written for.
+    named = _rows(results_db,
+                  "select symbol from results_events "
+                  "where date(results_date) = date(?) "
+                  "order by symbol limit 12", (today,))
+    reporting_today = [str(r[0]) for r in named if r and r[0]]
+
     if stamp == today:
         add("results calendar", True, "refreshed today")
+    elif reporting_today:
+        add("results calendar", True,
+            f"{len(reporting_today)} reporting today -- "
+            + ", ".join(reporting_today[:6])
+            + (f" (NSE list last refreshed {stamp or 'never'}, so there "
+               f"may be more)" if stamp != today else ""),
+            blocks=False)
     elif reporting == 0:
         add("results calendar", True,
             f"last refreshed {stamp or 'never'} -- and nothing is due. "
@@ -326,7 +353,8 @@ def check(now=None, telegram_db=TELEGRAM_DB, results_db=RESULTS_DB):
     else:
         add("results calendar", False,
             f"last refreshed {stamp or 'never'} and {reporting} company"
-            f"(ies) report from today -- the bot will not know which")
+            f"(ies) report in the days ahead but none today -- the bot "
+            f"will not know which")
 
     blocking = [c for c in checks if c["blocks"]]
     return {"ready": not blocking, "checks": checks,

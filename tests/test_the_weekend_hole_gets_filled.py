@@ -192,19 +192,97 @@ def test_an_id_that_never_arrives_is_dropped_after_three_tries():
     _seed(f, [(100, 40), (101, 39), (102, 38), (103, 37), (104, 36),
               (108, 20), (109, 19), (110, 18)])
     # 105, 106, 107 are service messages: they will never come back.
-    reader = FakeReader(published={}, missing={105, 106, 107})
+    # 110 is the newest post on file and travels as the control, so the
+    # silence on the other three can be read as real rather than as a
+    # broken request -- see test_a_broken_request_spends_no_attempt.
+    reader = FakeReader(published={110: "already held"},
+                        missing={105, 106, 107})
     f.client = reader
 
     for _ in range(3):
         f.fill_gaps()
     assert reader.asked, "it never asked at all"
-    asked_first = reader.asked[0]
-    assert set(asked_first) == {105, 106, 107}
+    # The three missing ids, plus the control that proves the request
+    # works at all.
+    assert set(reader.asked[0]) == {105, 106, 107, 110}
 
     before = len(reader.asked)
     f.fill_gaps()
     assert len(reader.asked) == before, \
         "asked a fourth time -- it must go quiet after three"
+
+
+def test_a_broken_request_spends_no_attempt():
+    """---- SILENCE MEANT TWO THINGS. 5 September 2026. ----
+
+    First live run, 16:49: all 71 ids came back "nothing there". That
+    is either exactly right -- Telegram numbers service posts in the
+    same sequence and those can never be stored -- or the request does
+    not work at all, and the answer looks identical either way.
+
+    The wrong reading is expensive: three runs of a broken request
+    would mark 71 real posts dead and stop asking for them for good.
+
+    So one post we KNOW we hold travels with the first batch. If even
+    that does not come back, the request is broken -- and nothing is
+    recorded, so no attempt is spent and the holes stay open.
+    """
+    path = os.path.join(tempfile.mkdtemp(), "telegram.db")
+    f = TelegramFeed(db_path=path,
+                     channels=[{"name": "Chan", "handle": "chan"}])
+    _seed(f, [(100, 40), (101, 39), (102, 38), (103, 37), (104, 36),
+              (108, 20), (109, 19), (110, 18)])
+
+    class BrokenReader(FakeReader):
+        def fetch(self, channel, limit=30, before=None, since_id=None,
+                  ids=None):
+            self.asked.append(list(ids or []))
+            return []                     # answers nothing, ever
+
+    reader = BrokenReader()
+    f.client = reader
+    for _ in range(4):
+        f.fill_gaps()
+
+    # It kept asking -- no attempt was spent on a request that was not
+    # working, so the holes are still open.
+    assert len(reader.asked) == 4, \
+        "a broken request must not burn the three tries"
+    assert f.missing_ids("Chan") == [105, 106, 107]
+
+
+def test_the_control_travels_with_the_first_batch():
+    path = os.path.join(tempfile.mkdtemp(), "telegram.db")
+    f = TelegramFeed(db_path=path,
+                     channels=[{"name": "Chan", "handle": "chan"}])
+    _seed(f, [(100, 40), (101, 39), (102, 38), (103, 37), (104, 36),
+              (108, 20), (109, 19), (110, 18)])
+    # 110 is the newest post on file; 105-107 are the hole.
+    reader = FakeReader(published={110: "already held"},
+                        missing={105, 106, 107})
+    f.client = reader
+    f.fill_gaps()
+    assert 110 in reader.asked[0], "no control was sent"
+    # The control came back, so the silence on 105-107 is real and the
+    # attempt IS spent.
+    assert f.missing_ids("Chan") == [105, 106, 107]
+    for _ in range(2):
+        f.fill_gaps()
+    assert f.missing_ids("Chan") == []
+
+
+def test_the_control_is_not_stored_again():
+    """It is already on file; sending it through _store() would push its
+    picture back through OCR for nothing."""
+    path = os.path.join(tempfile.mkdtemp(), "telegram.db")
+    f = TelegramFeed(db_path=path,
+                     channels=[{"name": "Chan", "handle": "chan"}])
+    _seed(f, [(100, 40), (101, 39), (102, 38), (103, 37), (104, 36),
+              (108, 20), (109, 19), (110, 18)])
+    f.client = FakeReader(published={110: "already held",
+                                     105: "a real recovered post"},
+                          missing={106, 107})
+    assert f.fill_gaps() == 1, "only the genuinely new post counts"
 
 
 def test_a_post_that_does_arrive_is_stored():
@@ -213,7 +291,10 @@ def test_a_post_that_does_arrive_is_stored():
                      channels=[{"name": "Chan", "handle": "chan"}])
     _seed(f, [(100, 40), (101, 39), (102, 38), (103, 37), (104, 36),
               (108, 20), (109, 19), (110, 18)])
-    f.client = FakeReader(published={105: "ACME wins Rs 900 crore order",
+    # 110 is the control -- the newest post already on file. It proves
+    # the request works; it is not counted as recovered.
+    f.client = FakeReader(published={110: "already held",
+                                     105: "ACME wins Rs 900 crore order",
                                      106: "second one", 107: "third"})
     assert f.fill_gaps() == 3
     assert f.missing_ids("Chan") == []
@@ -231,6 +312,37 @@ def test_a_bots_id_space_is_not_a_gap_in_this_channel():
                      channels=[{"name": "Chan", "handle": "chan"}])
     _seed(f, [(17263, 80), (17321, 47), (17379, 14)])
     assert f.missing_ids("Chan") == []
+
+
+def test_a_thin_channel_keeps_its_guard():
+    """---- THE GUARD FAILED OPEN. 5 September 2026, from his run. ----
+
+    The rate needs three dated posts. @WLPulseBot had three when the
+    guard was written and TWO by the evening -- one aged past the 96h
+    retention edge -- so no rate could be measured, the size test was
+    skipped entirely, and all 57 of its ids were asked for again.
+
+    It would do that to any quiet channel eventually, because _prune()
+    keeps taking posts away. With no rate, the bound is what we hold: a
+    hole bigger than everything ever seen from a channel is not its
+    numbering.
+    """
+    path = os.path.join(tempfile.mkdtemp(), "telegram.db")
+    f = TelegramFeed(db_path=path,
+                     channels=[{"name": "Chan", "handle": "chan"}])
+    _seed(f, [(17263, 80), (17321, 47)])          # two posts, 57 apart
+    assert f.missing_ids("Chan") == []
+
+
+def test_a_thin_channel_can_still_report_a_small_hole():
+    """The bound must not silence a channel with a genuine one or two
+    missing -- that is the ordinary shape of a service message and one
+    question settles it."""
+    path = os.path.join(tempfile.mkdtemp(), "telegram.db")
+    f = TelegramFeed(db_path=path,
+                     channels=[{"name": "Chan", "handle": "chan"}])
+    _seed(f, [(500, 30), (503, 20)])
+    assert f.missing_ids("Chan") == [501, 502]
 
 
 def test_a_busy_channels_weekend_is_still_a_gap():
@@ -313,8 +425,22 @@ def test_the_collector_actually_calls_it():
     import io
     src = io.open("tools/collector.py", encoding="utf-8").read()
     assert "feed.fill_gaps()" in src
-    assert src.index("feed.catch_up()") < src.index("feed.fill_gaps()"), \
-        "the walk brings in what is new; this is only for what it stepped over"
+
+    # ---- AFTER THE FORWARD PASS, NOT AFTER THE WALK. 5 Sep 2026. ----
+    #
+    # This asserted that the backward walk ran first. The walk is no
+    # longer run at startup at all -- poll()'s forward first pass does
+    # that half, and does it without re-downloading a picture for every
+    # post already on file (measured: 99 read, 0 new, 83 seconds).
+    #
+    # The ORDER still matters, for the same reason it always did: a
+    # hole can only be seen once the posts on BOTH sides of it are on
+    # file. So the forward pass runs first and this runs after it.
+    assert "feed.catch_up()" not in src, \
+        "the backward walk is redundant -- poll() goes forward and "\
+        "fill_gaps() closes the holes"
+    assert src.index("passes += 1") < src.index("feed.fill_gaps()"), \
+        "a hole is only visible once both its edges are on file"
 
 
 def test_named_posts_never_travel_with_a_page_request():

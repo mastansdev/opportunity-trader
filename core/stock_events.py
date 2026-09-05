@@ -399,7 +399,41 @@ CALENDAR_WORDS = re.compile(
 # own product, which is not a market event however enthusiastic.
 NOISE = re.compile(
     r"youtu\.be|youtube\.com|/shorts/|"
-    r"\bitr\b|deadline|recharge|must watch|subscribe|"
+    # ---- THREE WORDS THAT ARE ALSO FINANCE. 5 Sep 2026. ----
+    #
+    # Audited by asking, of each word in this rule, what it holds back
+    # ON ITS OWN across all 2,016 stored messages. Three were throwing
+    # away real filings:
+    #
+    #   subscribe   24 messages, 17 of them naming a stock, and every
+    #               one real. "Subscribed" is finance vocabulary --
+    #                 FLAIR WRITING: CO SUBSCRIBES TO 100 CRORE
+    #                   RIGHTS ISSUE OF WHOLLY OWNED SUBSIDIARY
+    #                 VODAFONE IDEA: JULY NET MOBILE SUBSCRIBER ADDS
+    #                 Purple Style Labs IPO ... subscribed 24% on day
+    #                   two
+    #               It is narrowed to the promo phrasing, which no
+    #               filing has ever used.
+    #
+    #   deadline    4 messages, 3 naming a stock, all real --
+    #                 ARTSON LTD: RECEIVES PURCHASE ORDER WORTH
+    #                   7.17 CR ... EXECUTION DEADLINES SET FOR 2027
+    #                 India sets April 2027 deadline for electric
+    #                   truck localisation
+    #               An order win states its delivery deadline. The word
+    #               was here for tax reminders, and \bitr\b already
+    #               catches those, so it is gone.
+    #
+    #   follow us on   added earlier the same day and reverted the same
+    #               hour: 84 messages, 26 naming a stock. The Day Trader
+    #               Telugu cards carry "Follow us on @etnowlive" as ET
+    #               Now's watermark, so it was about to throw away the
+    #               Welspun MoU, the Mahanadi IPO and the Cupid promoter
+    #               purchase -- the exact cards saved from the digest
+    #               rule that morning. Only the wording a filing never
+    #               uses survives, below.
+    r"\bitr\b|recharge|must watch|"
+    r"subscribe (?:to (?:our|the|my)|now|for more)|"
     r"picking window|arena|"
     r"i worked on|happy to see the validation|guys sharing|"
     # ---- THE AFFILIATE BLOCK. 2 August 2026. ----
@@ -428,7 +462,35 @@ NOISE = re.compile(
     # would silently drop their results, which is the opposite of the
     # job. So the patterns match the AFFILIATE SHAPE -- his own
     # shortener prefix, his own referral host -- and nothing else.
-    r"support our work|bit\.ly/_|aonelink\.in", re.I)
+    r"support our work|bit\.ly/_|aonelink\.in|"
+    # ---- THE CHANNEL ADVERTISING ITSELF. 5 September 2026. ----
+    #
+    #     "we made that to avoid links from that channel right?
+    #      forgot again??"   "not now since begining"
+    #                                          -- the operator
+    #
+    # He was right, and twice over. This rule has been here since
+    # 2 August and it works -- there are ZERO events of kind NOISE on
+    # file, so not one of these has ever reached a stock. A second
+    # rule was written on 5 September before checking, and measured
+    # against all 2,016 stored messages it caught 17 this one already
+    # had and 52 fewer besides. It was deleted; these four lines are
+    # everything it actually added.
+    #
+    # RedboxGlobal India advertising its own social accounts:
+    #
+    #     "WE'RE NOW LIVE ON INSTAGRAM! Get market-moving news
+    #      before everyone else."
+    #     "We're building something bigger on Facebook."
+    #
+    # Four messages, no stock named in any of them. The hosts are
+    # matched as well as the wording, because the next one will be
+    # phrased differently and still link to the same place.
+    # Measured: these four catch all four self-promos and cost nothing.
+    # "follow us on" alone does not appear -- see the note above.
+    r"we'?re now live on|building something bigger|"
+    r"(?:follow|join) us on (?:instagram|facebook)|"
+    r"instagram\.com|facebook\.com|fb\.watch", re.I)
 
 # An analyst's opinion is not an event. It may be worth reading and it
 # is not something that HAPPENED to the company.

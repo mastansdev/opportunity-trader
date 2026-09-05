@@ -1820,14 +1820,50 @@ class TelegramFeed:
         resolved. A pass that reads too much is a slow pass; a pass
         that reads nothing is a blind one.
         """
+        # ==============================================================
+        # A YOUTUBE CHANNEL AT THE WEEKEND.  5 September 2026.
+        # ==============================================================
+        #
+        #     "daytrader telugu needs to be avoided on weekends & links
+        #      they are posting"
+        #     "they will be posting their youtube links all weekends"
+        #                                          -- the operator
+        #
+        # On a Saturday that channel is not a market feed. From his own
+        # store, the same evening:
+        #
+        #     post 208202  "మీకు SBI ACC ఉందా ?🤩 శుభవార్త
+        #                   https://youtube.com/shorts/..."
+        #     STOCKS FOUND: ACC
+        #
+        # "ACC" inside the Telugu word for ACCOUNT matched ACC Ltd, the
+        # cement company, and a YouTube promotion became a published
+        # reason. That is not a cosmetic fault: a published reason is
+        # MANDATORY before the ranker will evaluate a stock at all, so
+        # this does not sit harmlessly on a panel -- it opens the door.
+        #
+        # Skipped on Saturday and Sunday only. NOT a rule about
+        # collecting at the weekend in general: the weekend is exactly
+        # when the gaps form, and every other channel must keep being
+        # read. This is about what THIS channel publishes on those two
+        # days, which he watches and I do not.
+        weekend = datetime.now().weekday() >= 5
+        channels = self.channels
+        if weekend:
+            kept = [c for c in channels
+                    if "daytrader" not in
+                    f"{c.get('handle') or ''}{c.get('name') or ''}"
+                    .lower().replace(" ", "")]
+            if kept:                       # never empty the list
+                channels = kept
         if not fast:
-            return list(self.channels)
+            return list(channels)
         try:
             from core.feed_clock import channel_kind
 
             in_season = self._results_matter_today()
             picked = []
-            for entry in self.channels:
+            for entry in channels:
                 kinds = {channel_kind(entry.get(key))
                          for key in ("handle", "name")}
                 if kinds & set(self.SLOW_KINDS):
@@ -1854,9 +1890,13 @@ class TelegramFeed:
                         picked.append(entry)
                     continue
                 picked.append(entry)
-            return picked or list(self.channels)
+            # The fallback keeps the weekend rule: falling back to
+            # `channels` rather than self.channels means an
+            # unresolvable channel kind cannot quietly put Day Trader
+            # Telugu's Saturday YouTube posts back on the list.
+            return picked or list(channels)
         except Exception:                                  # noqa: BLE001
-            return list(self.channels)
+            return list(channels)
 
     def _results_matter_today(self, day=None):
         """Should the results channels be read on the fast loop?
@@ -2347,6 +2387,30 @@ class TelegramFeed:
             if at_a is not None and at_a < cutoff:
                 continue
             size = b - a - 1
+            # ---- TOO LITTLE HISTORY MUST NOT MEAN NO GUARD. ----
+            #                                   5 September 2026.
+            #
+            # The rate needs three dated posts. @WLPulseBot had three
+            # when the guard was written and TWO by the evening -- one
+            # aged past the 96h retention edge -- so rate_per_hour came
+            # back None, the size test below was skipped entirely, and
+            # all 57 of its ids were asked for again on his 16:56 run.
+            # The guard failed open on the exact channel it exists for,
+            # and it will do that to any quiet channel eventually,
+            # because _prune() keeps taking posts away.
+            #
+            # With no measurable rate, what IS known is how much of this
+            # channel we hold at all. A hole bigger than everything we
+            # have ever seen from it is not its numbering: two posts on
+            # file and fifty-seven "missing" between them is a shared
+            # bot conversation, not a channel that went quiet.
+            if size > 3 and not rate_per_hour and size > max(3, len(held)):
+                diagnostic(
+                    f"[GAPFILL] {channel_name}: ids {a + 1}-{b - 1} "
+                    f"({size}) against {len(held)} post(s) ever held, "
+                    f"and too little history to measure a rate. Not its "
+                    f"post numbers -- not asking.")
+                continue
             # Small holes are always asked about. One or two missing ids
             # is the ordinary shape of a service message -- somebody
             # joined, a post was pinned -- and one question settles it.
@@ -2411,12 +2475,47 @@ class TelegramFeed:
                 continue
             decision(f"    {str(name)[:22]:22} {len(wanted):3} post(s) "
                      f"missing -- asking for them by id")
+            # ==================================================
+            # A CONTROL, SO SILENCE CAN BE READ.  5 Sep 2026.
+            # ==================================================
+            #
+            # First live run, 16:49: every one of 71 ids came back
+            # "nothing there". That is either exactly right -- Telegram
+            # numbers service posts in the same sequence and those can
+            # never be stored -- or the request does not work at all,
+            # and NOTHING IN THE ANSWER TELLS THE TWO APART.
+            #
+            # It matters because the wrong reading is expensive: three
+            # runs of a broken request would mark 71 real posts dead
+            # and stop asking for them for good. Silence must not be
+            # allowed to mean two things.
+            #
+            # So one id we KNOW we hold travels with the first batch.
+            # If it comes back, the request works and the others really
+            # are not posts. If it does not, the request is broken --
+            # say so loudly, and record NOTHING, so no attempt is spent
+            # on a mechanism that was not working.
+            control = None
+            try:
+                with self._lock:
+                    conn = sqlite3.connect(self.db_path)
+                    row = conn.execute(
+                        "SELECT CAST(message_id AS INTEGER) FROM messages "
+                        "WHERE channel = ? AND message_id IS NOT NULL "
+                        "ORDER BY 1 DESC LIMIT 1", (name,)).fetchone()
+                    conn.close()
+                control = int(row[0]) if row and row[0] is not None else None
+            except Exception:                              # noqa: BLE001
+                control = None
+
             got = []
             # A hundred at a time is Telegram's own batch size for this
             # request. Asking for more in one call is not faster and is
             # the shape of thing that draws a rate limit.
             for start in range(0, len(wanted), 100):
                 batch = wanted[start:start + 100]
+                if start == 0 and control is not None:
+                    batch = batch + [control]
                 try:
                     got.extend(self.client.fetch(handle, ids=batch) or [])
                 except TypeError:
@@ -2432,6 +2531,22 @@ class TelegramFeed:
                     break
             arrived = {int(m["id"]) for m in got
                        if str(m.get("id") or "").isdigit()}
+
+            # The control decides how to read the silence -- see above.
+            if control is not None and control not in arrived:
+                warn(f"[GAPFILL] {name}: asked for {len(wanted)} missing "
+                     f"post(s) AND for post {control}, which is already "
+                     f"on file, and none of them came back. The request "
+                     f"is not working -- recording nothing, so no attempt "
+                     f"is spent. The holes stay open and will be asked "
+                     f"for again.")
+                continue
+            arrived.discard(control)
+            # The control is already on file. Keeping it here would send
+            # its picture back through _store() for nothing.
+            got = [m for m in got
+                   if str(m.get("id") or "") != str(control)]
+
             self._note_gap_attempt(name, wanted, arrived)
             if got:
                 # skip_known=False for the same reason catch_up() uses

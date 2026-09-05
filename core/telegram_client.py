@@ -905,6 +905,51 @@ class FallbackReader:
         # so the fallback is slower, not wrong.
         return self.secondary.fetch(handle, limit=limit, before=before)
 
+    # ---- THE FEED HOLDS THIS, NOT THE READER INSIDE IT. ----
+    #                                        5 September 2026.
+    #
+    # watch() and pump() were added to TelethonReader, and the feed
+    # holds a FallbackReader wrapping it. So TelegramFeed.listen() did
+    #
+    #     watch = getattr(self.client, "watch", None)
+    #     if watch is None: return 0
+    #
+    # -- found nothing, returned 0, printed nothing, and the collector
+    # ran a whole startup with the listener silently absent. His 16:48
+    # run has no [PUSH] line anywhere in it.
+    #
+    # The fault this codebase keeps producing, and mine this time:
+    # built on the inner object while the outer one is what the live
+    # path actually holds. trading_gate, surge(), MOVE_DIED,
+    # refused_symbols, _same_story(), the collector's own listener --
+    # and now this.
+    #
+    # Both delegate, and both FAIL QUIET. The public web view cannot
+    # push, and a channel that cannot push is polled, which is how this
+    # worked for its entire life.
+
+    def watch(self, channels, on_message):
+        watcher = getattr(self.primary, "watch", None)
+        if watcher is None:
+            return 0
+        try:
+            return watcher(channels, on_message) or 0
+        except Exception as exc:                           # noqa: BLE001
+            warn(f"[TELEGRAM] Could not start listening "
+                 f"({str(exc)[:70]}). Polling only.")
+            return 0
+
+    def pump(self, seconds):
+        pumper = getattr(self.primary, "pump", None)
+        if pumper is None:
+            return False
+        try:
+            return bool(pumper(seconds))
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[TELEGRAM] Listening stopped ({str(exc)[:70]}). "
+                       f"Polling covers this cycle.")
+            return False
+
     def close(self):
         for reader in (self.primary, self.secondary):
             if hasattr(reader, "close"):

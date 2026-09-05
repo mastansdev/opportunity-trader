@@ -211,6 +211,50 @@ def test_the_collector_listens_too():
         "a reader that cannot push must not spin"
 
 
+def test_the_reader_the_feed_actually_holds_can_listen():
+    """A green test on TelethonReader proved nothing.
+
+    ---- 5 September 2026, from his own run. ----
+
+    watch() and pump() were written on TelethonReader. build_reader()
+    returns a FallbackReader that WRAPS it, and that wrapper is what
+    TelegramFeed.client holds. So listen() did
+
+        watch = getattr(self.client, "watch", None)
+        if watch is None: return 0
+
+    found nothing, returned 0, printed nothing, and his 16:48 collector
+    ran a full startup with the listener silently absent. No [PUSH]
+    line anywhere in the log.
+
+    This asserts the capability on the object the LIVE PATH holds,
+    which is the only place it means anything.
+    """
+    from core.telegram_client import build_reader
+    reader = build_reader()
+    assert hasattr(reader, "watch"), \
+        f"{type(reader).__name__} cannot be told to listen"
+    assert hasattr(reader, "pump"), \
+        f"{type(reader).__name__} cannot deliver what it was told"
+    # And idle it must answer False rather than raise -- False is what
+    # sends the caller back to an ordinary sleep.
+    assert reader.pump(0.01) is False
+
+
+def test_the_wrapper_survives_an_inner_reader_that_cannot_push():
+    """The public web view serves pages. A channel that cannot push is
+    polled, which is how this worked for its whole life."""
+    from core.telegram_client import FallbackReader
+
+    class NoPush:
+        def fetch(self, channel, limit=30, before=None, since_id=None):
+            return []
+
+    wrapper = FallbackReader(primary=NoPush(), secondary=NoPush())
+    assert wrapper.watch(["a"], lambda *_a: None) == 0
+    assert wrapper.pump(1) is False
+
+
 def test_only_one_thread_owns_the_connection():
     """Two owners and a held event loop is 'this event loop is already
     running', on the path that feeds the ranker."""

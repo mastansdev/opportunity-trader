@@ -289,45 +289,62 @@ def main(once=False, catchup=True):
         #
         # --no-catchup remains, for the case where somebody wants live
         # posts only and knows they are leaving a hole.
-        if catchup:
-            decision("  Filling the gap since the last run. Stops as "
-                     "soon as it meets what is already on file.")
-            try:
-                feed.catch_up()
-            except Exception as exc:                       # noqa: BLE001
-                warn(f"  Catch-up failed ({exc}). Live collection is "
-                     f"unaffected.")
-            # ---- AND THEN THE HOLES IT CANNOT REACH. 5 Sep 2026. ----
-            #
-            #     "for me all info must be tagged properly & never mis ,
-            #      duplicate , thats it"              -- the operator
-            #
-            # catch_up() walks backwards and stops after two pages that
-            # add nothing new. That closes a gap at the EDGE of what is
-            # held and cannot close one in the MIDDLE, because the pages
-            # either side of a weekend hole are ground already held.
-            #
-            # Counted the morning he said it: 183 posts published and
-            # never collected, and every long run of them was a weekend
-            # -- RedboxGlobal India alone had 76 missing between Saturday
-            # 29 August and Monday 31 August, sitting there for a week
-            # while catch_up() reported itself finished on every run.
-            #
-            # fill_gaps() asks a different question: the store knows it
-            # holds 3711 and 3788 and nothing between, so it asks for
-            # those posts BY NAME. One request per hundred, nothing
-            # walked past, and an id that never arrives is asked for
-            # three times and then left alone -- see
-            # core/telegram_feed.missing_ids().
-            #
-            # It runs AFTER catch_up() on purpose: the walk is what
-            # brings in everything published since the last run, and
-            # this is only for what the walk stepped over.
-            try:
-                feed.fill_gaps()
-            except Exception as exc:                       # noqa: BLE001
-                warn(f"  Gap fill failed ({exc}). Live collection is "
-                     f"unaffected.")
+        # ==========================================================
+        # READ FROM WHERE IT STOPPED. NOTHING ELSE.  5 Sep 2026.
+        # ==========================================================
+        #
+        #     "channel 1 posted img at 05:52 & bot received it as its
+        #      poll 90s if tools/collector is running. in case of
+        #      tools/collector not active then its patchup/recall must
+        #      check bots own memory that it stored last data from each
+        #      telegram channel & start from that last recvd time ...
+        #      once all done then it will do regular polling"
+        #                                          -- the operator
+        #
+        # That is the whole design, and it was already built -- twice
+        # over, with the older half still running first and costing
+        # twenty-five minutes of startup.
+        #
+        # WHAT WAS HAPPENING. catch_up() ran here: a BACKWARD page walk,
+        # newest first, two to forty pages a channel. It cannot use the
+        # "only send me what is after post 3,041" filter, because it is
+        # deliberately looking BELOW that mark -- so Telegram sends the
+        # whole page and the reader downloads every picture on it before
+        # anything checks whether the post is already held. Measured on
+        # his 16:30 run:
+        #
+        #     OrderBook Pulse  page 1   99 read   0 new   83 seconds
+        #
+        # Eighty-three seconds, ninety-nine images fetched, nothing
+        # stored. Ten channels, two pages each: twenty-five minutes
+        # before the first ordinary poll.
+        #
+        # WHAT REPLACES IT -- and both halves already existed:
+        #
+        #   posts NEWER than what we hold
+        #       poll()'s first pass. since_id gives Telegram the last
+        #       post id and reverse=True makes it walk FORWARD from
+        #       there, oldest first, FIRST_PASS_LIMIT at a time. A post
+        #       already held is never sent, so no picture is fetched
+        #       for it. This is exactly what he described.
+        #
+        #   posts MISSING below that mark -- a weekend with the laptop
+        #   off
+        #       fill_gaps(). The store knows it holds 3,711 and 3,788
+        #       and nothing between, so it asks for those posts BY
+        #       NUMBER. One request per hundred, nothing walked past.
+        #       This is the half catch_up() could never do: it stops
+        #       after two pages that add nothing, and the pages either
+        #       side of a weekend hole are ground already held.
+        #
+        # So the walk is not run here any more. It is not deleted --
+        # tools/telegram_catchup.py still calls it for a deliberate deep
+        # sweep by hand -- it simply stops being the thing that must
+        # finish before the collector starts working.
+        #
+        # ORDER MATTERS: the forward pass runs FIRST and fill_gaps()
+        # after it, because a hole can only be seen once the posts on
+        # both sides of it are on file. See below, after pass one.
 
         # ---- THE COLLECTOR LISTENS TOO. 5 September 2026. ----
         #
@@ -378,6 +395,23 @@ def main(once=False, catchup=True):
                 continue
 
             passes += 1
+            if passes == 1:
+                # The forward pass has just brought in everything
+                # published since the last run. NOW the holes below it
+                # are visible, and every one of them is a post that was
+                # published and never collected -- 183 of them the
+                # morning this was written, every long run a weekend.
+                #
+                # Guarded by `catchup` on its own line, not folded into
+                # the condition above: --no-catchup means "live posts
+                # only, and I know I am leaving a hole", and that
+                # promise is easier to keep when it is one word.
+                if catchup:
+                    try:
+                        feed.fill_gaps()
+                    except Exception as exc:               # noqa: BLE001
+                        warn(f"  Gap fill failed ({exc}). Live collection "
+                             f"is unaffected.")
             if passes == 1 or passes % 20 == 0:
                 total = events.status().get("total", 0) if events else 0
                 decision(f"  [{time.strftime('%H:%M:%S')}] pass {passes}, "

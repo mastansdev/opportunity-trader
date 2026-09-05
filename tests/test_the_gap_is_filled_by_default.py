@@ -51,7 +51,28 @@ def test_the_run_loop_calls_catch_up_when_catchup_is_true():
             for inner in ast.walk(node):
                 if isinstance(inner, ast.Call)                         and isinstance(inner.func, ast.Attribute):
                     calls.append(inner.func.attr)
-    assert "catch_up" in calls,         "main() must call catch_up() under `if catchup:`"
+    # ---- THE GAP IS FILLED FORWARD NOW. 5 September 2026. ----
+    #
+    #     "in case of tools/collector not active then its
+    #      patchup/recall must check bots own memory that it stored
+    #      last data from each telegram channel & start from that last
+    #      recvd time"                              -- the operator
+    #
+    # This asserted catch_up(), the BACKWARD page walk. Two mechanisms
+    # were doing one job and the older one could only do half of it:
+    # it stops after two pages that add nothing, and the pages either
+    # side of a weekend hole are ground already held, so 183 posts sat
+    # uncollected while it reported itself finished every morning.
+    #
+    # The job is split properly now and the guard still owns both
+    # halves. Posts NEWER than the last one held come from poll()'s
+    # forward first pass (since_id + reverse), which is precisely what
+    # he described. Posts MISSING below that mark come from
+    # fill_gaps(), which asks for them by number. The rule this test
+    # protects -- that a restart does not silently lose the night -- is
+    # unchanged; what fulfils it is not.
+    assert "fill_gaps" in calls, \
+        "main() must fill the holes under `if catchup:`"
 
 
 def test_no_catchup_is_still_available():

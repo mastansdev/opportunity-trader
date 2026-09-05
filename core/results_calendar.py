@@ -46,6 +46,8 @@ Author : H&M Opportunity Trader
 """
 
 import os
+import re
+import sqlite3
 import statistics
 from datetime import date as _date
 from datetime import datetime, timedelta
@@ -56,7 +58,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from core.logger import decision, warn
+from core.logger import decision, diagnostic, warn
 
 DEFAULT_DB = os.environ.get("RESULTS_CALENDAR_DB",
                             "sqlite:///data/results_calendar.db")
@@ -644,6 +646,293 @@ def fetch_filed_results(calendar, days_back=400, known_symbols=None,
     return stored
 
 
+# ==================================================================
+# THE CHANNEL THAT ACTUALLY PUBLISHES THE CALENDAR.  5 Sep 2026.
+# ==================================================================
+#
+#     "result gate = same as now , only block that stock/s on their
+#      result day , to know which stock earnings pulse channel post
+#      that image. this settles i think"        -- the operator
+#
+# The gate was already exactly what he describes. core/results_gate.py
+# blocks a stock only on its own result day, only until the numbers
+# land, and lets it through on GOOD or STRONG. Nothing about the RULE
+# needed changing.
+#
+# What was broken is the LIST it reads. earnings_calendar is built in
+# main.py from NSE board meetings plus a hand-typed dict, and on
+# 5 September that store said:
+#
+#     last_refresh        2026-08-31
+#     due from today on   0
+#
+# Zero. So the gate blocked nobody, and core/morning_ready.py -- which
+# reads the same table -- reported "out of season, nothing due" on days
+# when companies were reporting.
+#
+# Earnings Pulse publishes the list every day, and the CAPTION carries
+# it in plain text, so this needs no picture-reading at all:
+#
+#     "Tomorrow's Calendar - 05 Sep, 2026
+#      Key companies reporting results: #MOLBIO"
+#
+#     "THE WEEK AHEAD: Earnings Calendar
+#      Key companies: #LALITHAA #SHIPROCKET #GAJA #BLEL"
+#     picture: "MONDAY, SEPTEMBER 7 ... SHIPROCKET BLEL
+#               THURSDAY, SEPTEMBER 10 ... GAJA
+#               FRIDAY, SEPTEMBER 11 ... LALITHAA"
+#
+# BOTH shapes are read, because they fail differently. The daily one is
+# exact but exists only if that post was collected; the weekly one is
+# redundancy for the day it was missed. Measured on the store: 9 daily
+# posts and 16 weekly ones with full day headers, covering 19-26 and
+# 31 August and 2, 4, 5, 7, 10 and 11 September.
+#
+# WHERE THE SYMBOLS COME FROM: the caption hashtags, always. The
+# picture is used ONLY to decide WHICH DAY each of those already-named
+# companies belongs to. A company is never invented from a transcript
+# -- an OCR slip that produced a symbol would put a stock on a results
+# blackout it is not on, and this gate REFUSES entries.
+
+_TG_DB = os.path.join("data", "telegram.db")
+
+_TOMORROW = re.compile(
+    r"tomorrow'?s calendar\s*[-\u2013]\s*(\d{1,2})\s+([A-Za-z]{3,9}),?\s*"
+    r"(\d{4})", re.I)
+_DAYHEAD = re.compile(
+    r"\b(?:MON|TUE|WED|THU|FRI|SAT|SUN)[A-Z]*DAY,?\s+"
+    r"(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+(\d{1,2})",
+    re.I)
+_TAG = re.compile(r"#([A-Z][A-Z0-9&\-]{1,})")
+
+# ---- THE HEADER SAYS WHICH WEEK IT IS. 5 September 2026. ----
+#
+#     "ON TOP OF THE IMG = HEADER PART MENTIONS THE SAME DETAILS
+#      WEEK AHEAD RESULTS."                     -- the operator
+#
+# He is right, and it is the only independent check available on a card
+# whose grid the reader has scrambled:
+#
+#     EARNINGS PULSE: THE WEEK AHEAD  SEPTEMBER 7-11  Q1 FY27 EARNINGS
+#     EARNINGS PULSE: THE WEEK AHEAD  AUGUST 25-31
+#     EARNINGS PULSE: THE WEEK AHEAD  AUGUST 31-SEPTEMBER 2
+#
+# Two shapes -- "MONTH D-D" within one month, and "MONTH D-MONTH D"
+# across two. A date read off the day headings that falls outside the
+# week the card says it covers did not come from that card, and is
+# dropped rather than stored.
+_WEEK_RANGE = re.compile(
+    r"WEEK\s+AHEAD\W{0,12}?"
+    r"(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+(\d{1,2})"
+    r"\s*[-\u2013]\s*"
+    r"(?:(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\s+)?"
+    r"(\d{1,2})", re.I)
+_MONTHS = {m: i + 1 for i, m in enumerate(
+    ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+     "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"])}
+
+
+def _month_number(word):
+    return _MONTHS.get(str(word or "")[:3].upper())
+
+
+def telegram_calendar_rows(db_path=None, since_days=30, now=None):
+    """[(symbol_tag, date)] from the calendar posts on file.
+
+    Pure reading -- no database is written and nothing is resolved to a
+    master symbol here, so this can be tested and eyeballed on its own.
+    The tags come back exactly as the publisher typed them.
+    """
+    db_path = db_path or _TG_DB
+    now = now or datetime.now()
+    # {tag: (rank, posted, date)} -- see the note at the bottom of this
+    # function for what rank means and why it is needed.
+    best = {}
+    try:
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute(
+            "SELECT at, text, ocr_text FROM messages "
+            "WHERE text LIKE '%alendar%' OR ocr_text LIKE '%ALENDAR%' "
+            "OR text LIKE '%eek Ahead%' OR ocr_text LIKE '%EEK AHEAD%'"
+        ).fetchall()
+        conn.close()
+    except Exception as exc:                                # noqa: BLE001
+        diagnostic(f"[RESULTS] Could not read {db_path}: {exc}")
+        return []
+
+    for at, text, ocr in rows:
+        caption = str(text or "")
+        body = f"{caption}\n{ocr or ''}"
+        tags = _TAG.findall(caption.upper())
+        if not tags:
+            continue
+        # ---- THE STAMP CARRIES AN OFFSET. 5 September 2026. ----
+        #
+        # _as_date() returns None for "2026-08-25T02:30:19+00:00" --
+        # the offset defeats it -- so every post was dated TODAY and
+        # "the newest card wins" quietly became "whichever row sqlite
+        # returned first wins". It happened to be right on the live
+        # store and wrong the moment it was tested with two cards.
+        #
+        # Ordering is done on the RAW stamp: an ISO timestamp sorts
+        # correctly as text, needs no parsing and cannot be off by a
+        # timezone. The DATE is only wanted for the year, which the
+        # first ten characters give exactly.
+        posted = str(at or "")
+        posted_day = _as_date(posted[:10]) or now.date()
+
+        # ---- the daily post: one date, every tag on it ----
+        m = _TOMORROW.search(body)
+        if m:
+            month = _month_number(m.group(2))
+            if month:
+                try:
+                    when = _date(int(m.group(3)), month, int(m.group(1)))
+                except ValueError:
+                    when = None
+                if when:
+                    for tag in tags:
+                        _keep(best, tag, 2, posted, when)
+                    continue
+
+        # ---- the weekly post: a date per day heading ----
+        #
+        # The heading carries no year, so it is taken from the post.
+        # A December card naming JANUARY is next year -- the only place
+        # the year can be wrong, and the one line that fixes it.
+        heads = _DAYHEAD.findall(body)
+        if not heads:
+            continue
+
+        # The week the card says it covers -- see _WEEK_RANGE. None
+        # when the header did not read, and then nothing is bounded,
+        # because refusing every card whose header was blurred would
+        # cost far more than the one it protects against.
+        span = None
+        wm = _WEEK_RANGE.search(body.upper())
+        if wm:
+            m1 = _month_number(wm.group(1))
+            m2 = _month_number(wm.group(3)) or m1
+            if m1 and m2:
+                y1 = posted_day.year
+                if m1 < posted_day.month - 6:
+                    y1 += 1
+                y2 = y1 + (1 if m2 < m1 else 0)
+                try:
+                    span = (_date(y1, m1, int(wm.group(2))),
+                            _date(y2, m2, int(wm.group(4))))
+                except ValueError:
+                    span = None
+        sections = []
+        upper = body.upper()
+        marks = [(mm.start(), mm.group(1), mm.group(2))
+                 for mm in _DAYHEAD.finditer(upper)]
+        for i, (pos, mon, day_num) in enumerate(marks):
+            end = marks[i + 1][0] if i + 1 < len(marks) else len(upper)
+            month = _month_number(mon)
+            if not month:
+                continue
+            year = posted_day.year
+            if month < posted_day.month - 6:
+                year += 1
+            try:
+                when = _date(year, month, int(day_num))
+            except ValueError:
+                continue
+            if span and not (span[0] <= when <= span[1]):
+                diagnostic(f"[RESULTS] a day heading read as {when} is "
+                           f"outside the week this card states "
+                           f"({span[0]} to {span[1]}) -- ignored")
+                continue
+            sections.append((when, upper[pos:end]))
+
+        for when, chunk in sections:
+            for tag in tags:
+                # The tag has to APPEAR in that day's section. This is
+                # the whole reason the picture is read at all: the
+                # caption says who reports this week, the picture says
+                # who reports on which day.
+                if tag.upper() in chunk:
+                    _keep(best, tag, 1, posted, when)
+
+    return sorted((tag, when) for tag, (_r, _p, when) in best.items())
+
+
+def _keep(best, tag, rank, posted, when):
+    """Keep one date per company: the best-sourced, then the newest.
+
+    ---- THE PICTURE IS READ COLUMN BY COLUMN. 5 Sep 2026. ----
+
+    The week-ahead card is a GRID, and a flat transcript of a grid
+    scrambles which company sits under which day. The 24 August card
+    came out as
+
+        ARDEE MVELECTRO AFTER CLOSE AFTER CLOSE
+        WEDNESDAY, AUGUST 26  TUESDAY, AUGUST 25  MILKYMIST
+        AFTER CLOSE  MONDAY, AUGUST 31
+
+    -- so splitting on day headings put MILKYMIST on 25 August. The
+    cards published on the 25th, 26th and 27th all place it under
+    MONDAY, AUGUST 31, and they are right. This is the same fault that
+    put nine companies in the wrong session on 2 August, and the word
+    positions now stored beside each transcript are the eventual fix
+    for it.
+
+    Two rules until then, and both are about trusting the better
+    source:
+
+      RANK 2 -- "Tomorrow's Calendar" states ONE date for the whole
+                post. There is no grid to scramble, so it always wins.
+      RANK 1 -- the week-ahead grid, where the newest card wins,
+                because the publisher has repeated the week every day
+                and the last word is the one they stand on.
+    """
+    have = best.get(tag)
+    if have is None or (rank, posted) > (have[0], have[1]):
+        best[tag] = (rank, posted, when)
+
+
+def fetch_from_telegram(calendar, known_symbols=None, db_path=None,
+                        now=None):
+    """Put the channel's calendar into the store. Returns rows written.
+
+    Fails open like the other fetchers: a chat feed that cannot be read
+    must never stop the NSE refresh that follows it.
+    """
+    try:
+        rows = telegram_calendar_rows(db_path=db_path, now=now)
+    except Exception as exc:                                # noqa: BLE001
+        diagnostic(f"[RESULTS] Telegram calendar unreadable: {exc}")
+        return 0
+    if not rows:
+        return 0
+
+    known = {str(s).upper() for s in (known_symbols or ())}
+    written = 0
+    unknown = []
+    for tag, when in rows:
+        symbol = str(tag).upper()
+        if known and symbol not in known:
+            # NEVER GUESS. A tag the master does not carry is recorded
+            # in the log and nowhere else -- inventing a symbol here
+            # would blacklist a stock from trading on a day it does not
+            # report, and this gate REFUSES entries.
+            unknown.append(symbol)
+            continue
+        if calendar.remember(symbol=symbol, results_date=when,
+                             purpose="Results (Earnings Pulse)",
+                             source="telegram:Earnings Pulse"):
+            written += 1
+    if unknown:
+        diagnostic(f"[RESULTS] {len(unknown)} calendar tag(s) are not in "
+                   f"the master and were not stored: "
+                   f"{', '.join(sorted(set(unknown))[:8])}")
+    if written:
+        decision(f"[RESULTS] {written} result date(s) taken from the "
+                 f"Earnings Pulse calendar.")
+    return written
+
+
 def refresh(calendar=None, known_symbols=None, days_ahead=45,
             days_back=400, force=False, today=None):
     """One full refresh. Never raises.
@@ -654,6 +943,17 @@ def refresh(calendar=None, known_symbols=None, days_ahead=45,
     """
     calendar = calendar or ResultsCalendar()
     today = _as_date(today) or datetime.now().date()
+
+    # ---- READ THE CHANNEL FIRST, ALWAYS. 5 September 2026. ----
+    #
+    # Before the needs_refresh() gate, deliberately. That gate exists to
+    # stop polling NSE every morning for something that happens four
+    # times a year, and it is right to. This costs one read of a local
+    # sqlite file the collector has already filled, so there is nothing
+    # to throttle -- and skipping it is exactly how the store came to
+    # say "0 due from today" while Earnings Pulse was publishing a name
+    # every afternoon.
+    fetch_from_telegram(calendar, known_symbols=known_symbols)
 
     if not force and not calendar.needs_refresh(today):
         stats = calendar.stats()

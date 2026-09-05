@@ -60,6 +60,32 @@ class Recorder:
         return []
 
 
+
+# ---- A TEST THAT DEPENDS ON THE DAY IS NOT A TEST. 5 Sep 2026. ----
+#
+# Day Trader Telugu is not polled on Saturday or Sunday -- he watches
+# that channel and says it publishes YouTube promotions all weekend
+# (see tests/test_a_video_is_not_a_reason.py). These tests are about
+# WHICH CHANNELS a pass reads and were written on a weekday, so on the
+# Saturday the rule shipped they all failed on a working feature.
+#
+# The same shape as the `off_season` fixture below/above: the day is a
+# real input, so it is pinned rather than left to whenever the suite
+# happens to run. The weekend behaviour has its own tests.
+@pytest.fixture(autouse=True)
+def _a_weekday(monkeypatch):
+    from datetime import datetime as _dt
+
+    import core.telegram_feed as _tf
+
+    class _Monday(_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 7, 10, 0)      # Monday
+
+    monkeypatch.setattr(_tf, "datetime", _Monday)
+
+
 @pytest.fixture
 def feed(tmp_path):
     got = TelegramFeed(db_path=str(tmp_path / "tg.db"))
