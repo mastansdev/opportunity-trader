@@ -585,6 +585,51 @@ STANDING_DAYS = 30
 # ages; an order is still on the books.
 STANDING_KINDS = ("ORDER",)
 
+# ==================================================================
+# WHEN A STANDING ORDER MAY COUNT AS A REASON.  5 September 2026.
+# ==================================================================
+#
+#     "why WELCORP is showing Still refused? its a clear winner with
+#      +3 % right"                              -- the operator
+#
+# He was right and my first measurement was wrong. I banded these
+# orders by RUPEES, found nothing, and recommended display-only --
+# after he had already said rupees is the wrong yardstick. Re-asked
+# with HIS measure, every stock-day a standing order would have
+# admitted, banded by the order's share of the company:
+#
+#   share of co.   stock-days   moved 3%+ with 2x volume   ran 3% from open
+#   0-5%                  241                          7             7 of 7
+#   5-10%                 123                          2             1 of 2
+#   10-20%                 74                          3             3 of 3
+#   20-100%               117                         15           15 of 15
+#
+# Nine DISTINCT days in the top band -- WELCORP four times, plus
+# AFCONS, TEJASNET, RAILTEL and INOXWIND twice -- and every one
+# reached +3% from the open. A day in that band is about four times
+# more likely to qualify than one in the bottom band.
+#
+# WHAT THIS DOES AND DOES NOT DO. It lets a large order keep counting
+# as a PUBLISHED REASON after the 24-hour staleness window, and
+# nothing else. The stock still has to be up 3%, still has to carry
+# the volume, still has to be alive, still has to win a seat. In his
+# words: "here our rule saves us without taking all entries too."
+#
+# THE BAR IS THE SHARE, NOT THE RUPEES. Twenty percent of the company,
+# because that is where the measurement separates -- and because a
+# rupee bar would let L&T's Rs 15,000 cr order (3% of L&T) through
+# while refusing RailTel's Rs 630 cr (27% of RailTel), which is the
+# exact mistake this replaces.
+#
+# A stock whose size is not known gets NOTHING. There are 500 sizes on
+# file for 1,976 symbols, and admitting the unmeasured ones on a rupee
+# bar would reintroduce the fault by the back door.
+STANDING_GATE_MIN_PCT = 20.0
+
+# Two trading weeks. The Welspun order was ten sessions old when it
+# was still running and fourteen when he asked about it.
+STANDING_GATE_SESSIONS = 14
+
 
 def standing_cause(symbol, on=None, events_db=None, min_cr=None,
                    days=None):
@@ -823,6 +868,53 @@ def _headline_names(symbol, headline, matcher=None):
     except Exception:                                      # noqa: BLE001
         return True
     return name in found
+
+
+def standing_reason(symbol, on=None, events_db=None):
+    """A standing order big enough to still be a REASON, or None.
+
+    The one function in this module the trading path may call. See
+    STANDING_GATE_MIN_PCT for the measurement behind the bar and for
+    what this deliberately does not do.
+
+    Returns the same shape core/ranker.py's mechanism_of() expects --
+    {"text", "weight", "direction", "source"} -- so nothing downstream
+    needs a new field.
+
+    Never raises. A memory that cannot be read means no reason, which
+    is exactly what the bot did before this existed.
+    """
+    try:
+        got = standing_cause(symbol, on=on, events_db=events_db)
+    except Exception as exc:                               # noqa: BLE001
+        diagnostic(f"[MEMORY] standing_reason({symbol}) failed: {exc}")
+        return None
+    if not got:
+        return None
+    share = got.get("pct_of_company")
+    if share is None or share < STANDING_GATE_MIN_PCT:
+        return None
+    # An "order" larger than the whole company is the store reporting a
+    # bad row -- see the NUVAMA case in _sentence(). It must never open
+    # a door.
+    if share > 100.0:
+        diagnostic(f"[MEMORY] {symbol}: a stored order reads as "
+                   f"{share:.0f}% of the company -- not a reason")
+        return None
+    if got.get("sessions_ago", 0) > STANDING_GATE_SESSIONS:
+        return None
+    return {
+        "text": got["text"],
+        # Below a fresh, graded event on purpose. This is a cause that
+        # is still standing, not news that broke this morning, and when
+        # both exist the fresh one should rank first.
+        "weight": 0.45,
+        "direction": "POSITIVE",
+        "at": got.get("date"),
+        "source": "standing order",
+        "pct_of_company": share,
+        "sessions_ago": got.get("sessions_ago"),
+    }
 
 
 def standing_causes(on=None, events_db=None, min_cr=None, days=None):

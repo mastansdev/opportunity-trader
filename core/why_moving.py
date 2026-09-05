@@ -1040,6 +1040,47 @@ def why(events=None, news_hits=None, on_date=None, symbol=None,
     got = _why_before_payoff(events=events, news_hits=news_hits,
                              on_date=on_date, symbol=symbol,
                              filing=filing)
+
+    # ---- A CAUSE THAT IS STILL STANDING. 5 September 2026. ----
+    #
+    #     "why WELCORP is showing Still refused? its a clear winner
+    #      with +3 % right"                       -- the operator
+    #
+    # He was right. On 3 September WELCORP opened 2,554.7 and closed
+    # 2,641.6 -- up 3.4%, high +4.7%, on 1.7x volume -- and the board
+    # refused it for "nothing published". The cause was a Rs 15,840
+    # crore order, ten sessions old and worth 47% of the company,
+    # sitting in this bot's own store.
+    #
+    # STALE_REASON_HOURS stays 24 and every path above is untouched.
+    # This is asked ONLY when nothing fresher answered, so a stock with
+    # real news today is never given an old order instead.
+    #
+    # The bar is the order's share of the COMPANY, not its rupees --
+    # see core/cause_effect.STANDING_GATE_MIN_PCT for the measurement,
+    # and for why a rupee bar would admit L&T's 3% order while
+    # refusing RailTel's 27% one.
+    #
+    # It only opens the door. Three percent, the volume, the liveness
+    # and a free seat all still decide, which is his own read of it:
+    # "here our rule saves us without taking all entries too."
+    if not isinstance(got, dict) and symbol:
+        try:
+            from core.cause_effect import standing_reason
+            standing = standing_reason(symbol, on=on_date)
+        except Exception:                                  # noqa: BLE001
+            standing = None
+        if standing:
+            try:
+                from core.logger import diagnostic
+                diagnostic(f"[WHY] {symbol}: no fresh reason, but a "
+                           f"{standing['pct_of_company']:.0f}% order "
+                           f"stands from {standing['sessions_ago']} "
+                           f"session(s) ago")
+            except Exception:                              # noqa: BLE001
+                pass
+            got = standing
+
     if not isinstance(got, dict):
         return got
     try:

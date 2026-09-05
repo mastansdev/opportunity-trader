@@ -200,17 +200,39 @@ def test_the_biggest_cause_wins_when_a_stock_has_two():
 # and what it must NOT touch
 # ------------------------------------------------------------------
 
-def test_no_gate_reads_this():
-    """The measurement said more candidates is not the constraint, so
-    nothing about what the bot may buy changes. If that decision is
-    ever revisited it should be a deliberate act, not a drift."""
+def test_no_gate_reads_this_except_the_one_that_was_decided():
+    """---- THE DECISION WAS REVISITED, ON PURPOSE. 5 Sep 2026. ----
+
+    This test read "no gate reads this" and it caught the hour that one
+    did, which is what it was for. The original note said: "if that
+    decision is ever revisited it should be a deliberate act, not a
+    drift." It was revisited, deliberately, the same evening --
+
+        "why WELCORP is showing Still refused? its a clear winner with
+         +3 % right"                             -- the operator
+
+    -- and only after re-measuring with his yardstick rather than mine.
+    See tests/test_a_standing_order_opens_the_door.py for the evidence
+    and the bar.
+
+    So core/why_moving.py may read it, through exactly one function and
+    only when nothing fresher answered. Everything else still may not:
+    the ranker, the entry path, the engine and the results gate all get
+    their reason from why_moving and have no business asking a memory
+    of their own.
+    """
     import io
-    for path in ("core/why_moving.py", "core/ranker.py",
-                 "core/auto_entry.py", "core/engine.py",
-                 "core/results_gate.py"):
+    for path in ("core/ranker.py", "core/auto_entry.py",
+                 "core/engine.py", "core/results_gate.py"):
         src = io.open(path, encoding="utf-8").read()
         assert "cause_effect" not in src, \
-            f"{path} reads the memory -- that was a deliberate decision"
+            f"{path} reads the memory -- that was never decided"
+
+    why = io.open("core/why_moving.py", encoding="utf-8").read()
+    assert "from core.cause_effect import standing_reason" in why
+    assert "standing_causes" not in why, \
+        "why_moving may ask for ONE stock's standing cause, never the "\
+        "whole board's -- that is the display's question"
 
 
 def test_the_stale_window_is_untouched():
