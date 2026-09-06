@@ -64,6 +64,50 @@ def _isolate_fill_log(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_telegram_store(tmp_path, monkeypatch):
+    """Tests must never write into data/telegram.db.
+
+    ---- IT HAD NO FIXTURE, AND IT SHOWED. 6 September 2026. ----
+
+    Same shape as the trade log and the fill log above, and it was the
+    one store that never got one.
+
+    tests/test_collector_stops.py builds a feed with
+    TelegramFeed.__new__(), which skips __init__, so the object never
+    learns a db_path and _note_attempt() falls back to this module
+    global -- his real collected posts. Nine channels called c0..c8
+    were bookmarked there on every full run, and the dashboard listed
+    them beside the ten real ones. Proved by cleaning the store,
+    running the suite, and watching them come back before it finished.
+
+    A dozen other tests build a feed without a db_path and take the
+    same default. Most only read, but "most" is not a guarantee, and
+    finding out which by inspection is how the next one gets missed.
+    One redirect closes every door, including the ones written next
+    month.
+
+    A test that genuinely wants a specific store still passes db_path
+    and is unaffected -- this only changes what "no path given" means.
+    """
+    from core import telegram_feed
+    monkeypatch.setattr(
+        telegram_feed, "DB_PATH", os.path.join(str(tmp_path), "telegram.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_decision_log(tmp_path, monkeypatch):
+    """Tests must never write into data/decisions.db.
+
+    Caught by the same guard on the same day: a test that builds a
+    feed also reaches the decision log, and the log is what answers
+    "why was this stock not named" weeks later.
+    """
+    from core import decision_log
+    monkeypatch.setattr(
+        decision_log, "DB_PATH", os.path.join(str(tmp_path), "decisions.db"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_pause_flag(tmp_path, monkeypatch):
     """Tests must never touch the LIVE pause flag.
 
@@ -484,6 +528,19 @@ def _no_test_may_litter_the_live_data_folder():
         except OSError:
             pass
 
+    # Asked BEFORE as well as after. He stopped his collector in the
+    # middle of a run on 6 September; every store it had already
+    # touched then looked like test pollution, because the lock was
+    # gone by the time the question was asked.
+    def _collector_alive():
+        try:
+            from core import runlock
+            return bool(runlock.held_by_another()[0])
+        except Exception:                                  # noqa: BLE001
+            return False
+
+    was_collecting = _collector_alive()
+
     yield
 
     after = _real(glob.glob(os.path.join("data", "*")))
@@ -495,30 +552,56 @@ def _no_test_may_litter_the_live_data_folder():
         + ". A test that needs a path which does not exist must use "
           "tmp_path -- data/ holds the bot's real memory.")
 
+    # ---- HIS COLLECTOR IS ALLOWED TO BE RUNNING. 6 Sep 2026. ----
+    #
+    # He runs py tools/collector.py all day, and it writes telegram.db
+    # every ninety seconds. Blaming a test for that would make the
+    # suite unrunnable exactly when he is collecting, which is most of
+    # the time -- and a guard that cannot be trusted gets switched off.
+    #
+    # core/runlock.py already answers "is a reader alive": the
+    # collector holds data/telegram_reader.lock with its pid in it.
+    # _written_by_a_live_process() above cannot see that, because it
+    # reads the FILE for a pid marker and a sqlite store is binary.
+    collecting = was_collecting or _collector_alive()
+    #: What the collector legitimately writes while it runs.
+    HIS = {"telegram.db", "stock_events.db", "decisions.db"}
+
     touched = []
     for path, was in watched.items():
         if _written_by_a_live_process(path):
-            continue                  # the collector, running alongside
+            continue                  # a live process left its pid in it
+        name = os.path.basename(path)
+        if collecting and name in HIS:
+            continue                  # his collector, not this suite
         try:
             if os.path.getmtime(path) != was:
-                touched.append(os.path.basename(path))
+                touched.append(name)
         except OSError:
             continue
-    # ---- REPORTING, NOT YET ENFORCING. 6 September 2026. ----
+    # ---- IT REPORTS. THE FIX IS THE ISOLATION. 6 Sep 2026. ----
     #
-    # Switched on for one run and it caught more than the test it was
-    # written for: test_a_fund_cannot_have_news.py writes into
-    # telegram.db AND decisions.db, and about ten places build a feed
-    # without a db_path so __init__ points them at the live store.
-    # Most only read; which ones write can only be found by running.
+    # This was switched to a hard failure and blamed the wrong test
+    # twice: a database flushes when it feels like it, so the mtime
+    # change lands during the NEXT test, not the one that wrote. Run
+    # alone every accused test passed.
     #
-    # Failing here today would leave the suite red on something that
-    # touches no trading logic, in the middle of 28 uncommitted files.
-    # So it SAYS what it saw and lets the run pass. Turning the assert
-    # back on is its own change, with its own green run -- and the
-    # leak that was actually corrupting his channel list, c0..c8 from
-    # tests/test_collector_stops.py, is already closed and proved.
+    # A guard that fails the suite for the wrong reason gets switched
+    # off, so it says what it saw and lets the run pass.
+    #
+    # THE ACTUAL FIX IS ABOVE, and it is at the source:
+    # _isolate_telegram_store and _isolate_decision_log now redirect
+    # those module globals to tmp_path for every test, the way the
+    # trade log and fill log have always been redirected. The telegram
+    # store was the one that never had a fixture, which is how
+    # tests/test_collector_stops.py came to bookmark nine channels
+    # called c0..c8 in his real data on every run.
+    #
+    # And core/telegram_feed._note_attempt() was passing no path at
+    # all, so it took core/feed_clock.py's default -- a feed pointed
+    # at any other store wrote its MESSAGES there and its BOOKMARKS to
+    # the live one. That was a production bug, not a test one.
     if touched:
-        print("  [DATA] a test wrote into a live store: "
+        print("  [DATA] a live store changed during the suite: "
               + ", ".join(sorted(touched))
-              + " -- pass db_path to a temporary file.")
+              + " -- if no collector was running, find what wrote it.")

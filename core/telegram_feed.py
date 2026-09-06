@@ -1628,12 +1628,28 @@ class TelegramFeed:
         except Exception as exc:                           # noqa: BLE001
             diagnostic(f"[TELEGRAM] could not measure lag ({exc}).")
 
-    @staticmethod
-    def _note_attempt(channel, ok=True, error=None):
-        """Bookkeeping only. Never allowed to break a pass."""
+    def _note_attempt(self, channel, ok=True, error=None):
+        """Bookkeeping only. Never allowed to break a pass.
+
+        ---- IT BOOKMARKED INTO THE WRONG FILE. 6 Sep 2026. ----
+
+        This was a staticmethod and called note_attempt() without a
+        path, so it took core/feed_clock.py's default -- which is bound
+        at definition time to data/telegram.db. A feed pointed at any
+        other store therefore wrote its MESSAGES to that store and its
+        BOOKMARKS to the live one.
+
+        In the suite that meant nine channels called c0..c8 appeared in
+        his real store on every run, listed on his dashboard beside the
+        ten real ones. In production it means a second feed could never
+        be given its own file. Both are the same bug.
+
+        It writes where the rest of this object writes now.
+        """
         try:
             from core.feed_clock import note_attempt
-            note_attempt(channel, ok=ok, error=error)
+            note_attempt(channel, ok=ok, error=error,
+                         db_path=getattr(self, "db_path", None) or DB_PATH)
         except Exception:                                  # noqa: BLE001
             pass
 
