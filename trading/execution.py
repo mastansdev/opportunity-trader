@@ -281,6 +281,42 @@ class Execution:
         two states remembered: a position opened on paper is closed on
         paper even if he flips the switch while it is open.
         """
+        # ---- AN EXIT FOLLOWS ITS ENTRY *BOTH* WAYS. 6 Sep 2026. ----
+        #
+        #     "once if i ON & after trades completed incase i switched
+        #      OFF, how bot will react for multiple ON & OFF"
+        #                                          -- the operator
+        #
+        # He asked, and the answer was wrong. The rule below has been
+        # right since 31 August for one direction only: a PAPER
+        # position is sold on paper even with the switch ON. The other
+        # direction never got here, because `if not self.live` returned
+        # first -- so flipping OFF with a REAL position open routed its
+        # exit to PAPER. The bot recorded the trade closed; Dhan went on
+        # holding the stock, unmanaged, with no stop the broker knows
+        # about.
+        #
+        # Proved before this was written, with the process in LIVE:
+        #
+        #     switch ON   buy ABC   -> LIVE
+        #     switch OFF  sell ABC  -> PAPER      <-- orphaned
+        #
+        # A position's exit belongs to whoever opened it. The switch
+        # decides what may be OPENED next, never how to close what is
+        # already open, and that is asked first now.
+        if selling and self._who_opened(symbol) == "live":
+            live = self._live_executor()
+            if live is not None:
+                return live
+            # The process cannot reach Dhan at all -- paper is the only
+            # executor there is, and saying so once beats silence.
+            self._say_once(
+                "orphan-" + str(symbol),
+                f"{symbol} was opened for REAL and this process can no "
+                f"longer place a real order. Closing it on paper here "
+                f"does NOT close it at Dhan -- check the broker.")
+            return self.executor
+
         if not self.live:
             return self.executor
         live = self._live_executor()
