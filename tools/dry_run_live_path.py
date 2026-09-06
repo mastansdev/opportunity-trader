@@ -247,7 +247,10 @@ def _static_ip():
     if "staticip" not in proxy:
         return False, f"ORDER_PROXY is {proxy[:40]!r} -- not the static route"
     # Say the expiry out loud; it is a renewal date, not a code path.
-    return True, proxy.split("@")[-1] + "  (renew before 31 Aug 2026)"
+    # Renewed 6 September 2026 for four months. The date lives here as
+    # well as in config.py because this is the line he reads before an
+    # open, and a stale one reads as "fine" on the morning it is not.
+    return True, proxy.split("@")[-1] + "  (renew before 6 Jan 2027)"
 
 
 @stage(3, "Instrument master loads and security ids match Dhan")

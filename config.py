@@ -260,8 +260,15 @@ BROKER_STOP_TAG_PREFIX = "OTSTOP"
 #     home line arrives as   157.50.99.165      (Jio -- NSE sees this)
 #     via the proxy          165.101.251.109    (Dhan sees this)
 #
-# 165.101.251.109 is the number whitelisted at Dhan. Valid to
-# 31 Aug 2026 -- RENEW BEFORE THEN or every order stops.
+# 165.101.251.109 is the number whitelisted at Dhan.
+#
+# RENEWED 6 September 2026, four months, so valid to about
+# 6 JANUARY 2027 -- RENEW BEFORE THEN or every order stops.
+#
+# Verified the same evening, through this proxy: Dhan answered with a
+# balance of Rs 69,429.68 and core/trading_gate.broker_is_reachable()
+# returned True, so the switch will arm. While it was expired that
+# same gate refused ON and said why, which is what it is for.
 #
 # Both http:// and https:// were tested and both carry traffic;
 # http:// is used because it is a plain CONNECT tunnel, which keeps
