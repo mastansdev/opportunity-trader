@@ -103,6 +103,10 @@ h1{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em}
    see standingOf(). */
 .op .standing{display:block;margin-top:3px;font-size:11.5px;
   color:var(--mid);border-left:2px solid var(--hair);padding-left:7px}
+/* How big the company is. Muted on purpose -- it is context, not
+   a verdict, and it must not compete with the grade tags. */
+.tag.size{background:transparent;color:var(--dim);
+  border:1px solid var(--hair);font-weight:500}
 .op .sig{grid-column:3;text-align:right;font-size:10.5px;color:var(--dim);
   white-space:nowrap}
 .tag{display:inline-block;font-size:9px;letter-spacing:.05em;padding:1px 6px;
@@ -223,6 +227,7 @@ tr.hand td{background:var(--sunk)}
     <button class="tab" data-tab="watch">Watch</button>
     <button class="tab" data-tab="brain">Brain</button>
     <button class="tab" data-tab="tg">Telegram</button>
+    <button class="tab" data-tab="month">Month</button>
     <button class="tab" data-tab="refused">Blocked</button>
   </div>
 
@@ -282,6 +287,9 @@ tr.hand td{background:var(--sunk)}
     <div class="card"><div class="hd"><b>Stocks that moved and never reached the board</b>
       <span class="sub">what the pool missed, and why</span></div>
       <div class="scroll" id="misses"></div></div>
+    <div class="card"><div class="hd"><b>How fast the bot is</b>
+      <span class="sub" id="speedHead">opening&hellip;</span></div>
+      <div class="scroll" id="speedTable"></div></div>
   </div>
 
   <div class="pane" id="watch-pane" style="display:none">
@@ -304,6 +312,9 @@ tr.hand td{background:var(--sunk)}
   <div class="pane" id="brain-pane" style="display:none">
     <div class="card"><div class="hd"><b>What the bot has learned</b></div>
       <div class="scroll" id="brain"></div></div>
+    <div class="card"><div class="hd"><b>Events, and the stock each was filed against</b>
+      <span class="sub" id="brainHead">opening&hellip;</span></div>
+      <div class="scroll" id="brainLinks"></div></div>
     <div class="card"><div class="hd"><b>System health</b>
       <span class="sub">a short board must never look like a quiet market</span></div>
       <div class="scroll" id="health"></div></div>
@@ -314,6 +325,16 @@ tr.hand td{background:var(--sunk)}
       <div class="scroll" id="tg"></div></div>
     <div class="card"><div class="hd"><b>News and filings today</b></div>
       <div class="scroll" id="news"></div></div>
+  </div>
+
+  <!-- ================= MONTH ================= -->
+  <!-- Fetched only when this tab is opened -- see /api/month. The
+       board rebuild never computes it, because the entry path reads
+       that rebuild and it is already the slowest thing the bot does. -->
+  <div class="pane" id="month-pane" style="display:none">
+    <div class="card"><div class="hd"><b>Monthly target</b>
+      <span class="sub" id="monthHead">opening&hellip;</span></div>
+      <div class="scroll" id="monthTable"></div></div>
   </div>
 
   <div class="pane" id="refused-pane" style="display:none">
@@ -382,7 +403,7 @@ function mins(v){
 }
 
 /* ---------------- tabs ---------------- */
-var PANES = ["live","pre","trade","post","watch","brain","tg","refused"];
+var PANES = ["live","pre","trade","post","watch","brain","tg","month","refused"];
 Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(b){
   b.addEventListener("click", function(){
     Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(x){
@@ -390,8 +411,109 @@ Array.prototype.forEach.call(document.querySelectorAll(".tab"), function(b){
     b.classList.add("on");
     PANES.forEach(function(p){
       $(p + "-pane").style.display = (p === b.dataset.tab) ? "" : "none"; });
+    if (b.dataset.tab === "month"){ loadMonth(); }
+    if (b.dataset.tab === "post"){ loadSpeed(); }
+    if (b.dataset.tab === "brain"){ loadBrain(); }
   });
 });
+
+/* ---- THE MONTH, FETCHED ON DEMAND. 6 September 2026. ----
+ *
+ *     "but none of these process must slow down my bot trade path or
+ *      trading mechanism at all. i'm telling about all the panels
+ *      rebuilds or any other things"            -- the operator
+ *
+ * So it is NOT in the payload. The rebuild is what the entry path
+ * reads and it is already the slowest thing the bot does; a table
+ * nobody is looking at must not be paid for on every cycle. This
+ * asks for it only when the tab is opened. */
+/* ---- HOW LONG A STOCK WAITS. 6 September 2026. ----
+ *
+ *     "i want to know how much time will be taken by bot to process
+ *      the stock entry from pool to buy"
+ *     "i asked that too . where i can see that timings"
+ *
+ * The rebuild publishes the candidate list, so its length IS how long
+ * a newly-qualified stock waits before it can be bought. refresh() has
+ * recorded rebuild_ms and a per-panel panel_ms into every snapshot
+ * since it was written and nothing ever read them.
+ *
+ * Costs 2.4 microseconds to answer -- nothing is recomputed. */
+/* ---- IS THE LINKING WORKING. 6 September 2026. ----
+ *
+ *     "Brain tab purpose is to link the events to their respective
+ *      stocks. by seeing them user can identify that is working or
+ *      not"                                    -- the operator
+ *
+ * The tab showed market breadth, which answers a different question.
+ * This shows what arrived and which stock it was attached to, so he
+ * can see the attaching for himself. A row with no stock is shown as
+ * such, never hidden -- that is half the answer. */
+function loadBrain(){
+  var head = $("brainHead");
+  fetch("/api/brain").then(function(r){ return r.json(); }).then(function(b){
+    if (!b || b.error){ head.textContent = "could not read the events"; return; }
+    head.textContent = b.linked + " events carry a stock, " + b.loose
+      + " carry none — newest first";
+    simple("brainLinks", b.events || [], [
+      ["When","at"],
+      ["Stock", function(r){
+        return r.symbol ? esc(r.symbol)
+          : '<span style="color:var(--text-muted)">no stock</span>'; }],
+      ["Kind","kind"],
+      ["Scope","scope"],
+      ["What arrived", function(r){ return esc(r.headline); }],
+      ["From","source"]
+    ], "No event has been stored yet.");
+  }).catch(function(){ head.textContent = "could not read the events"; });
+}
+
+function loadSpeed(){
+  var head = $("speedHead");
+  fetch("/api/timings").then(function(r){ return r.json(); }).then(function(s){
+    if (!s || s.error){ head.textContent = "could not read the timings"; return; }
+    var total = s.rebuild_ms;
+    head.textContent = (total === null || total === undefined
+      ? "no round measured yet"
+      : "one round took " + total + " ms — a new stock waits this long "
+        + "before it can be bought");
+    var rows = (s.panels || []).slice();
+    if (s.elsewhere_ms !== null && s.elsewhere_ms !== undefined){
+      rows.push({panel: "everything else in the round", ms: s.elsewhere_ms});
+    }
+    simple("speedTable", rows, [
+      ["Panel", function(r){ return esc(String(r.panel).replace(/_/g," ")); }],
+      ["Time", function(r){ return esc(r.ms + " ms"); }, 1],
+      ["Share of the round", function(r){
+        if (!total) return "—";
+        var pct = Math.round((r.ms || 0) / total * 100);
+        return esc(pct + "%"); }, 1]
+    ], "No rebuild has been timed yet.");
+  }).catch(function(){ head.textContent = "could not read the timings"; });
+}
+
+function loadMonth(){
+  var head = $("monthHead");
+  fetch("/api/month").then(function(r){ return r.json(); }).then(function(m){
+    if (!m || m.error){ head.textContent = "could not read the month"; return; }
+    var cost = (m.days || []).reduce(function(s, d){
+      return s + (d.charges || 0); }, 0);
+    head.textContent = inr(m.booked) + " kept of " + inr(m.target)
+      + " after " + inr(cost) + " in charges — " + inr(m.remaining)
+      + " still to go, " + m.days_left + " session(s) left";
+    simple("monthTable", m.days || [], [
+      ["Date", "day"],
+      ["Trades", "trades", 1],
+      ["Up / down", function(r){ return esc(r.up + " / " + r.down); }, 1],
+      ["Profit / loss", function(r){ return inr2(r.pnl); }, 1],
+      ["Charges", function(r){ return inr2(r.charges); }, 1],
+      ["Without its best two", function(r){ return inr2(r.rest); }, 1],
+      ["Remaining target", function(r){ return inr2(r.remaining); }, 1]
+    ], "No trade has closed this month yet.");
+  }).catch(function(){
+    head.textContent = "could not read the month";
+  });
+}
 
 /* ---------------- 1. where am I ---------------- */
 function drawStrip(d){
@@ -667,6 +789,29 @@ function standingOf(d, symbol){
        + esc(got.text) + '</span>';
 }
 
+/* LARGE / MID / SMALL, from NSE's own rank -- top 100, 101-250,
+ * 251 and on, which is how SEBI defines them.
+ *
+ * TOTAL market cap, not the free float standingOf() uses. Two measures
+ * for two questions; core/company_size.py says why they are kept in
+ * separate stores and must never be swapped.
+ *
+ * It decides NOTHING -- no gate reads it. It is here so a size is on
+ * the screen, and more to the point in the BOOK: his trades now record
+ * the band, so "do the bigger ones work better" gets answered by his
+ * own trades instead of by a hunch.
+ *
+ * Nothing is drawn for a company NSE's list does not carry -- 235 of
+ * 1,976, mostly listed after the filing period. Unknown is not SMALL.
+ */
+function sizeOf(r){
+  if (!r || !r.mcap_band) return "";
+  var cap = r.mcap_cr ? ("Rs " + Math.round(r.mcap_cr).toLocaleString("en-IN")
+                         + " cr, total market cap") : "";
+  return '<span class="tag size" title="' + esc(cap) + '">'
+       + esc(r.mcap_band) + ' CAP</span>';
+}
+
 function drawList(d){
   var rows = boardRows(d);
   /* Keep the ranker's position before re-ordering, so the row can
@@ -716,6 +861,7 @@ function drawList(d){
       + (r.cash_only ? '<span class="tag cash">CASH 1x</span>' : '')
       + (r._early ? '<span class="tag cash">EARLY LANE</span>' : '')
       + (r.held ? '<span class="tag held">HELD</span>' : '')
+      + sizeOf(r)
       + '</span><span></span>'
       + '<span class="px n">'+inr2(r.ltp)+'<br>'
       + (chg===null?'' : '<span class="'+(chg>=0?"up":"down")+'">'
@@ -1137,13 +1283,18 @@ function drawClosed(d){
       + '<td class="num">'+inr2(r.entry_price)+'</td>'
       + '<td class="num">'+inr2(r.exit_price)+'</td>'
       + '<td class="num">'+esc(r.qty)+'</td>'
-      + '<td class="num">'+pnl(r.pnl)+'</td>'
+      + '<td class="num">'+pnl(r.net_pnl !== null && r.net_pnl !== undefined
+                                    ? r.net_pnl : r.pnl)+'</td>'
+      + '<td class="num" style="color:var(--text-secondary)">'
+      + (r.charges === null || r.charges === undefined
+         ? '—' : inr2(r.charges))+'</td>'
       + '<td class="num dim">'+mins(r.holding_minutes !== undefined
           ? r.holding_minutes : (num(r.holding_seconds)/60))+'</td>'
       + '<td class="dim">'+esc(String(r.exit_reason||"").replace(/_/g," ").toLowerCase())+'</td></tr>';
   }).join("");
   $("closed").innerHTML = '<table><thead><tr><th>Stock</th><th class="num">In</th>'
-    + '<th class="num">Out</th><th class="num">Qty</th><th class="num">P&amp;L</th>'
+    + '<th class="num">Out</th><th class="num">Qty</th>'
+    + '<th class="num">P&amp;L</th><th class="num">Charges</th>'
     + '<th class="num">Held</th><th>Why it ended</th></tr></thead><tbody>'
     + body
     + '<tr class="foot"><td colspan="4">The bot’s own trades</td>'
@@ -1190,7 +1341,22 @@ function drawRest(d){
   var tradeCols = [
     ["Stock","symbol"], ["In", function(r){ return inr2(r.entry_price); }, 1],
     ["Out", function(r){ return inr2(r.exit_price); }, 1],
-    ["Qty","qty",1], ["P&L", function(r){ return pnl(r.pnl); }, 1],
+    /* ---- OUR MONEY IS THE NET AMOUNT. 6 September 2026. ----
+     *
+     *     "our money or profit is NET Amount after charges"
+     *                                            -- the operator
+     *
+     * state.py has computed net_pnl and charges for every closed
+     * trade since 24 July and the page showed neither. Friday read
+     * 11,794 here and he kept 9,247; charges also turned five of
+     * 3 September's thirteen winners into losers. */
+    ["Qty","qty",1],
+    ["P&L", function(r){
+      return pnl(r.net_pnl !== null && r.net_pnl !== undefined
+                 ? r.net_pnl : r.pnl); }, 1],
+    ["Charges", function(r){
+      return (r.charges === null || r.charges === undefined)
+        ? "—" : inr2(r.charges); }, 1],
     ["Why it ended", function(r){
       return esc(String(r.exit_reason||"").replace(/_/g," ").toLowerCase()); }]
   ];
@@ -1306,8 +1472,37 @@ function drawRest(d){
   ], "Every store answered. Nothing is stale, nothing is short.");
 
   /* --- Telegram --- */
+  /* ---- IT ASKED FOR KEYS THAT DO NOT EXIST. 6 Sep 2026. ----
+   *
+   *     "telegram tab purpose is to get user to understand the info
+   *      whether bot is getting data or not & timestamps . till now
+   *      bot never displayed or i didn't observed the data time of
+   *      the info bot is receving"              -- the operator
+   *
+   * He never observed it because it was never drawn. channel_report()
+   * returns last_post, held, late_minutes, pictures, pictures_read,
+   * named_a_stock, last_error and state -- and this asked for "last"
+   * and "n", neither of which it has ever returned. Every row showed
+   * the channel name and two dashes.
+   *
+   * The whole point of the tab is "is data arriving, and when", so
+   * the answer is drawn plainly: when it last spoke, how late that
+   * is, and whether the pictures were read. */
   simple("tg", rowsOf(d.telegram_channels), [
-    ["Channel","name"], ["Last message","last"], ["Messages","n",1]
+    ["Channel","name"],
+    ["Last message", function(r){ return esc(r.last_post || "never"); }],
+    ["Late by", function(r){
+      var m = r.late_minutes;
+      if (m === null || m === undefined) return "—";
+      if (m < 60) return esc(Math.round(m) + " min");
+      if (m < 1440) return esc((m/60).toFixed(1) + " hr");
+      return esc((m/1440).toFixed(1) + " days"); }, 1],
+    ["Messages", function(r){ return esc(r.held || 0); }, 1],
+    ["Pictures read", function(r){
+      return esc((r.pictures_read || 0) + " of " + (r.pictures || 0)); }, 1],
+    ["Named a stock", function(r){ return esc(r.named_a_stock || 0); }, 1],
+    ["State", function(r){
+      return esc(r.last_error ? String(r.last_error) : (r.state || "—")); }]
   ], "No channel has reported in.");
 
   simple("news", rowsOf(d.news_table).slice(0,80), [

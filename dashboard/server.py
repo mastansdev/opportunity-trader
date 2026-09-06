@@ -579,6 +579,134 @@ def build_app(dashboard_state, trade_controller, master_loader,
         except Exception as exc:                           # noqa: BLE001
             return {"mode": "UNKNOWN", "error": str(exc)}
 
+    @app.get("/api/brain")
+    def brain(limit: int = 120):
+        """Every event, and the stock it was filed against.
+
+        ---- WHAT THE TAB IS FOR. 6 September 2026. ----
+
+            "Brain tab purpose is to link the events to their
+             respective stocks. by seeing them user can identify that
+             is working or not"                 -- the operator
+
+        The tab has been showing market breadth, which answers a
+        different question. This answers his: here is what arrived,
+        here is the stock it was attached to, and you can see for
+        yourself whether the attaching is right.
+
+        The store holds 14,065 events carrying a stock and 4,705
+        carrying none, and neither number has ever been on a screen.
+
+        Read-only, on demand, off the rebuild -- see /api/month.
+        """
+        import os
+        import sqlite3
+        path = os.path.join("data", "stock_events.db")
+        try:
+            conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True,
+                                   timeout=5)
+            conn.row_factory = sqlite3.Row
+            # ---- COMPANY NEWS FIRST. 6 September 2026. ----
+            #
+            #     "now it showing the fresh news on top which is
+            #      correct but it will be best use to display the real
+            #      company news which were fresh & newest"
+            #                                     -- the operator
+            #
+            # Newest-first alone put six general market stories at the
+            # top -- McDonald's scrutiny, GDP growth, an ISRO union --
+            # because those happened to be the latest to arrive. True,
+            # and useless for checking that events reach the right
+            # stock. Company news leads; the market items keep their
+            # place below, never dropped, because "nothing was filed
+            # against a stock today" is itself an answer.
+            n = max(1, min(int(limit or 120), 400))
+            rows = [dict(r) for r in conn.execute(
+                "SELECT at, symbol, kind, scope, headline, source "
+                "FROM events ORDER BY "
+                "  CASE WHEN symbol IS NULL OR symbol = '' THEN 1 ELSE 0 END, "
+                "  at DESC LIMIT ?", (n,))]
+            linked = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE symbol IS NOT NULL "
+                "AND symbol != ''").fetchone()[0]
+            loose = conn.execute(
+                "SELECT COUNT(*) FROM events WHERE symbol IS NULL "
+                "OR symbol = ''").fetchone()[0]
+            conn.close()
+        except Exception as exc:                           # noqa: BLE001
+            return {"error": str(exc), "events": []}
+        for row in rows:
+            row["headline"] = str(row.get("headline") or "")[:160]
+            row["at"] = str(row.get("at") or "")[:16].replace("T", " ")
+        return {"events": rows, "linked": linked, "loose": loose}
+
+    @app.get("/api/timings")
+    def timings():
+        """How long the last rebuild took, and which panels ate it.
+
+        ---- HE ASKED TWICE. 6 September 2026. ----
+
+            "i want to know how much time will be taken by bot to
+             process the stock entry from pool to buy"
+            "i asked that too . where i can see that timings"
+
+        The answer matters because the rebuild is what publishes the
+        candidate list, so its length is how long a newly-qualified
+        stock waits before it can be bought. 42s at the median, 82 at
+        p90 -- and until now nobody could see WHICH of the 27 panels
+        was spending it.
+
+        refresh() has been recording rebuild_ms and a per-panel
+        panel_ms into every snapshot since it was written. Nothing
+        read either. This just hands them over.
+
+        COSTS NOTHING. get_snapshot() returns the dict the loop
+        already built -- no panel is recomputed to answer this.
+        """
+        try:
+            snap = dashboard_state.get_snapshot() or {}
+        except Exception as exc:                           # noqa: BLE001
+            return {"error": str(exc), "panels": []}
+        panels = snap.get("panel_ms") or {}
+        rows = sorted(({"panel": name, "ms": ms} for name, ms in panels.items()),
+                      key=lambda r: -(r["ms"] or 0))
+        total = snap.get("rebuild_ms")
+        counted = sum(r["ms"] or 0 for r in rows)
+        return {
+            "rebuild_ms": total,
+            "panels": rows,
+            "counted_ms": counted,
+            # What the rebuild spent OUTSIDE the named panels. A big
+            # number here means the cost is not in any one panel.
+            "elsewhere_ms": (round(total - counted)
+                             if isinstance(total, (int, float)) else None),
+            "entry_interval_s": 1.0,
+        }
+
+    @app.get("/api/month")
+    def month():
+        """The month's table -- date, trades, money, remainder.
+
+        ---- ITS OWN ENDPOINT, ON PURPOSE. 6 September 2026. ----
+
+            "but none of these process must slow down my bot trade
+             path or trading mechanism at all. i'm telling about all
+             the panels rebuilds or any other things"
+                                                -- the operator
+
+        The board rebuild is already the slowest thing the bot does
+        and the entry path reads it, so anything added to that payload
+        is paid for on every cycle whether or not anybody is looking.
+
+        This is fetched ONLY when the Month tab is opened. The rebuild
+        never computes it, never carries it, and costs nothing for it.
+        """
+        try:
+            from core.monthly_target import progress
+            return progress()
+        except Exception as exc:                           # noqa: BLE001
+            return {"error": str(exc), "days": []}
+
     @app.get("/api/price_check")
     def price_check():
         """Every symbol's price and % exactly as the bot holds it,
