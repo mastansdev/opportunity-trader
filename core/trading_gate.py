@@ -111,10 +111,11 @@ def may_place_real_orders(engine):
     in PAPER never places a real order however the switch is set, so a
     paper session cannot be turned real by a click.
     """
-    mode = _mode()
-    if mode != "LIVE":
-        return False, (f"the process is in {mode or 'an unreadable mode'} "
-                       f"-- every order this session is paper")
+    # THE SWITCH IS THE WHOLE ANSWER. TRADING_MODE no longer gates a
+    # real order -- see trading/execution._live_executor(). What used
+    # to be an outer bound is now a refusal at the switch, with a
+    # reason he can read: refuse_to_arm_reason() below will not let ON
+    # happen while the broker is unreachable.
 
     # ---- IT WAS READING THE WRONG FLAG. 5 September 2026. ----
     #
@@ -208,8 +209,10 @@ def refuse_to_arm_reason(engine):
     The switch may always be turned OFF -- that direction is never
     refused, and is not this function's business.
     """
-    if _mode() != "LIVE":
-        return None          # paper: arming is harmless, it stays paper
+    # Asked ALWAYS now, not only in a LIVE process. This is the check
+    # that replaced the mode outer bound: ON means real money, so ON
+    # must not be possible while Dhan is not answering -- which is the
+    # state he was in on 4 September when the IP was not renewed.
     ok, why = broker_is_reachable()
     if not ok:
         warn(f"[GATE] Refusing to arm: {why}. Orders would go to a broker "

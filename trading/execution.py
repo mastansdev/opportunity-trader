@@ -250,20 +250,27 @@ class Execution:
         separated completely, so he could run tests freely without a
         click costing money.
         """
-        live = getattr(self, "_live", None)
-        if live is None:
-            return None
-        from config import TRADING_MODE as _mode
-        if str(_mode).upper() != "LIVE":
-            self._say_once(
-                "paper-outer-bound",
-                f"[GATE] The switch is ON but this process is "
-                f"{str(_mode).upper()} -- the order is PAPER. A session "
-                f"started in {str(_mode).upper()} never places a real "
-                f"order, whatever the switch says. Restart with "
-                f"TRADING_MODE=LIVE to trade for real.")
-            return None
-        return live
+        # ---- THE SWITCH IS THE WHOLE ANSWER. 6 September 2026. ----
+        #
+        #     "its not correct. as we settled that switch . OFF = paper
+        #      & ON = Real trades thats it & final"   -- the operator
+        #
+        # This used to require TRADING_MODE=LIVE as well, so arming
+        # meant editing config.py and restarting -- which is a third
+        # condition he never asked for, and exactly the "deployment,
+        # not a control" he rejected when ALERT_ONLY_MODE lived in a
+        # source file.
+        #
+        # The outer bound was added on 4 September for a real reason:
+        # his static IP was down, Dhan was unreachable, and he wanted
+        # to click freely without a click costing money. That reason is
+        # now served properly instead -- core/trading_gate.py refuses
+        # to arm ON whenever the broker is not answering, and says why.
+        # A refusal with a sentence is a control; a silent second mode
+        # is a third state.
+        #
+        # So: OFF is paper, ON is real, and nothing else decides.
+        return getattr(self, "_live", None)
 
     def _route(self, reason, selling=False, symbol=None):
         """Which executor takes this order. Two answers, one question.

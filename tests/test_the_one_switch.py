@@ -67,11 +67,32 @@ def test_the_switch_still_governs_what_may_be_OPENED(monkeypatch):
     assert _routed(_execution(False, {}), symbol="NEW") == "paper"
 
 
-def test_a_paper_process_never_places_a_real_order_either_way(monkeypatch):
-    """The outer bound. A session started in PAPER cannot be turned
-    real by a click, however the switch is set and whoever opened it."""
+def test_the_switch_is_the_whole_answer(monkeypatch):
+    """---- HE SETTLED IT, AND IT IS FINAL. 6 September 2026. ----
+
+        "its not correct. as we settled that switch . OFF = paper &
+         ON = Real trades thats it & final"
+        "by default OFF . after clicking ON then it must trade in real
+         mode & do not ask user to change in files or restarts in run"
+
+    A real order used to need TRADING_MODE=LIVE as well, so arming
+    meant editing a source file and restarting -- a deployment, not a
+    control, and the same thing he rejected when ALERT_ONLY_MODE lived
+    in config.py.
+
+    TRADING_MODE no longer decides anything. The switch does.
+    """
     import config
     monkeypatch.setattr(config, "TRADING_MODE", "PAPER")
-    e = _execution(switch_on=True, opened={"ABC": "live"})
-    assert _routed(e, symbol="NEW") == "paper"
-    assert _routed(e, selling=True, symbol="ABC") == "paper"
+    assert _routed(_execution(True, {}), symbol="NEW") == "live", (
+        "the switch is ON and the order went to paper -- he must not "
+        "have to edit a file or restart to trade for real")
+    assert _routed(_execution(False, {}), symbol="NEW") == "paper"
+
+
+def test_the_bot_always_starts_OFF():
+    """"by default OFF". It is a class attribute, so it cannot be
+    forgotten in a constructor, and it is never written back to
+    config -- a restart always comes up OFF."""
+    from trading.execution import Execution
+    assert Execution.live is False

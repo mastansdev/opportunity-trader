@@ -62,12 +62,27 @@ def _armed_execution(monkeypatch, mode):
     return ex
 
 
-def test_a_paper_process_never_routes_to_the_live_executor(monkeypatch):
-    """THE fix. Switch ON, live executor present, mode PAPER -> paper."""
+def test_the_switch_alone_decides(monkeypatch):
+    """---- HE OVERRULED THE OUTER BOUND. 6 September 2026. ----
+
+        "its not correct. as we settled that switch . OFF = paper &
+         ON = Real trades thats it & final"
+        "by default OFF . after clicking ON then it must trade in real
+         mode & do not ask user to change in files or restarts in run"
+
+    This file was written on 4 September to stop a click costing money
+    while his static IP was down and Dhan was unreachable. That reason
+    is now served properly: core/trading_gate.refuse_to_arm_reason()
+    will not let ON happen while the broker is not answering, and says
+    why. A refusal with a sentence is a control; a second hidden mode
+    is the third state he abolished.
+
+    So TRADING_MODE no longer gates a real order. The switch does.
+    """
     ex = _armed_execution(monkeypatch, "PAPER")
-    assert ex._live_executor() is None, (
-        "a PAPER process handed back the LIVE executor -- pressing ON "
-        "would place real orders at Dhan")
+    assert ex._live_executor() is not None, (
+        "the switch is ON and this handed back paper -- he must not "
+        "have to edit a file or restart to trade for real")
 
 
 def test_a_live_process_still_routes_to_the_live_executor(monkeypatch):
@@ -76,12 +91,15 @@ def test_a_live_process_still_routes_to_the_live_executor(monkeypatch):
     assert ex._live_executor() is not None
 
 
-def test_the_refusal_is_said_once_not_per_order(monkeypatch):
-    """It runs on every routed order. A line per order would bury the log."""
-    ex = _armed_execution(monkeypatch, "PAPER")
-    for _ in range(5):
-        ex._live_executor()
-    assert len(ex._said) == 1
+def test_arming_is_refused_while_the_broker_is_silent(monkeypatch):
+    """What replaced the outer bound, and the case it was built for:
+    4 September, his static IP not renewed, Dhan unreachable. ON must
+    not arm into that -- and must say why rather than go quiet."""
+    from core import trading_gate
+    monkeypatch.setattr(trading_gate, "broker_is_reachable",
+                        lambda *a, **k: (False, "Dhan has not answered"))
+    why = trading_gate.refuse_to_arm_reason(object())
+    assert why and "answered" in why
 
 
 def test_no_live_executor_at_all_is_still_none(monkeypatch):
@@ -156,13 +174,18 @@ def test_the_gate_itself_still_fails_closed():
     assert ok is False and why
 
 
-def test_a_paper_process_is_never_allowed_by_the_gate(monkeypatch):
+def test_the_gate_allows_a_real_order_when_the_switch_is_on(monkeypatch):
+    """TRADING_MODE is not consulted any more. The switch and a broker
+    that answered -- those two, and nothing else."""
     import config
-    from core.trading_gate import may_place_real_orders
+    from core import trading_gate
     monkeypatch.setattr(config, "TRADING_MODE", "PAPER")
+    monkeypatch.setattr(trading_gate, "broker_is_reachable",
+                        lambda *a, **k: (True, "Dhan answered"))
 
+    class _Execution:
+        live = True
     class _Engine:
-        alert_only = False            # the switch is ON
-    ok, why = may_place_real_orders(_Engine())
-    assert ok is False
-    assert "paper" in why.lower()
+        execution = _Execution()
+    ok, _why = trading_gate.may_place_real_orders(_Engine())
+    assert ok is True

@@ -118,7 +118,18 @@ class _Loader:
 
 
 @pytest.fixture
-def rig():
+def rig(monkeypatch):
+    # ---- ON NOW ASKS THE BROKER. 6 September 2026. ----
+    #
+    # TRADING_MODE stopped gating a real order when he settled the
+    # switch -- "OFF = paper & ON = Real trades thats it & final" --
+    # and the check that replaced it is whether Dhan is answering. This
+    # rig has no broker, so arming was refused and the switch never
+    # moved. These tests are about the TOGGLE, not the broker, so the
+    # broker is answered for them.
+    from core import trading_gate
+    monkeypatch.setattr(trading_gate, "broker_is_reachable",
+                        lambda *a, **k: (True, "answered (test rig)"))
     engine = _Engine()
     controller = _Controller()
     app = build_app(_State(engine), controller, _Loader(),
