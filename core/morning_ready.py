@@ -335,6 +335,11 @@ def check(now=None, telegram_db=TELEGRAM_DB, results_db=RESULTS_DB):
                   "where date(results_date) = date(?) "
                   "order by symbol limit 12", (today,))
     reporting_today = [str(r[0]) for r in named if r and r[0]]
+    ahead = _rows(results_db,
+                  "select symbol, date(results_date) from results_events "
+                  "where date(results_date) > date(?) "
+                  "order by date(results_date), symbol limit 8", (today,))
+    upcoming = [(str(r[0]), str(r[1])) for r in ahead if r and r[0]]
 
     if stamp == today:
         add("results calendar", True, "refreshed today")
@@ -350,11 +355,32 @@ def check(now=None, telegram_db=TELEGRAM_DB, results_db=RESULTS_DB):
             f"last refreshed {stamp or 'never'} -- and nothing is due. "
             f"Out of season; the next window is the one to refresh for.",
             blocks=False)
+    elif upcoming:
+        # ---- IT BLOCKED FOR KNOWING THE ANSWER. 6 Sep 2026. ----
+        #
+        # This branch read "the bot will not know which" and blocked,
+        # on a store that held BLEL and SHIPROCKET for Monday, GAJA
+        # for Thursday and LALITHAA for Friday -- by name, from the
+        # Earnings Pulse channel. The comment above it already said
+        # the rule: block when something is due and NOTHING is known.
+        # Knowing them is the whole question, so it says who and when.
+        #
+        # It fires on every day nobody reports but someone reports
+        # later, which off-season is most days. A check that shows red
+        # while the bot is right is how a real red gets scrolled past.
+        add("results calendar", True,
+            "none reporting today; next "
+            + ", ".join(f"{s} on {d}" for s, d in upcoming[:4])
+            + f" (NSE list last refreshed {stamp or 'never'}, so there "
+              f"may be more)",
+            blocks=False)
     else:
+        # Something is due and NOT ONE of those rows carries a symbol.
+        # That is the case the check was written for.
         add("results calendar", False,
             f"last refreshed {stamp or 'never'} and {reporting} company"
-            f"(ies) report in the days ahead but none today -- the bot "
-            f"will not know which")
+            f"(ies) report in the days ahead but none is named -- the "
+            f"bot will not know which")
 
     blocking = [c for c in checks if c["blocks"]]
     return {"ready": not blocking, "checks": checks,
