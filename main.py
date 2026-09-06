@@ -391,6 +391,25 @@ def main():
     order_route.route_orders_through(dhan_order_client, ORDER_PROXY)
     decision(f"[ROUTE] {order_route.describe(ORDER_PROXY)}")
 
+    # ---- THE MEMORY IS WARMED HERE, NOT AT 09:15. 6 Sep 2026. ----
+    #
+    # core/why_moving.why() asks core/cause_effect for a standing
+    # order when nothing fresher answered, and the first such call
+    # builds a matcher and reads the event store: 1,642 ms measured,
+    # once. _route_entries() runs every second from the open, so
+    # without this that one slow call happens at 09:15 on a live
+    # decision. Here it happens before the feed is even connected,
+    # and it hands over the master list already loaded above rather
+    # than reading a second copy.
+    try:
+        from core import cause_effect as _cause_effect
+        _held = _cause_effect.warm(master_loader)
+        decision(f"[MEMORY] {_held} standing cause(s) on the board, "
+                 f"read before the open")
+    except Exception as _exc:                              # noqa: BLE001
+        warn(f"[MEMORY] could not warm the standing causes ({_exc}). "
+             f"They will be built on first use; nothing else changes.")
+
     sector_monitor = SectorMonitor(market_data, master_loader)
     # TOP_N_MOMENTUM_MODE (config.py) -- wired in unconditionally,
     # same pattern as sector_monitor above: the object
@@ -2536,6 +2555,36 @@ def _score_the_day():
         verify()
     except Exception as exc:                               # noqa: BLE001
         warn(f"[REVIEW] Could not score the picks ({exc}).")
+
+    # ---- WHERE THE MONTH STANDS. 6 September 2026. ----
+    #
+    #     "on monthly 5L target & in case day -1 bot booked 70 K then
+    #      remaining 4.3L on remaining days & so on"   -- the operator
+    #
+    # A remainder, printed once a day where he already reads. It
+    # decides nothing and divides by nothing -- see
+    # core/monthly_target.py for why there is no per-day figure.
+    try:
+        from core.monthly_target import line as _month_line
+        decision(_month_line())
+    except Exception as exc:                               # noqa: BLE001
+        warn(f"[MONTH] Could not read the month ({exc}).")
+
+    # ---- IT MARKS ITS OWN HOMEWORK. 6 September 2026. ----
+    #
+    #     "yes - self performance upgrade, self improving"
+    #     "again why manual runs? why can't bot do itself."
+    #
+    # A fixed set of questions put to its own book, printed here and
+    # kept, so tonight's answers can be read against last week's. It
+    # changes no setting -- see core/self_review.py.
+    try:
+        from core import self_review
+        self_review.run()
+    except Exception as exc:                               # noqa: BLE001
+        warn(f"[REVIEW] The self review failed ({exc}). Nothing else "
+             f"is affected; run py -c \"from core import self_review; "
+             f"self_review.run()\" to see why.")
 
     _run_nightly()
 

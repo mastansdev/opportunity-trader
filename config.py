@@ -3277,6 +3277,25 @@ RECORDER_LAST_MINUTE = "15:28"
 # paper at all; see DAILY_LOSS_CAP_APPLIES_IN_PAPER below.
 DAILY_MAX_LOSS_RS = 12000.0
 
+
+# ---- FIVE LAKH A MONTH, AS A REMAINDER. 6 September 2026. ----
+#
+#     "on monthly 5L target & in case day -1 bot booked 70 K then
+#      remaining 4.3L on remaining days & so on. not like averaging
+#      each day targets. as market may give more opportunites in some
+#      days & less in other days"          -- the operator
+#
+# A RUNNING REMAINDER, never a daily quota. 5,00,000 over 21 sessions
+# is 23,810 a day and that number lies in both directions: it makes a
+# quiet Tuesday look like a failure and calls a day finished at noon
+# when the market is still handing out NIACLs.
+#
+# It DECIDES NOTHING -- see core/monthly_target.py, which divides by
+# nothing on purpose and which no gate imports. Same shape as
+# DAILY_PROFIT_TARGET_RS above: it is reported, and the only figure
+# that still stops anything is DAILY_MAX_LOSS_RS.
+MONTHLY_TARGET_RS = 5_00_000.0
+
 # ---- NO DAILY CAP IN PAPER. 4 September 2026. ----
 #
 #     "remove the daily cap -12K per day in paper mode. no use at all
