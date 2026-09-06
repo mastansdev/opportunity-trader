@@ -46,7 +46,26 @@ class Client:
 
 
 def feed_of(n=9):
+    # ---- IT WAS WRITING INTO THE LIVE STORE. 6 September 2026. ----
+    #
+    # __new__ skips __init__, so this object never learned which file
+    # to use -- and _note_attempt() falls back to the module default,
+    # which is data/telegram.db, his real collected data. Every full
+    # suite run bookmarked nine channels called c0..c8 in it, and his
+    # dashboard listed them beside the ten real ones.
+    #
+    # Proved on 6 September: the store was cleaned, the suite was run,
+    # and c0 through c8 were back before it finished.
+    #
+    # _store and _prune are stubbed below, so it was never the posts
+    # that leaked -- only the bookmark row. One temp path closes it.
+    import os
+    import tempfile
+    import threading
+
     feed = TelegramFeed.__new__(TelegramFeed)
+    feed.db_path = os.path.join(tempfile.mkdtemp(), "tg.db")
+    feed._lock = threading.Lock()
     feed.client = Client()
     feed.channels = [{"handle": "c%d" % i, "name": "c%d" % i}
                      for i in range(n)]

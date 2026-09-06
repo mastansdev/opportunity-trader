@@ -395,6 +395,47 @@ NOT_A_NAME = {
 }
 
 
+# ---- A LINK IS NOT A REASON. 6 September 2026. ----
+#
+#     "do not get the youtube links & any other links . not only in
+#      this channel , this applies to all other channels"
+#                                             -- the operator
+#
+# NOT "any message containing http". All 31 link-bearing messages in
+# the store were read before this was written, and three of them carry
+# real stocks:
+#
+#     #MorningMarketWithDTT ~ 4 SEPT ... Today's Stocks in News
+#         -> INOXWIND, KAYNES, LICHSGFIN, SAIL
+#     LATEST MARKET UPDATES ... GOLD FALL        -> OIL, BSE
+#
+# Those end in a t.me pointer to another post. A blanket http rule
+# would throw them away -- the same over-reach that nearly cost the
+# Welspun MoU on 5 September.
+#
+# So it is by DESTINATION. These places never carry a trading reason:
+# a YouTube short about gold in a bank locker, an Instagram launch
+# announcement, an affiliate insurance link, a "add our channels as a
+# folder" invite. A t.me link to a POST is kept, because that is a
+# pointer to content and not an advertisement.
+#
+# It also removes a real mis-link at the source: "Must Watch Shorts --
+# Gold in Bank Locker? Not Safe?" was filed against ACC, the cement
+# company, three times over.
+NEVER_A_REASON = re.compile(
+    r"youtube\.com|youtu\.be|/shorts/"
+    r"|instagram\.com|facebook\.com|fb\.watch"
+    r"|bit\.ly|tinyurl\.com|aonelink\.in"
+    r"|t\.me/addlist",
+    re.I)
+
+
+def is_just_a_link(text):
+    """Is this post an advertisement rather than information?"""
+    return bool(NEVER_A_REASON.search(str(text or "")))
+
+
+
 class TelegramFeed:
     """Recent messages from the operator's channels, and the stocks
     they name. Read-only, fail-quiet, never an input to a trade."""
@@ -2027,7 +2068,10 @@ class TelegramFeed:
         """
         try:
             channel = None
-            for c in self.channels:
+            # A handler registered before midnight can still deliver
+            # after it, so the arriving post is checked as well as the
+            # registration. See listen().
+            for c in self._channels_for():
                 names = {str(c.get("handle") or "").lstrip("@").lower(),
                          str(c.get("name") or "").lower()}
                 if str(handle or "").lower() in names:
@@ -2072,7 +2116,19 @@ class TelegramFeed:
         watch = getattr(self.client, "watch", None)
         if watch is None:
             return 0
-        handles = [c.get("handle") or c.get("name") for c in self.channels
+        # ---- THE SKIP HAD FOUR DOORS AND GUARDED ONE. 6 Sep 2026. ----
+        #
+        # poll() has used _channels_for() since the weekend rule was
+        # written; listen(), fill_gaps(), catch_up() and _store_pushed()
+        # walked self.channels raw. So Day Trader Telugu was skipped by
+        # the 90-second poll and let straight in through the other four
+        # -- and the store proves it: t.me was asked for that channel
+        # today, a Sunday, at 14:24, and returned 502.
+        #
+        # Registering a push handler is the worst of the four: Telegram
+        # then sends the weekend posts unasked.
+        handles = [c.get("handle") or c.get("name")
+                   for c in self._channels_for()
                    if (c.get("handle") or c.get("name"))]
         try:
             n = watch(handles, self._store_pushed) or 0
@@ -2524,7 +2580,9 @@ class TelegramFeed:
         if self.client is None:
             return 0
         filled = 0
-        for channel in self.channels:
+        # _channels_for(), not self.channels -- a channel skipped today
+        # must not be asked for its missing posts either. See listen().
+        for channel in self._channels_for():
             name = channel.get("name") or channel.get("handle")
             handle = channel.get("handle") or name
             if not handle:
@@ -2652,7 +2710,8 @@ class TelegramFeed:
         requests a day at a stranger's expense.
         """
         recovered = 0
-        for channel in self.channels:
+        # _channels_for(), not self.channels. See listen().
+        for channel in self._channels_for():
             handle = channel["handle"]
             name = channel.get("name") or handle
 
@@ -2991,6 +3050,13 @@ class TelegramFeed:
             # the image channel. Dropping it would empty the one panel
             # the operator most wants.
             if not text and not photos and not message.get("photo_data"):
+                continue
+            # A link to YouTube, Instagram or an affiliate page is an
+            # advertisement, not information. Refused at the door so it
+            # never reaches the matcher, the events store or a screen.
+            # See NEVER_A_REASON above for why this is by destination
+            # and not by the presence of a URL.
+            if is_just_a_link(text):
                 continue
             at = message.get("at")
             # Hashtags first, but ONLY from channels whose hashtags

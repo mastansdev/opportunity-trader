@@ -206,3 +206,84 @@ def test_the_list_is_never_emptied(feed, monkeypatch):
                       "name": "Day Trader Telugu"}]
     assert _names(feed, None, monkeypatch, weekend=True) == \
         {"Day Trader Telugu"}
+
+
+# ==========================================================
+#  A LINK IS NOT A REASON -- AT THE DOOR.  6 September 2026.
+# ==========================================================
+#
+#     "do not get the youtube links & any other links . not only in
+#      this channel , this applies to all other channels"
+#                                             -- the operator
+#
+# The NOISE patterns already refused these as EVENTS. He asked for
+# something stronger: do not collect them at all. So the test is on
+# the store, not the classifier.
+#
+# NOT "any message containing http". All 31 link-bearing messages were
+# read before the rule was written, and the morning briefing carries
+# both a t.me pointer and the day's F&O ban list -- INOXWIND, KAYNES,
+# LICHSGFIN, SAIL. A blanket rule throws that away.
+#
+# Measured over the whole store: 27 of 1,612 messages refused, and of
+# the six that had named a stock, four were "Gold in Bank Locker" shorts
+# filed against ACC and two were video contents-lists.
+
+def test_a_youtube_short_is_never_collected():
+    from core.telegram_feed import is_just_a_link
+    assert is_just_a_link(
+        "Must Watch Shorts - Gold in Bank Locker? Not Safe? "
+        "https://youtube.com/shorts/KI-SIubw1-g") is True
+
+
+def test_every_advertisement_destination_is_refused():
+    from core.telegram_feed import is_just_a_link
+    for text in (
+            "watch this https://youtu.be/3oEIE_n5VTo",
+            "WE'RE NOW LIVE ON INSTAGRAM https://instagram.com/redbox",
+            "building something bigger https://facebook.com/redbox",
+            "clip here https://fb.watch/xyz",
+            "Support Our Work Term Policy https://bit.ly/_Term_Policy",
+            "Add all Pro channels https://t.me/addlist/Dxp1klf3",
+            "deal https://aonelink.in/abc"):
+        assert is_just_a_link(text) is True, text
+
+
+def test_the_morning_briefing_survives():
+    """It ends in a t.me pointer and carries the day's F&O ban list.
+    A blanket http rule would have thrown it away -- the same
+    over-reach that nearly cost the Welspun MoU."""
+    from core.telegram_feed import is_just_a_link
+    assert is_just_a_link(
+        "#MorningMarketWithDTT ~ 4 SEPT\nToday's Stocks in News\n"
+        "https://t.me/daytradertelugu/208120\nF&O BAN\n1,INOXWIND\n"
+        "2,KAYNES\n3,LICHSGFIN\n4,SAIL") is False
+
+
+def test_a_filing_with_no_link_is_untouched():
+    from core.telegram_feed import is_just_a_link
+    assert is_just_a_link(
+        "WELSPUN CORP: CO. SECURES LARGEST-EVER SINGLE ORDER") is False
+
+
+def test_the_store_itself_turns_them_away():
+    """The rule has to be ON the store, not only importable. He asked
+    for them not COLLECTED, not merely not classified."""
+    import io
+    src = io.open("core/telegram_feed.py", encoding="utf-8").read()
+    assert "if is_just_a_link(text):" in src, \
+        "the rule exists and _store never calls it"
+
+
+def test_the_rule_lives_outside_the_class():
+    """---- IT ENDED THE CLASS. 6 September 2026. ----
+
+    First attempt put NEVER_A_REASON and is_just_a_link at column 0 in
+    the middle of the class body, which closed the class. _store and
+    every method after it became module functions, and 22 tests failed
+    with "'TelegramFeed' object has no attribute '_store'".
+    """
+    from core.telegram_feed import TelegramFeed
+    for method in ("_store", "poll", "channel_report", "listen"):
+        assert hasattr(TelegramFeed, method), \
+            f"TelegramFeed lost {method} -- something closed the class early"
