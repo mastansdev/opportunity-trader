@@ -233,12 +233,54 @@ class TelegramWebReader:
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             return response.read().decode("utf-8", errors="replace")
 
+    #: Handles this reader has already said it cannot address.
+    _UNUSABLE = set()
+    #: Handles whose page fetches but never parses -- bots, private.
+    _UNPARSEABLE = set()
+
     def fetch(self, channel, limit=30, before=None, ids=None):
         # `ids` exists so this stays a drop-in for the API reader. The
         # public web view serves pages and cannot answer "give me post
         # 3741", so it says so instead of returning a page that was not
         # asked for. See core/telegram_client.FallbackReader.fetch().
         if ids:
+            return []
+
+        # ---- A TITLE IS NOT A HANDLE. 6 September 2026. ----
+        #
+        #     "too many errors in last closed run"    -- the operator
+        #
+        # 1,224 of them, and every one this:
+        #
+        #     [TELEGRAM] Earnings Pro: URL can't contain control
+        #     characters. '/s/Earnings Pro'
+        #
+        # Four channels carry their display TITLE where a handle
+        # belongs -- "Business Pulse", "Earnings Pro", "Earnings 360",
+        # "Breakouts". They come from feed_watermark, which records
+        # what a channel is CALLED, and a title is what Telethon needs.
+        # Telethon resolves them and collects them normally.
+        #
+        # This reader builds a URL, and t.me/s/Earnings Pro is not one.
+        # It failed, warned, and was asked again ninety seconds later,
+        # all day, for weeks.
+        #
+        # Nothing is lost by not trying -- it could never have worked.
+        # So it says so ONCE per handle and returns nothing, which is
+        # the honest answer: this reader cannot address this channel.
+        # The warning is kept for the first time because a channel the
+        # fallback cannot reach is a channel with no safety net if
+        # Telethon goes down.
+        handle = str(channel or "").strip()
+        if not handle or any(c.isspace() for c in handle):
+            if handle not in self._UNUSABLE:
+                self._UNUSABLE.add(handle)
+                diagnostic(
+                    f"[TELEGRAM] the web reader cannot address "
+                    f"{handle!r} -- that is a channel TITLE, not a "
+                    f"handle, and a URL cannot hold a space. Telethon "
+                    f"reads it normally; this fallback cannot, so this "
+                    f"channel has no safety net if Telethon drops.")
             return []
         """Recent messages from one public channel.
 
@@ -277,8 +319,23 @@ class TelegramWebReader:
         page = self._get(url)
         messages = parse_channel_html(page, handle)
         if not messages:
-            warn(f"[TELEGRAM] {handle}: page fetched but no messages parsed "
-                 f"-- Telegram may have changed its HTML, or the channel is "
-                 f"private (a private channel has no web view at all).")
+            # ---- SAID ONCE, NOT 312 TIMES. 6 September 2026. ----
+            #
+            # WLPulseBot has no public web view -- it is a bot, and a
+            # bot has no t.me/s/ page. The page fetches, parses to
+            # nothing, and warns; ninety seconds later it does it
+            # again. 312 identical lines in the logs, drowning the
+            # warnings that mattered.
+            #
+            # The condition is PERMANENT, so the warning is said once
+            # per handle and then kept quiet. It is still a warning
+            # the first time, because a channel this reader cannot
+            # parse has no safety net if Telethon drops.
+            if handle not in self._UNPARSEABLE:
+                self._UNPARSEABLE.add(handle)
+                warn(f"[TELEGRAM] {handle}: page fetched but no messages "
+                     f"parsed -- Telegram may have changed its HTML, or "
+                     f"the channel is private or a bot (neither has a web "
+                     f"view). Said once; it will not be repeated.")
         diagnostic(f"[TELEGRAM] {handle}: {len(messages)} messages.")
         return messages[-limit:] if limit else messages
