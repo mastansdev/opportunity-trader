@@ -49,6 +49,21 @@ from core.logger import warn, diagnostic, decision
 def _utcnow():
     return datetime.now(timezone.utc)
 
+
+def _size_of(symbol):
+    """{"band", "cap_cr", "rank"} for this company, or {}.
+
+    Never raises and never guesses. A company that is not on NSE's
+    list -- 235 of the 1,976 followed, mostly listed after the filing
+    period -- records no band at all, which is a different thing from
+    recording SMALL.
+    """
+    try:
+        from core import company_size
+        return company_size.of(symbol) or {}
+    except Exception:                                      # noqa: BLE001
+        return {}
+
 def _as_datetime(value):
     """A datetime, whatever shape it arrived in.
 
@@ -134,6 +149,15 @@ class TradeMemory:
             Column("jump_x", Float),
             Column("liveness", String(12)),
             Column("off_high_pct", Float),
+            # How big the company is -- see LATE_COLUMNS.
+            Column("mcap_band", String(8), index=True),
+            Column("mcap_cr", Float),
+            # Right stock at right time, both readings -- see
+            # LATE_COLUMNS. Recorded, never consulted.
+            Column("run_up_pct", Float),
+            Column("move_age_min", Float),
+            Column("reason_kind", String(24), index=True),
+            Column("reason_pct_of_company", Float),
             Column("recorded_at", DateTime(timezone=True), default=_utcnow),
             # ---- ONE ROW PER STOCK PER DAY LOST HALF A SESSION ----
             #      1 September 2026.
@@ -201,6 +225,56 @@ class TradeMemory:
         "jump_x": "REAL",
         "liveness": "TEXT",
         "off_high_pct": "REAL",
+        # ---- HOW BIG THE COMPANY IS. 6 September 2026. ----
+        #
+        #     "does that brings any change in trading & overall
+        #      outcome?"                             -- the operator
+        #
+        # Not by itself, and that is the point of putting it HERE
+        # rather than in a gate. Asked on 6 September whether size
+        # predicts anything, this book could not answer:
+        #
+        #     from 29 August, under the rules running now
+        #       LARGE    2 trades    2 up    0 down
+        #       MID      3 trades    3 up    0 down
+        #       SMALL   56 trades   25 up   31 down
+        #
+        # Five non-small trades. The 139 trades before 29 August ran a
+        # different stop, target and sizing, and his rule is that a new
+        # rule is never tuned on trades from the old one. So the
+        # question is not unanswered because it is hard -- it is
+        # unanswered because nothing wrote the size down.
+        #
+        # NOT the free-float figure core/cause_effect.py's gate reads.
+        # That one is deliberately different; see core/company_size.py
+        # for why the two are separate modules.
+        "mcap_band": "TEXT",
+        "mcap_cr": "REAL",
+        # ---- HIS ANSWER AND MINE, SIDE BY SIDE. 6 Sep 2026. ----
+        #
+        #     "no rupee will go into trade unless there is potential to
+        #      move"                              -- the operator
+        #
+        # He says volume settles it and the REASON behind the volume --
+        # news, an event, or pure price action. I found Friday's seven
+        # late entries lost every one. He settled it: "yes both will
+        # settle the answer i guess". So both are written down and
+        # neither decides anything.
+        #
+        #   run_up_pct              how far it had already run when
+        #                           bought, from yesterday's close
+        #   move_age_min            how long ago the move began, by the
+        #                           bot's own definition of moving
+        #   reason_kind             ORDER_WIN, GUIDANCE, BUSINESS_UPDATE
+        #   reason_pct_of_company   the reason's size against the
+        #                           company. Rs 15,840 cr against a
+        #                           Rs 33,636 cr company is 47% and is
+        #                           potential; the same order against
+        #                           L&T is 3% and is not.
+        "run_up_pct": "REAL",
+        "move_age_min": "REAL",
+        "reason_kind": "TEXT",
+        "reason_pct_of_company": "REAL",
     }
 
     def _widen_the_unique_constraint(self):
@@ -394,6 +468,21 @@ class TradeMemory:
                 jump_x=closed_position.get("jump_x"),
                 liveness=closed_position.get("liveness"),
                 off_high_pct=closed_position.get("off_high_pct"),
+                run_up_pct=closed_position.get("run_up_pct"),
+                move_age_min=closed_position.get("move_age_min"),
+                reason_kind=(closed_position.get("reason_kind")
+                             or closed_position.get("news_kind")),
+                reason_pct_of_company=closed_position.get(
+                    "reason_pct_of_company"),
+                # A company's size class does not move during a
+                # session, so unlike door and liveness this can be
+                # read here rather than stamped at entry -- and it is
+                # taken from the position first, so an engine that
+                # starts stamping it later wins without a change here.
+                mcap_band=(closed_position.get("mcap_band")
+                           or _size_of(symbol).get("band")),
+                mcap_cr=(closed_position.get("mcap_cr")
+                         or _size_of(symbol).get("cap_cr")),
                 recorded_at=_utcnow(),
             )
             with self.engine.begin() as conn:

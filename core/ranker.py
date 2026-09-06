@@ -1217,6 +1217,18 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
     # Unknown liveness (no high, no recent window) sorts with the live
     # ones. We did not measure it, so we must not demote it -- that is
     # the same "unasked is not failed" rule the MTF gate follows.
+    # ---- WHEN DID EACH MOVE BEGIN. 6 September 2026. ----
+    #
+    # Watches only. core/move_clock.py decides nothing and no gate
+    # imports it -- it exists because Friday's book could not answer
+    # "how late were we", and reconstructing one day by hand took an
+    # afternoon. Wrapped because bookkeeping must never stop a cycle.
+    try:
+        from core import move_clock
+        move_clock.note(out, now=now)
+    except Exception:                                      # noqa: BLE001
+        pass
+
     out.sort(key=lambda c: (c.get("state") == "fading", -c["score"]))
 
     # ---- FIVE CHEMICALS NAMES IS ONE BET, NOT FIVE. 19 Aug 2026 ----

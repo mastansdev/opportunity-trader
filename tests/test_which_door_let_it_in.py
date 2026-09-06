@@ -70,11 +70,33 @@ def test_a_row_the_pool_never_tagged_is_opening_not_blank():
     assert '"opening")' in src
 
 
+def _fingerprint_block(src):
+    """The whole entry_facts block, however long it grows.
+
+    ---- IT WAS A CHARACTER COUNT. 6 September 2026. ----
+
+    This sliced a fixed 1400 characters from the marker. Four fields
+    were added to the fingerprint that day -- run_up_pct,
+    move_age_min, reason_kind, reason_pct_of_company -- and the
+    `except Exception` that is the whole point of the test fell 233
+    characters outside the window. The code was correct and the test
+    failed, which is the wrong way round.
+
+    So it reads to the END of the block instead: the enter() call that
+    follows it. The guard is unchanged -- the try/except must still be
+    there, and it must still say it never blocks a trade.
+    """
+    start = src.index("THE FINGERPRINT OF THIS ENTRY")
+    tail = src[start:]
+    end = tail.index("enter(symbol")
+    return tail[:end]
+
+
 def test_the_facts_are_stamped_at_the_moment_of_the_decision():
     """Not rebuilt later from the board -- by then the numbers have
     moved, which is the whole fault this session has been chasing."""
     src = io.open("core/auto_entry.py", encoding="utf-8").read()
-    block = src[src.index("THE FINGERPRINT OF THIS ENTRY"):][:1400]
+    block = _fingerprint_block(src)
     for k in ('"door"', '"volume_x"', '"jump_x"', '"liveness"', '"off_high_pct"'):
         assert k in block
     assert "engine.entry_facts" in block
@@ -84,7 +106,7 @@ def test_bookkeeping_never_blocks_a_trade():
     """The oldest rule in this file. A fingerprint that cannot be built
     must cost a field, never an order."""
     src = io.open("core/auto_entry.py", encoding="utf-8").read()
-    block = src[src.index("THE FINGERPRINT OF THIS ENTRY"):][:1400]
+    block = _fingerprint_block(src)
     assert "except Exception" in block
     assert "never block a trade" in block
 

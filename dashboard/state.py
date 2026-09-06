@@ -1288,7 +1288,52 @@ class DashboardState:
             ranked.get("rows"),
             (snapshot.get("gainers_losers") or {}).get("gainers"),
             ranked.get("refused_rows"))
+        # ---- AND HOW BIG THE COMPANY IS. 6 September 2026. ----
+        #
+        #     "atleast for the sortlisted candidates each day along
+        #      with their size = Largecap , Midcap, smallcap"
+        #
+        # Stamped on the ROW rather than sent as a second map, so it
+        # reaches every list the board draws and cannot drift out of
+        # step with whichever one the page reads. Same reasoning, and
+        # the same three groups, as the flow above.
+        self._stamp_company_size(
+            ranked.get("rows"),
+            (snapshot.get("gainers_losers") or {}).get("gainers"),
+            ranked.get("refused_rows"))
         return snapshot
+
+    def _stamp_company_size(self, *groups):
+        """Put LARGE / MID / SMALL on every row the board draws.
+
+        One dict read for the whole board -- the store is a json file
+        held in memory by core/company_size.py, so this is a lookup per
+        row and nothing else. It decides nothing; no gate reads it.
+
+        A company NSE's list does not carry gets no band at all, which
+        is deliberately different from being called SMALL.
+
+        Never raises: a row without a size is left exactly as it was.
+        """
+        try:
+            from core import company_size
+            sizes = company_size.load().get("sizes") or {}
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[SIZE] company sizes unavailable: {exc}")
+            return
+        if not sizes:
+            return
+        for rows in groups:
+            for row in (rows or ()):
+                if not isinstance(row, dict):
+                    continue
+                got = sizes.get(str(row.get("symbol") or "").upper())
+                if not isinstance(got, dict):
+                    continue
+                if got.get("band"):
+                    row["mcap_band"] = got["band"]
+                if got.get("cap_cr"):
+                    row["mcap_cr"] = got["cap_cr"]
 
     # A standing cause is days old and cannot change within a minute.
     # Measured warm: 610 ms for 36 stocks, because naming a company in

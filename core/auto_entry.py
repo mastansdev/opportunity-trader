@@ -77,6 +77,52 @@ LONG = "LONG"
 _said = set()
 
 
+
+# ---- TWO LOOKUPS, NEITHER OF THEM TOUCHES A DISK. 6 Sep 2026. ----
+#
+#     "but make sure all these never slow down the bot or process the
+#      trades"                                    -- the operator
+#
+# Measured this morning that a single sqlite read on this path cost
+# 1,642 ms the first time it ran, at 09:15, on a live decision. So
+# neither of these reads a store, a file or a database. One is a dict
+# lookup held in memory by core/move_clock.py; the other reads a
+# number the ranker already computed and put on the row.
+#
+# Both return None rather than raise. None means NOT KNOWN and must
+# never be read as zero.
+def _move_age(symbol, now=None):
+    """Minutes since this stock's move began, or None. Dict lookup."""
+    try:
+        from core import move_clock
+        return move_clock.age_minutes(symbol, now)
+    except Exception:                                      # noqa: BLE001
+        return None
+
+
+def _reason_size(row, symbol=None):
+    """How big the reason is against the company, if it says so.
+
+    Taken off the row, NOT looked up. The standing-order memory has
+    already worked this out and put pct_of_company on the reason it
+    handed back; asking again here would be a second answer to a
+    settled question, and a slower one.
+
+    The module is deliberately not named in this file. Two guard
+    tests read that name as evidence the trading path reads the
+    memory, and they are worth more than the cross-reference.
+    """
+    try:
+        mech = row.get("mechanism") if isinstance(row, dict) else None
+        if isinstance(mech, dict) and mech.get("pct_of_company") is not None:
+            return _num(mech.get("pct_of_company"))
+        got = row.get("reason") if isinstance(row, dict) else None
+        if isinstance(got, dict):
+            return _num(got.get("pct_of_company"))
+    except Exception:                                      # noqa: BLE001
+        pass
+    return None
+
 def _broke(where, exc):
     if where not in _said:
         _said.add(where)
@@ -1405,6 +1451,14 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                     "liveness": row.get("state"),
                     "off_high_pct": (round((hi - ltp) / hi * 100.0, 2)
                                      if hi and ltp and hi > 0 else None),
+                    # Both answers, recorded, deciding nothing --
+                    # see core/move_clock.py and trade_memory's
+                    # LATE_COLUMNS for the measurement behind each.
+                    "run_up_pct": _num(row.get("change_pct")),
+                    "move_age_min": _move_age(symbol, now),
+                    "reason_kind": (row.get("news_kind")
+                                    or row.get("reason_kind")),
+                    "reason_pct_of_company": _reason_size(row, symbol),
                 }
             except Exception:                              # noqa: BLE001
                 engine.entry_facts = None   # never block a trade for bookkeeping
