@@ -73,6 +73,8 @@ excluded from every reading. An unknown effect is not a zero effect.
 
 import os
 import sqlite3
+import threading
+import time
 from datetime import datetime
 
 from core.logger import diagnostic
@@ -656,7 +658,14 @@ def standing_cause(symbol, on=None, events_db=None, min_cr=None,
         except ValueError:
             today = datetime.now().date()
     try:
-        conn = sqlite3.connect(events_db or EVENTS_DB)
+        # READ-ONLY, AND IT WAITS. The collector writes this store
+        # from another process and the journal mode is `delete`, so a
+        # reader BLOCKS during a write. The default timeout is 5 s and
+        # a timeout here returns "no standing cause", which is a wrong
+        # answer rather than a slow one. Same shape as _sessions() and
+        # _closes() above.
+        conn = sqlite3.connect("file:" + (events_db or EVENTS_DB)
+                               + "?mode=ro", uri=True, timeout=30)
         rows = conn.execute(
             "SELECT date(at), value_cr, headline FROM events "
             "WHERE symbol = ? AND kind IN (%s) AND value_cr >= ? "
@@ -813,6 +822,7 @@ def _still_reads_as_an_order(headline, value_cr):
 
 
 _MATCHER = None
+_NAMES_CACHE = {}
 
 
 def _matcher():
@@ -827,10 +837,45 @@ def _matcher():
     if _MATCHER is None:
         from core.master_loader import MasterLoader
         from core.telegram_feed import TelegramFeed
+        # main.py has had a loaded MasterLoader since line 307. Loading
+        # a SECOND one here cost 0.9 s and held the whole master list
+        # in memory twice, for a list that is identical. warm() hands
+        # the live one over before the open; this stays as the
+        # fallback for tools and tests, which have no loader to give.
         loader = MasterLoader()
         loader.load()
         _MATCHER = TelegramFeed(master_loader=loader)
     return _MATCHER
+
+
+def warm(master_loader=None):
+    """Build the matcher and today's batch BEFORE the market opens.
+
+    ---- 1.6 SECONDS, ONCE, IN THE WRONG PLACE. 6 Sep 2026. ----
+
+        "i want 0 lag & 0 errors from monday"      -- the operator
+
+    Measured in a fresh process: the first standing lookup costs
+    1,642 ms and every one after it costs nothing. That first one
+    would have landed inside _route_entries(), which runs every second
+    from 09:15 -- so the one slow call was going to happen at the open,
+    on the first stock with no fresh reason.
+
+    Called from main.py at startup, where there is slack. Never
+    raises: a memory that could not be warmed is a memory that warms
+    itself on first use, which is what it did before this existed.
+    """
+    global _MATCHER
+    try:
+        if _MATCHER is None and master_loader is not None:
+            from core.telegram_feed import TelegramFeed
+            _MATCHER = TelegramFeed(master_loader=master_loader)
+        held = _standing_batch(_day(None))
+        return len(held)
+    except Exception as exc:                               # noqa: BLE001
+        diagnostic(f"[MEMORY] warm() failed ({exc}) -- the standing "
+                   f"causes will be built on first use instead")
+        return 0
 
 
 def _headline_names(symbol, headline, matcher=None):
@@ -860,14 +905,156 @@ def _headline_names(symbol, headline, matcher=None):
     if not text.strip():
         return False
     name = str(symbol or "").upper()
+
+    # ---- IT ASKED THE SAME QUESTION EVERY CYCLE. 6 Sep 2026. ----
+    #
+    # Measured on the live path the morning after this shipped: 300
+    # symbols through why() cost 23.5 ms each against 4.7 ms before,
+    # and 93% of that time was seven stocks reaching this function.
+    # One call is 86 ms, because names_in() compares the headline
+    # against every company on the master list -- 553,913 string
+    # comparisons for 300 symbols.
+    #
+    # The question is PURE. The same stored headline and the same
+    # symbol give the same answer for as long as both exist, and the
+    # rows being re-read are days old by definition. So it is asked
+    # once and remembered, which changes no answer and removes the
+    # cost from the second cycle onward.
+    #
+    # The matcher itself is NOT copied here -- see _matcher(). This
+    # remembers what it said; it does not decide anything itself.
+    key = (name, text)
+    hit = _NAMES_CACHE.get(key)
+    if hit is not None:
+        return hit
     try:
         from core.stock_events import _for_matching
         m = matcher or _matcher()
         body = _for_matching(text)
         found = set(m.symbols_in(body)) | set(m.names_in(body))
     except Exception:                                      # noqa: BLE001
-        return True
-    return name in found
+        return True                    # fails open, and is not cached
+    got = name in found
+    if len(_NAMES_CACHE) > 20000:      # a day of rows is a few hundred
+        _NAMES_CACHE.clear()
+    _NAMES_CACHE[key] = got
+    return got
+
+
+# How long the board's standing causes are held before being read
+# again. A standing order is DAYS old by definition -- five minutes of
+# staleness cannot change one -- and the events store is written by the
+# collector, a different process, so nothing here misses its own write.
+STANDING_CACHE_SECONDS = 300.0
+# How long an EMPTY answer is held. See _standing_batch().
+EMPTY_RETRY_SECONDS = 20.0
+_STANDING_BATCH = {}
+_REFRESHING = set()
+
+
+def _day(on):
+    """A date, whatever shape it arrived in.
+
+    A datetime MUST become a date here. why() is called with one --
+    core/why_moving.py has carried a note about that shape since
+    August -- and datetime.isoformat() carries the time, so a datetime
+    used as the cache key would miss on every single call and rebuild
+    the board every second. That is the exact cost this cache exists
+    to remove, arriving through the back door.
+    """
+    if on is None:
+        return datetime.now().date()
+    if isinstance(on, str):
+        try:
+            return datetime.fromisoformat(on[:10]).date()
+        except ValueError:
+            return datetime.now().date()
+    if isinstance(on, datetime):       # datetime IS a date -- check first
+        return on.date()
+    return on
+
+
+def _standing_batch(today):
+    """Every standing cause on the board, in one pass, held briefly.
+
+    ---- ONE QUERY A CYCLE, NOT ONE A STOCK. 6 September 2026. ----
+
+    standing_causes() has carried this note since the day it was
+    written -- "asking per symbol would be 1,800 queries a cycle" --
+    and then the gate went in and started asking per symbol, on the
+    path that runs every second. Measured before this: 23.5 ms a
+    symbol through why(), against 4.7 ms before the gate existed.
+
+    So the gate reads the same batch the board does. One code path,
+    which is also why the two can no longer disagree.
+    """
+    key = today.isoformat()
+    hit = _STANDING_BATCH.get(key)
+    now = time.monotonic()
+    if hit is not None and hit[0] > now:
+        return hit[1]
+
+    # ---- STALE BEATS SLOW, ON THIS PATH. 6 September 2026. ----
+    #
+    # Proved rather than assumed: with a writer holding the store, a
+    # read WAITED 8.67 s and then returned the right answer. Correct,
+    # and completely wrong for a loop that runs every second -- the
+    # collector writes this file from another process all session and
+    # the journal mode is `delete`, so any reader blocks during a
+    # write.
+    #
+    # So an EXPIRED board is served as it is and rebuilt on a thread.
+    # A standing cause is days old by definition; five minutes of
+    # staleness cannot change one, and the entry loop never waits for
+    # a disk at all. Only the very first build is synchronous, and
+    # main.py does that before the feed connects -- see warm().
+    if hit is not None:
+        _refresh_soon(today, key)
+        return hit[1]
+
+    built = standing_causes(on=today)
+    lifetime = STANDING_CACHE_SECONDS if built else EMPTY_RETRY_SECONDS
+    _STANDING_BATCH.clear()            # yesterday's board is not today's
+    _STANDING_BATCH[key] = (now + lifetime, built)
+    return built
+
+
+def _rebuild(today, key):
+    """Read the board again and swap it in. Runs off the entry loop."""
+    try:
+        built = standing_causes(on=today)
+    except Exception as exc:                               # noqa: BLE001
+        diagnostic(f"[MEMORY] standing causes could not be re-read "
+                   f"({exc}) -- keeping the board already held")
+        built = {}
+    now = time.monotonic()
+    previous = _STANDING_BATCH.get(key)
+    if not built and previous is not None and previous[1]:
+        # The read failed, or the store was locked. standing_causes()
+        # cannot tell us which. Keep the board we have and ask again
+        # sooner rather than blanking every standing cause on it.
+        _STANDING_BATCH[key] = (now + EMPTY_RETRY_SECONDS, previous[1])
+    else:
+        lifetime = STANDING_CACHE_SECONDS if built else EMPTY_RETRY_SECONDS
+        _STANDING_BATCH[key] = (now + lifetime, built)
+    _REFRESHING.discard(key)
+
+
+def _refresh_soon(today, key):
+    """One rebuild at a time, and never on the caller's thread."""
+    if key in _REFRESHING:
+        return
+    _REFRESHING.add(key)
+    try:
+        thread = threading.Thread(target=_rebuild, args=(today, key),
+                                  name="standing-causes", daemon=True)
+        thread.start()
+    except Exception as exc:                               # noqa: BLE001
+        # A process that cannot start a thread still gets an answer:
+        # the board already held, and another attempt next call.
+        _REFRESHING.discard(key)
+        diagnostic(f"[MEMORY] could not refresh the standing causes "
+                   f"in the background ({exc})")
 
 
 def standing_reason(symbol, on=None, events_db=None):
@@ -885,7 +1072,14 @@ def standing_reason(symbol, on=None, events_db=None):
     is exactly what the bot did before this existed.
     """
     try:
-        got = standing_cause(symbol, on=on, events_db=events_db)
+        if events_db is None:
+            # The live path. One pass for the whole board, held for
+            # STANDING_CACHE_SECONDS -- see _standing_batch().
+            got = _standing_batch(_day(on)).get(str(symbol or "").upper())
+        else:
+            # An explicit store: a test, or a tool asking about a
+            # specific file. Read it directly and cache nothing.
+            got = standing_cause(symbol, on=on, events_db=events_db)
     except Exception as exc:                               # noqa: BLE001
         diagnostic(f"[MEMORY] standing_reason({symbol}) failed: {exc}")
         return None
@@ -934,7 +1128,8 @@ def standing_causes(on=None, events_db=None, min_cr=None, days=None):
         except ValueError:
             today = datetime.now().date()
     try:
-        conn = sqlite3.connect(events_db or EVENTS_DB)
+        conn = sqlite3.connect("file:" + (events_db or EVENTS_DB)
+                               + "?mode=ro", uri=True, timeout=30)
         rows = conn.execute(
             "SELECT symbol, date(at), value_cr, headline FROM events "
             "WHERE kind IN (%s) AND value_cr >= ? AND symbol IS NOT NULL "
