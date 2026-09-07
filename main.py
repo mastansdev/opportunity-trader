@@ -1581,6 +1581,75 @@ def main():
             enter=engine._enter,
         )
 
+    def _follow_the_account(portfolio, engine, before):
+        """Money added to Dhan mid-session must be spendable.
+
+        ---- HE ADDS FUNDS DURING THE DAY. 7 September 2026. ----
+
+            "what if i add funds in to dhan after some time like lets
+             say 50 K around 07:30 & 1 Lakh around 11:30. i don't want
+             restart main run , it must fetch for available funds &
+             thats the right mechanism"          -- the operator
+
+        portfolio.starting_capital used to be written in exactly two
+        places -- startup, and the moment ON arms -- so a top-up was
+        visible on the board and invisible to sizing until he toggled
+        the switch. He asked for it to follow the account instead.
+
+        THE TRAP, AND WHY THIS IS NOT ONE LINE. Dhan's
+        availabelBalance is ALREADY NET of margin in use:
+
+            availabelBalance  69,429.68     utilizedAmount  0.00
+
+        and trading/portfolio.py then computes
+
+            available_margin = starting_capital - used_margin(open)
+
+        so assigning the available figure straight in would subtract
+        the same margin twice and quietly under-size every order. The
+        bot's OWN used margin is added back, which makes
+        available_margin come out at exactly what Dhan says is
+        available -- no more, and no less.
+
+        HIS OWN DHAN POSITIONS ARE NOT THE BOT'S BUSINESS, and this
+        keeps that rule: Dhan has already netted them out of the
+        available figure, so money genuinely tied up in his manual
+        trades is money the bot cannot spend. That is arithmetic, not
+        the bot managing his book.
+
+        PAPER IS UNTOUCHED -- this only runs while real orders are
+        armed, and the paper purse stays the fixed figure so a paper
+        week is measured against constant capital.
+
+        Never raises. A reading that cannot be applied leaves the last
+        good capital in place, which is what happened before this
+        existed.
+        """
+        try:
+            got = broker_funds.last_read() or {}
+            if got.get("source") != "dhan":
+                return                    # a figure from config decides nothing
+            available = got.get("balance")
+            if available is None or portfolio is None:
+                return
+            held = getattr(engine, "open_positions", {}) or {}
+            used = float(portfolio.used_margin(held) or 0.0)
+            whole = float(available) + used
+            was = float(getattr(portfolio, "starting_capital", 0.0) or 0.0)
+            if abs(whole - was) < 1.0:
+                return                    # nothing moved worth saying
+            portfolio.starting_capital = whole
+            portfolio.available_capital = whole
+            decision(
+                f"[FUNDS] Dhan now says {available:,.0f} available"
+                + (f" with {used:,.0f} of the bot's margin in use" if used
+                   else "")
+                + f". Capital {was:,.0f} -> {whole:,.0f}; the next entry "
+                  f"sizes on it.")
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[FUNDS] could not follow the account ({exc}). "
+                       f"The last good capital stands.")
+
     def _real_orders_armed():
         """Is this session actually placing real orders right now?
 
@@ -2052,7 +2121,14 @@ def main():
                 # targets and the circuit guard keep running on
                 # everything already held.
                 try:
-                    _live_guard.poll(armed=not engine.alert_only)
+                    # engine.alert_only was retired on 5 September --
+                    # the switch is execution.live now, and reading the
+                    # dead attribute threw on every cycle, so the guard
+                    # never once checked the feed. It printed a warning
+                    # instead, twice a minute, all session.
+                    _live_guard.poll(
+                        armed=bool(getattr(getattr(engine, "execution", None),
+                                           "live", False)))
                 except Exception as exc:                   # noqa: BLE001
                     warn(f"[GUARD] Could not check the feed ({exc}). "
                          f"Trading continues -- watch the panel.")
@@ -2324,7 +2400,9 @@ def main():
                 # decides money depends on this poll.
                 if _real_orders_armed():
                     try:
+                        _before = broker_funds.last_read().get("balance")
                         broker_funds.refresh(dhan_rest_client)
+                        _follow_the_account(portfolio, engine, _before)
                     except Exception as exc:               # noqa: BLE001
                         diagnostic(f"[FUNDS] Could not refresh the balance "
                                    f"({type(exc).__name__}). The last good "

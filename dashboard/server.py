@@ -1482,6 +1482,34 @@ def build_app(dashboard_state, trade_controller, master_loader,
             #       this flag is set. That one is enforced at the point
             #       every order routes through, so it cannot be bypassed
             #       by some future caller setting .live another way.
+            # ---- ASK DHAN BEFORE ASKING THE GATE. 7 Sep 2026. ----
+            #
+            #     "i tried multiple times by clicking ON . nothing
+            #      printed in terminal"                 -- the operator
+            #
+            # He could not arm at all this morning. refuse_to_arm_reason
+            # was changed on 6 September to ask the broker on EVERY
+            # arming -- it used to return early in a PAPER process --
+            # and it asks "has Dhan answered THIS SESSION". The answer
+            # was no, because the only thing that takes that reading is
+            # forty lines BELOW this, and the refusal returned first.
+            #
+            # A closed loop: the gate wanted a reading, and the reading
+            # only happened after the gate let it through.
+            #
+            # So the reading is taken here, first, which is what the
+            # gate has always described -- "the switch takes its own
+            # fresh reading at the moment it arms". Never raises: a
+            # broker that cannot be reached leaves the reading absent
+            # and the gate refuses immediately after, with its sentence
+            # intact.
+            if want_trading:
+                try:
+                    from core import broker_funds as _funds
+                    _funds.refresh(getattr(engine, "dhan_client", None))
+                except Exception:                          # noqa: BLE001
+                    pass          # the gate below says so, in words
+
             from core.trading_gate import apply_switch
             armed, why = apply_switch(engine, want_trading)
             if not armed:

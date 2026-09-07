@@ -416,9 +416,18 @@ def _no_test_may_litter_the_live_data_folder():
     # They are sqlite working files, not a test writing junk into his
     # data folder, and excluding them keeps the guard pointed at what
     # it was built for: a test that CREATES a store.
+    #: Third-party cache files that land in data/ and are not the
+    #: bot's memory. The `nse` package keeps its cookie jar in whatever
+    #: download_folder it is given, and core/market_cap.py gives it
+    #: "data" -- so a refresh, from the suite or from his own running
+    #: collector, drops nse_cookies_requests.json there. Blaming a test
+    #: for a library's cookie jar is how this guard gets switched off.
+    _NOT_HIS_MEMORY = ("nse_cookies_requests.json", "nse_cookies.json")
+
     def _real(paths):
         return {p for p in paths
-                if not p.endswith(("-wal", "-shm", "-journal"))}
+                if not p.endswith(("-wal", "-shm", "-journal"))
+                and os.path.basename(p) not in _NOT_HIS_MEMORY}
 
     # ---- IT BLAMED THE SUITE FOR THE OPERATOR'S OWN BOT. 19 Aug ----
     #
