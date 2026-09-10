@@ -1,8 +1,10 @@
 ---
 name: the-one-switch
 description: "ON = REAL trades, OFF = PAPER trades, no third state — but as of 10 Sep 2026 the switch only routes the order; TRADING_MODE still decides the purse, the broker stop and the loss cap"
-metadata:
-  node_type: feedback
+metadata: 
+  node_type: memory
+  originSessionId: 16056bf4-7288-47a5-b025-94575658f3a9
+  modified: 2026-09-10T10:33:28.594Z
 ---
 
 The board's ON/OFF control has exactly two meanings and no third state:
@@ -33,7 +35,22 @@ event and therefore no trade is a correct day -- "just music day (no
 trade until 15:30)" -- and must not be treated as the bot being idle or
 broken.
 
-## STILL BROKEN as of 10 September 2026 -- the top fix
+## FIXED 10 September 2026 -- commit "The switch decides the slot, the loss cap, the broker stop and the reconcile"
+
+TRADING_MODE no longer decides real vs paper anywhere at runtime. Two
+authorities: NEW orders read the switch (`engine._switch_is_live`:
+execution.live and a built live executor) -> slot size
+(`capital.own_cash_per_position`: 15k live / 50k paper) and the daily loss
+cap. EXISTING positions read who opened them (`execution._who_opened`) ->
+broker stop placement (`BrokerStop(is_live_position=...)`, fails closed)
+and reconciliation (`BrokerSync._opened_live`). Startup-only reads in
+main.py:753 and morning_ready.py:272 were left: the switch is always OFF
+at startup, so they agree. Full suite 5,961 passed; 8 old-contract tests
+rewritten; 4 failures are stale data files, not this.
+
+The section below is the fault as found, kept for the history.
+
+## (was) STILL BROKEN as of 10 September 2026 -- the top fix
 
 The 6 Sep change made `trading/execution._live_executor()` return
 `getattr(self, "_live", None)` with no mode check, so ROUTING follows

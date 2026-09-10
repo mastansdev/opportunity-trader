@@ -1,9 +1,11 @@
 ---
 name: bot-review-7-to-10-sep-2026
 description: "What the bot actually did 7-10 Sep 2026 (all PAPER, net -21,710), the seven faults found, and the fix order he agreed to"
-metadata:
+metadata: 
   node_type: memory
   type: project
+  originSessionId: 16056bf4-7288-47a5-b025-94575658f3a9
+  modified: 2026-09-10T10:33:41.630Z
 ---
 
 **Reviewed 10 September 2026** from the live logs, `data/trade_memory.db`
@@ -22,6 +24,12 @@ entries, exits all are worrking but not as we wanted."*
 **All four sessions ran PAPER** -- every banner reads `Layer 1 (PAPER,
 equity only)` and `[FUNDS] PAPER -- fixed Rs 500,000.00`. His money
 never moved. He stopped both runs on 10 Sep at ~10:50.
+
+**Progress, 10 Sep evening:** #1 switch FIXED. #2 OCR half 1 fixed, half 2
+open. Everything else open and handed to the phone session in
+`docs/handoff/open-problems-10-sep.md` — see [[phone-work-via-cloud-sessions]].
+He also named the execution delay and clock lag; both measured to the
+board rebuild blocking the main loop — see [[board-rebuild-is-too-slow]].
 
 ## The seven faults, in the fix order agreed
 

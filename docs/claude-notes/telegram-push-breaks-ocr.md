@@ -1,9 +1,11 @@
 ---
 name: telegram-push-breaks-ocr
 description: "Telegram push delivers photos inside a running event loop, so download_media returns an un-awaited coroutine and every pushed picture loses its transcript"
-metadata:
+metadata: 
   node_type: memory
   type: project
+  originSessionId: 16056bf4-7288-47a5-b025-94575658f3a9
+  modified: 2026-09-10T10:33:33.242Z
 ---
 
 **Found 10 September 2026.** He reported "Telegram OCR Failed". In the
@@ -56,6 +58,19 @@ that posts market-hours news as screenshots.
 a floor of `_newest_stored_id()`, so a message stored with an empty
 `ocr_text` raises the floor and is never revisited. Only `catch_up()`
 (`skip_known=False`) walks back over it.
+
+## Status 10 Sep 2026
+
+**Half 1 DONE** (commit "A pushed picture no longer crashes the reader"):
+`_photo_bytes()` closes the coroutine and returns None inside a running
+loop. 100 Telegram tests pass. **Half 2 OPEN** — handed to the phone
+session in `docs/handoff/open-problems-10-sep.md` §4, with the facts:
+`_store` is `INSERT OR IGNORE` (re-fetch never updates ocr_text);
+`fetch(handle, ids=[...])` returns photo_data and works on the poller
+thread; wire after `self.poll` in `start()._loop`; `_read_photo` caches
+the failed `""` by URL — evict it first; remember tried ids so textless
+pictures aren't re-downloaded every 90s; bound it (daily channels);
+`tools/telegram_ocr.py` exists — check it before writing a second path.
 
 ## The fix, both halves
 

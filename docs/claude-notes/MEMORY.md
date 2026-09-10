@@ -1,5 +1,6 @@
 - [His trading rules](his-trading-rules.md) — the complete rule set in his own words; read this instead of asking him again
-- [Board rebuild is too slow](board-rebuild-is-too-slow.md) — 42s median, 82s p90; entries read it so every entry decides on stale prices
+- [Phone work via cloud sessions](phone-work-via-cloud-sessions.md) — from 10 Sep he codes from the Claude app, laptop off; repo + CLAUDE.md + docs/ carry the context; never push the backup branch
+- [Board rebuild is too slow](board-rebuild-is-too-slow.md) — re-measured 10 Sep: ranked/shortlist are the cost and the rebuild blocks the main loop (clock lag, stale seats)
 - [Operator work style](operator-work-style.md) — never assume, every number needs an n; the repo's own audit docs are wrong in places
 - [Opportunity Trader architecture](opportunity-trader-architecture.md) — two entry lanes, one rule file, and which dashboard page is actually live
 - [Open decisions](opportunity-trader-open-decisions.md) — what was decided 12 Aug 2026 and what is still waiting on him
@@ -11,7 +12,7 @@
 - [What the live stop and seats actually are](what-the-live-stop-and-seats-actually-are.md) — sizing, stop, target and exit after 29 Aug; and which findings died out-of-sample
 - [Open work, 5 Sep 2026](open-work-5-sep-2026.md) — what went live, what to watch Monday 7 Sep, and the four tasks still open
 - [Open work, 31 Aug 2026](open-work-31-aug-2026.md) — Monday start order, and the four results stocks still ungraded
-- [The one switch](the-one-switch.md) — ON = real, OFF = paper; but the switch only routes the order, TRADING_MODE still decides the purse and the broker stop
+- [The one switch](the-one-switch.md) — ON = real, OFF = paper, no third state; FIXED 10 Sep: the switch now decides slot, loss cap, broker stop and reconcile too
 - [Never mix old data with new rules](never-mix-old-data-with-new-rules.md) — no averaging, and no tuning a new rule on trades from the old one
 - [First task after the close, 1 Sep 2026](first-task-after-close-1-sep-2026.md) — delete provably-unreachable branches; dead code is not a runtime cost, it is a lying-to-you cost
 - [Day Trader Telugu: weekends and links](day-trader-telugu-weekends-and-links.md) — skip it Sat/Sun; and grep for the filter before writing a second one
@@ -29,6 +30,6 @@
 - [The month is a remainder, and the bot marks itself](the-month-is-a-remainder-and-the-bot-marks-itself.md) — 5L monthly target that divides by nothing, and the nightly self review; the bleed column is the yardstick
 - [Every change needs its effect on trading stated](every-change-needs-its-effect-on-trading-stated.md) — his benchmark question, asked every time; answer it before he has to ask
 - [Adding funds mid-session](adding-funds-mid-session-needs-a-toggle.md) — DONE 7 Sep 2026; the bot follows the Dhan balance live, no toggle, no restart
-- [Review: what the bot did 7-10 Sep 2026](bot-review-7-to-10-sep-2026.md) — all four days PAPER, net -21,710, and the seven faults in fix order
+- [Review: what the bot did 7-10 Sep 2026](bot-review-7-to-10-sep-2026.md) — all four days PAPER, net -21,710, the seven faults in fix order; #1 fixed 10 Sep
 - [Late entries, measured](late-entries-measured.md) — moves over an hour old cost 21,896 on 27 trades; 41% of entries fire in the first three minutes
-- [Telegram push breaks the OCR](telegram-push-breaks-ocr.md) — a pushed photo returns an un-awaited coroutine; 100% of 10 Sep pictures unread
+- [Telegram push breaks the OCR](telegram-push-breaks-ocr.md) — a pushed photo returned an un-awaited coroutine; half 1 fixed 10 Sep, transcript recovery (half 2) still open

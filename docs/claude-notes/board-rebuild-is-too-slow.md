@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 9fd6931f-938d-4539-ad73-4191c031054a
-  modified: 2026-09-03T08:07:16.205Z
+  modified: 2026-09-10T10:33:38.207Z
 ---
 
 **Fix this before the exit rules.** His instruction, 3 September 2026:
@@ -52,6 +52,17 @@ the ranker is probably NOT the slow part despite its name.
 Bigger candidates, unmeasured: the GL build over 1,338 symbols, the
 shortlist reference over 2,446, and ~30 other panels all rebuilt from
 scratch every cycle.
+
+## Measured again 10 Sep 2026 — the guess above was wrong
+
+From `[SLOW]` lines, 8-10 Sep: medians 32.6s / 70.7s / 23.7s, p90 42.0 /
+103.7 / 54.1, max 160.2s. Worst panel: **`ranked` 723 times, `shortlist`
+326** — so the ranker IS the slow part. And it blocks: `main.py:2104` calls
+`dashboard_state.refresh()` inline (interval 1s) and `state.py:825` runs
+`_build()` synchronously, so heartbeats (60s) landed 65-91s apart median,
+196s max — his "bot is late, recovers, never in sync". Candidates
+(`_candidates["rows"]`, main.py:2203) are published only after a rebuild,
+so seats go to stale picks. First step: rebuild on its own thread.
 
 ## The shape of the fix
 
