@@ -1,0 +1,34 @@
+- [His trading rules](his-trading-rules.md) — the complete rule set in his own words; read this instead of asking him again
+- [Board rebuild is too slow](board-rebuild-is-too-slow.md) — 42s median, 82s p90; entries read it so every entry decides on stale prices
+- [Operator work style](operator-work-style.md) — never assume, every number needs an n; the repo's own audit docs are wrong in places
+- [Opportunity Trader architecture](opportunity-trader-architecture.md) — two entry lanes, one rule file, and which dashboard page is actually live
+- [Open decisions](opportunity-trader-open-decisions.md) — what was decided 12 Aug 2026 and what is still waiting on him
+- [AI Trending India is a separate repo](ai-trending-india-is-a-separate-repo.md) — D:\AI Trending India, never mixed into the trading bot
+- [AI Trending India objective](ai-trending-india-objective.md) — a system that runs and earns 24/7, however small the amount
+- [Verify the value the live path reads](verify-the-value-the-live-path-reads.md) — a green suite proves the constant, not the code path
+- [Telegram channel roles](telegram-channel-roles.md) — which three post daily (delay costs money), which are results-only, which are episodic
+- [What the event edge actually measures](what-the-event-edge-actually-measures.md) — the event alone is worth nothing; capital, not opportunity, is the binding constraint
+- [What the live stop and seats actually are](what-the-live-stop-and-seats-actually-are.md) — sizing, stop, target and exit after 29 Aug; and which findings died out-of-sample
+- [Open work, 5 Sep 2026](open-work-5-sep-2026.md) — what went live, what to watch Monday 7 Sep, and the four tasks still open
+- [Open work, 31 Aug 2026](open-work-31-aug-2026.md) — Monday start order, and the four results stocks still ungraded
+- [The one switch](the-one-switch.md) — ON = real, OFF = paper; but the switch only routes the order, TRADING_MODE still decides the purse and the broker stop
+- [Never mix old data with new rules](never-mix-old-data-with-new-rules.md) — no averaging, and no tuning a new rule on trades from the old one
+- [First task after the close, 1 Sep 2026](first-task-after-close-1-sep-2026.md) — delete provably-unreachable branches; dead code is not a runtime cost, it is a lying-to-you cost
+- [Day Trader Telugu: weekends and links](day-trader-telugu-weekends-and-links.md) — skip it Sat/Sun; and grep for the filter before writing a second one
+- [Telegram collection, settled 5 Sep 2026](telegram-catchup-should-walk-forward.md) — forward walk, gap fill by post id, and Telegram pushing; the results-calendar nag is still open
+- [247 stocks missing from the universe](universe-247-stocks-missing.md) — DYCL rose 11.8% and was never eligible; the review file has sat since 26 July
+- [Rules are provisional](rules-are-provisional-not-permanent.md) — a gate that fenced in a weak signal must retire when a better signal arrives
+- [No fixed limits](no-fixed-limits-trade-when-opportunity-shows.md) — enter only on opportunity, exit on the exit rule; a quiet day is a correct day
+- [Decide, don't ask](decide-dont-ask.md) — act from his stated rules; explain after, don't put the choice back to him
+- [Measure the second run, not the first](measure-the-second-run-not-the-first.md) — warm, then alternate; a cold process charges every one-time load to whichever arm went first
+- [Two market caps](two-market-caps-free-float-and-total.md) — free float feeds the order gate, total feeds the size band; separate stores so they can never be swapped
+- [Three rules the code and his notes disagree on](three-rules-the-code-and-his-notes-disagree-on.md) — a short button, the ranking order, a moved premise; found 6 Sep, his call not mine
+- [The Friday rule set that hit the first target](the-friday-rule-set-that-hit-the-first-target.md) — 4 Sep 2026, commit 6efe7ff, Rs 11,794 on 27 trades; the baseline everything is judged against
+- [Why the 3% bar stays for now](why-the-3-percent-bar-stays-for-now.md) — his rule, measured correct; 56-58% of first-five-minute movers fade. Lower it only after the event/momentum/flow join exists
+- [The bot asks who else this lands on](the-bot-asks-who-else-this-lands-on.md) — core/sector_impact.py, the brain memory he asked for since the start; one row per stock, UltraTech→wires & cables is the worked example
+- [The month is a remainder, and the bot marks itself](the-month-is-a-remainder-and-the-bot-marks-itself.md) — 5L monthly target that divides by nothing, and the nightly self review; the bleed column is the yardstick
+- [Every change needs its effect on trading stated](every-change-needs-its-effect-on-trading-stated.md) — his benchmark question, asked every time; answer it before he has to ask
+- [Adding funds mid-session](adding-funds-mid-session-needs-a-toggle.md) — DONE 7 Sep 2026; the bot follows the Dhan balance live, no toggle, no restart
+- [Review: what the bot did 7-10 Sep 2026](bot-review-7-to-10-sep-2026.md) — all four days PAPER, net -21,710, and the seven faults in fix order
+- [Late entries, measured](late-entries-measured.md) — moves over an hour old cost 21,896 on 27 trades; 41% of entries fire in the first three minutes
+- [Telegram push breaks the OCR](telegram-push-breaks-ocr.md) — a pushed photo returns an un-awaited coroutine; 100% of 10 Sep pictures unread

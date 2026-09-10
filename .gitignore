@@ -104,3 +104,12 @@ data/volume_profile.json
 # anything. 11 MB each and regenerated on demand -- kept on disk so a
 # removed row is always recoverable by id, never in git history.
 data/*.db.*.bak
+
+# ---- Kept out of GitHub, 10 September 2026. ----
+# x.session is a Telethon login (a 256-byte auth key -- anyone holding it can
+# read the Telegram account). It sat at the repo root, outside the
+# data/telegram_session* rule above, and was committed on 31 Aug. It was
+# removed from the unpushed history before the first push for the phone.
+*.session
+*.session-journal
+data/_test_result.pdf
