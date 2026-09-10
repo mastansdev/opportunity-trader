@@ -21,24 +21,28 @@ NCC and URBANCO were open PAPER positions from that morning's session.
 They do not exist at Dhan because they were never sent to Dhan. That
 is not a discrepancy -- it is the definition of a simulation.
 
-WHY IT HAD NEVER HAPPENED BEFORE
-
-core/broker_sync.py's reconciler has always been correct in LIVE:
-a position the bot thinks it holds that the broker does not have is a
-real and dangerous disagreement, and dropping it from the bot's book
-is right.
-
-In PAPER the question had simply never been ASKED, because _reader()
-returned None -- there was no broker view at all. Giving PAPER a
-reader answered a question nobody had checked the reconciler could
-handle, and it answered it by deleting his positions.
-
 THE DISTINCTION THE FIX DRAWS
 
     READING the broker        safe in every mode, and the whole
                               point of the view
     RECONCILING against it    only meaningful when both books are
                               supposed to describe the same money
+
+---- RE-KEYED TO PROVENANCE. 10 September 2026. ----
+
+The guard used to be a session-wide TRADING_MODE == "LIVE": the whole
+reconciler was OFF in PAPER. TRADING_MODE is frozen at "PAPER" and the
+switch does not move it, so once the switch became the whole answer
+that gate was wrong both ways -- a REAL position (switch ON) was never
+reconciled, and a mixed book after a mid-session flip could not be
+handled at all.
+
+So the reconciler is wired whenever there is a book, and it decides
+PER POSITION: only a position the bot opened for real is ever dropped
+or warned about. Who opened it is remembered on the fill
+(trading/execution._who_opened). A paper or unknown-origin position is
+left exactly alone -- which is what protected NCC and URBANCO, now for
+the right reason and in a mixed book too.
 
 Author : H&M Opportunity Trader
 ==========================================================
@@ -51,78 +55,100 @@ from core.broker_sync import BrokerSync
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+class _Execution:
+    """Stands in for trading/execution.Execution: it remembers who
+    opened each symbol."""
+
+    def __init__(self, opened):
+        self._opened = {k.upper(): v for k, v in opened.items()}
+
+    def _who_opened(self, symbol):
+        return self._opened.get(str(symbol or "").upper())
+
+
 class _Engine:
     def __init__(self, **positions):
         self.open_positions = dict(positions)
-        self.alert_only = True
 
 
-def _sync(engine):
+def _sync(engine, opened=None):
     sync = BrokerSync.__new__(BrokerSync)
     sync.engine = engine
+    sync.execution = _Execution(opened or {})
     return sync
 
 
 # ---------------------------------------------------------------
-# PAPER POSITIONS SURVIVE
+# A PAPER (OR UNKNOWN) POSITION SURVIVES
 # ---------------------------------------------------------------
 
-def test_paper_mode_cannot_drop_a_position(monkeypatch):
-    """THE CASE. NCC and URBANCO, deleted ninety seconds after a
-    restart for the crime of being simulated."""
-    monkeypatch.setattr("config.TRADING_MODE", "PAPER")
-    assert _sync(_Engine(NCC={"qty": 230}))._drop_closed_fn() is None
+def test_a_paper_opened_position_is_not_dropped():
+    """THE CASE. NCC, deleted ninety seconds after a restart for the
+    crime of being simulated. drop() exists now, but it refuses."""
+    engine = _Engine(NCC={"qty": 230})
+    drop = _sync(engine, opened={"NCC": "paper"})._drop_closed_fn()
+    assert drop is not None
+    drop("NCC")
+    assert list(engine.open_positions) == ["NCC"], (
+        "a paper position was deleted as a Dhan discrepancy")
 
 
-def test_no_non_live_mode_can_drop_a_position(monkeypatch):
-    for mode in ("PAPER", "paper", "BACKTEST", "REPLAY", "", None):
-        monkeypatch.setattr("config.TRADING_MODE", mode)
-        assert _sync(_Engine(NCC={"qty": 230}))._drop_closed_fn() is None, mode
+def test_an_unknown_origin_position_is_not_dropped():
+    """His own manual holdings, and anything with no bot fill on
+    record, are unknown. Deleting one wrongly costs a position that
+    then gets no stop and no exit."""
+    engine = _Engine(NCC={"qty": 230})
+    _sync(engine, opened={})._drop_closed_fn()("NCC")
+    assert list(engine.open_positions) == ["NCC"]
 
 
-def test_an_unreadable_mode_does_not_delete(monkeypatch):
-    """Refusing to reconcile costs a stale row on a panel. Deleting
-    wrongly costs a position that then gets no stop and no exit."""
-    import builtins
-    real_import = builtins.__import__
-
-    def _boom(name, *a, **k):
-        if name == "config":
-            raise RuntimeError("config is broken")
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", _boom)
-    assert _sync(_Engine(NCC={"qty": 230}))._drop_closed_fn() is None
+def test_no_execution_wired_drops_nothing():
+    """Provenance cannot be read -> nothing is dropped. Fails closed."""
+    engine = _Engine(NCC={"qty": 230})
+    sync = BrokerSync.__new__(BrokerSync)
+    sync.engine = engine
+    # no sync.execution at all
+    sync._drop_closed_fn()("NCC")
+    assert list(engine.open_positions) == ["NCC"]
 
 
 # ---------------------------------------------------------------
-# LIVE RECONCILIATION STILL WORKS
+# A REAL POSITION IS STILL RECONCILED
 # ---------------------------------------------------------------
 
-def test_live_mode_still_drops_a_closed_position(monkeypatch):
-    """The control. In LIVE a position the broker does not have IS a
-    real disagreement, and this suite must not have disabled the
-    reconciler to fix the paper case."""
-    monkeypatch.setattr("config.TRADING_MODE", "LIVE")
+def test_a_live_opened_position_is_dropped():
+    """The control. A position the bot opened for real that Dhan does
+    not have IS a real disagreement, and this suite must not have
+    disabled the reconciler to fix the paper case."""
     engine = _Engine(NCC={"qty": 230}, SBIN={"qty": 500})
-    drop = _sync(engine)._drop_closed_fn()
+    drop = _sync(engine, opened={"NCC": "live", "SBIN": "live"})._drop_closed_fn()
     assert drop is not None
     drop("NCC")
     assert list(engine.open_positions) == ["SBIN"]
 
 
-def test_live_drop_is_case_insensitive(monkeypatch):
-    monkeypatch.setattr("config.TRADING_MODE", "LIVE")
+def test_the_live_drop_is_case_insensitive():
     engine = _Engine(NCC={"qty": 230})
-    _sync(engine)._drop_closed_fn()("ncc")
+    _sync(engine, opened={"NCC": "live"})._drop_closed_fn()("ncc")
     assert engine.open_positions == {}
 
 
-def test_it_still_needs_an_engine(monkeypatch):
+def test_a_mixed_book_drops_only_the_real_one():
+    """THE REASON IT IS PER POSITION. After a mid-session flip the book
+    holds both. The real closed one is dropped; the paper one stays."""
+    engine = _Engine(REALCO={"qty": 100}, PAPERCO={"qty": 50})
+    drop = _sync(engine,
+                 opened={"REALCO": "live", "PAPERCO": "paper"})._drop_closed_fn()
+    drop("REALCO")
+    drop("PAPERCO")
+    assert list(engine.open_positions) == ["PAPERCO"]
+
+
+def test_it_still_needs_an_engine():
     """The older rule: no engine, nothing to drop from."""
-    monkeypatch.setattr("config.TRADING_MODE", "LIVE")
     sync = BrokerSync.__new__(BrokerSync)
     sync.engine = None
+    sync.execution = _Execution({})
     assert sync._drop_closed_fn() is None
 
 
@@ -130,13 +156,18 @@ def test_it_still_needs_an_engine(monkeypatch):
 # READING IS NOT RECONCILING
 # ---------------------------------------------------------------
 
-def test_the_mode_is_read_at_call_time():
-    """He edits the mode between sessions. A value captured at import
-    describes the last run -- the same lesson the broker stop learned
-    on 19 August."""
+def test_provenance_is_read_not_the_mode():
+    """The switch is the whole answer. The reconciler must decide by
+    who opened the position, not by config.TRADING_MODE (frozen at
+    PAPER, and the same lesson the broker stop learned on 19 August)."""
     src = (ROOT / "core" / "broker_sync.py").read_text(encoding="utf-8")
     body = src[src.find("def _drop_closed_fn"):src.find("def check(")]
-    assert "from config import TRADING_MODE" in body
+    assert "_opened_live" in body
+    # The read forms, which cannot appear in the explanatory prose:
+    assert "from config import TRADING_MODE" not in body, (
+        "the reconciler is importing the frozen mode again")
+    assert "str(TRADING_MODE)" not in body, (
+        "the reconciler is reading the frozen mode again")
 
 
 def test_the_read_only_view_is_untouched():

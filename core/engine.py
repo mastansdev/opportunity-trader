@@ -403,7 +403,26 @@ EXIT_REASON_MANUAL_PARTIAL = "MANUAL_PARTIAL"
 EXIT_REASON_MISSED_STOP = "MISSED_STOP_RECONCILED"
 
 
-def _daily_cap_applies():
+def _switch_is_live(execution):
+    """Is the ON switch placing real orders right now?
+
+    THE SWITCH IS THE WHOLE ANSWER -- his rule, 6 September 2026. Read
+    execution.live at CALL time (never a value bound at import, which is
+    the whole fault this replaces), and confirm this process can
+    actually reach the broker (the live executor was built). TRADING_MODE
+    decides nothing here.
+
+    Attribute access only, so it never raises. A missing execution, an
+    OFF switch, or a process that cannot place real orders is NOT live.
+    """
+    if execution is None:
+        return False
+    if not getattr(execution, "live", False):
+        return False
+    return getattr(execution, "_live", None) is not None
+
+
+def _daily_cap_applies(execution=None):
     """Is the Rs 12,000 daily loss brake armed for this session?
 
     ---- NO DAILY CAP IN PAPER. 4 September 2026. ----
@@ -416,15 +435,24 @@ def _daily_cap_applies():
     setups are never scored, which is the opposite of what a paper run
     is for.
 
-    Read fresh rather than captured at import, so flipping the mode
+    Read fresh rather than captured at import, so flipping the switch
     does not need a code change to take effect. Anything unreadable
-    ARMS the brake: an unknown mode must not be treated as paper.
+    ARMS the brake: an unknown state must not be treated as paper.
+
+    ---- IT FOLLOWED THE MODE, NOT THE SWITCH. 10 September 2026. ----
+    This read config.TRADING_MODE, frozen at "PAPER". With
+    DAILY_LOSS_CAP_APPLIES_IN_PAPER False, a session with the switch ON
+    -- real orders, real money -- ran with NO daily loss cap, because
+    the cap only armed on TRADING_MODE == "LIVE". Real money at risk
+    means the brake is armed, and the switch is what says whether real
+    money is at risk. `execution` is passed by the caller so this is
+    read live; if the switch is live, the cap always applies.
     """
     try:
-        from config import (DAILY_LOSS_CAP_APPLIES_IN_PAPER, TRADING_MODE)
+        from config import DAILY_LOSS_CAP_APPLIES_IN_PAPER
     except Exception:                                      # noqa: BLE001
         return True
-    if str(TRADING_MODE).upper() == "LIVE":
+    if _switch_is_live(execution):
         return True
     return bool(DAILY_LOSS_CAP_APPLIES_IN_PAPER)
 
@@ -631,8 +659,7 @@ class Engine:
         #
         # OFF unless BROKER_STOP_ENABLED. See trading/broker_stop.py.
         from config import (BROKER_STOP_ENABLED, BROKER_STOP_RESYNC_PCT,
-                            BROKER_STOP_TAG_PREFIX, EXCHANGE_SEGMENT,
-                            TRADING_MODE)
+                            BROKER_STOP_TAG_PREFIX, EXCHANGE_SEGMENT)
         from trading.broker_stop import BrokerStop
 
         # ---- THE BUY WAS IMAGINARY. THE SELL WAS REAL. ----
@@ -662,13 +689,26 @@ class Engine:
         # A resting order at a broker is a LIVE instruction. It cannot
         # be armed by a flag that does not know whether the rest of
         # the system is pretending.
-        _stop_live = str(TRADING_MODE).upper() == "LIVE"
-        if BROKER_STOP_ENABLED and not _stop_live:
-            warn(f"[BROKER_STOP] DISABLED -- BROKER_STOP_ENABLED is on "
-                 f"but TRADING_MODE is {TRADING_MODE}. A real resting "
-                 f"order must never protect a simulated position. "
-                 f"Set TRADING_MODE=LIVE to arm it.")
-
+        #
+        # ---- IT ASKED THE MODE, NOT THE SWITCH. 10 September 2026. ----
+        # `enabled` used to be `BROKER_STOP_ENABLED and TRADING_MODE ==
+        # "LIVE"`, decided once here at startup. TRADING_MODE is frozen
+        # at "PAPER", so a session with the switch ON placed real orders
+        # with NO broker backstop -- the exact opposite failure to the
+        # 19 August one above, and just as dangerous: a real MTF
+        # position at up to 4X, held overnight, with no stop the broker
+        # knew about if this process died.
+        #
+        # THE SWITCH IS THE WHOLE ANSWER. `enabled` is now the pure
+        # CAPABILITY -- is the backstop turned on at all -- while WHICH
+        # positions get a real stop is decided per position, at the
+        # moment each order is placed, by who opened it. A book that
+        # holds both paper and real positions after a mid-session flip
+        # is then handled one position at a time; the 19 August rule
+        # cannot be re-broken by a session-wide flag that "does not know
+        # whether the rest of the system is pretending", because there
+        # is no session-wide flag any more -- there is the fill's own
+        # provenance. See trading/execution._who_opened().
         self.broker_stop = BrokerStop(
             dhan_client=dhan_client,
             exchange_segment=EXCHANGE_SEGMENT,
@@ -676,9 +716,19 @@ class Engine:
             # A protective order on the wrong product would be refused
             # by Dhan, or worse, accepted against a different position.
             product_type="MTF",
-            enabled=BROKER_STOP_ENABLED and _stop_live,
+            enabled=BROKER_STOP_ENABLED,
             resync_pct=BROKER_STOP_RESYNC_PCT,
             tag_prefix=BROKER_STOP_TAG_PREFIX,
+            # THE SECOND, INDEPENDENT REFUSAL, now per position: a real
+            # resting order may only guard a position opened for real.
+            # execution.live at buy time is remembered per symbol, so
+            # this is a lookup, not a guess -- and unknown fails closed
+            # inside place(). getattr, because a partially-built engine
+            # (some tests) may have no execution; no execution -> not
+            # live -> no real stop, which is the safe direction.
+            is_live_position=lambda symbol: (
+                getattr(self, "execution", None) is not None
+                and self.execution._who_opened(symbol) == "live"),
         )
 
         # Display/tracking ledger only -- see
@@ -2945,8 +2995,14 @@ class Engine:
 
         try:
             from core import capital as capital_rules
+            # THE SLOT FOLLOWS THE SWITCH. 10 September 2026. LIVE seats
+            # Rs 15,000, PAPER Rs 50,000 -- read execution.live now,
+            # never a constant frozen at import from TRADING_MODE. A real
+            # book sized on the paper slot buys positions 3x too big.
             allowed = capital_rules.slots(
-                capital, held=len(getattr(self, "open_positions", {}) or {}))
+                capital, held=len(getattr(self, "open_positions", {}) or {}),
+                per_position_rs=capital_rules.own_cash_per_position(
+                    _switch_is_live(getattr(self, "execution", None))))
         except Exception as exc:                           # noqa: BLE001
             warn(f"[SLOTS] Could not size the book from cash ({exc}); "
                  f"falling back to MAX_OPEN_POSITIONS={MAX_OPEN_POSITIONS}")
@@ -3979,7 +4035,7 @@ class Engine:
         # and nothing more -- see the note on it below. Edge-triggered
         # log so the moment it trips is loud, once.
         realized = self._daily_realized_pnl()
-        if _daily_cap_applies() and realized <= -DAILY_MAX_LOSS_RS:
+        if _daily_cap_applies(getattr(self, "execution", None)) and realized <= -DAILY_MAX_LOSS_RS:
             if self._daily_halt_logged != "LOSS":
                 self._daily_halt_logged = "LOSS"
                 warn(
@@ -5167,7 +5223,7 @@ class Engine:
             return cutoff
 
         realized = self._daily_realized_pnl()
-        if _daily_cap_applies() and realized <= -DAILY_MAX_LOSS_RS:
+        if _daily_cap_applies(getattr(self, "execution", None)) and realized <= -DAILY_MAX_LOSS_RS:
             return (f"daily loss cap hit ({realized:.0f} <= "
                     f"-{DAILY_MAX_LOSS_RS:.0f}) -- no new entries for the "
                     f"rest of the session")

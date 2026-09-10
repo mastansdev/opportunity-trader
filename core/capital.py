@@ -126,22 +126,41 @@ FREE_CASH_FLOOR_RS = 0.0
 # Rs 12,000 daily cap therefore ends the day after TWO stop-outs,
 # against 6.7 at the old slot.
 #
-# ---- AND IT IS PER MODE. 4 September 2026. ----
+# ---- AND IT FOLLOWS THE SWITCH, NOT THE MODE. 10 September 2026. ----
 # The slot is Rs 50,000 in PAPER, where the purse is a fixed Rs 5 lakh
 # and the point is to test behaviour freely -- "bot/we need to trade
 # as & when opportunity triggers, so in paper mode thats safe to test
 # the behaviour of bot trading".
 #
-# LIVE stays Rs 15,000, which is where he moved it on 3 September
-# because the book was full for 290 of the session's 306 minutes. His
-# real balance is about Rs 1.2 lakh: at Rs 50,000 that is TWO seats
-# and, against the Rs 12,000 live cap, two stop-outs to the end of the
-# day. A paper decision must not shrink the live book.
-try:
-    from config import TRADING_MODE as _MODE
-except Exception:            # noqa: BLE001
-    _MODE = "PAPER"
-OWN_CASH_PER_POSITION_RS = 50_000.0 if str(_MODE).upper() == "PAPER" else 15_000.0
+# LIVE is Rs 15,000, which is where he moved it on 3 September because
+# the book was full for 290 of the session's 306 minutes. His real
+# balance is about Rs 1.2 lakh: at Rs 50,000 that is TWO seats and,
+# against the Rs 12,000 live cap, two stop-outs to the end of the day.
+#
+# WHY THIS STOPPED BEING A CONSTANT. Until 10 September the slot was
+# chosen HERE, at import, from config.TRADING_MODE -- which is frozen
+# at "PAPER" and which the switch does not move. So clicking ON (real
+# orders) left the slot at the PAPER Rs 50,000 and sized every real
+# position more than three times too big. THE SWITCH IS THE WHOLE
+# ANSWER (his rule, 6 Sep): the engine reads execution.live at sizing
+# time and passes the matching slot to slots() below -- see
+# core/engine.py's slot sizing. OWN_CASH_PER_POSITION_RS stays the
+# PAPER default because the bot always comes up OFF, so slots() called
+# with no per_position_rs still sizes a paper book.
+OWN_CASH_PER_POSITION_RS_PAPER = 50_000.0
+OWN_CASH_PER_POSITION_RS_LIVE = 15_000.0
+OWN_CASH_PER_POSITION_RS = OWN_CASH_PER_POSITION_RS_PAPER
+
+
+def own_cash_per_position(live):
+    """Rupees of his own cash per seat: LIVE Rs 15,000, PAPER Rs 50,000.
+
+    The switch decides, read at CALL time by the caller (the engine
+    reads execution.live). See the note above for why the two differ
+    and why this is no longer a value bound at import.
+    """
+    return (OWN_CASH_PER_POSITION_RS_LIVE if live
+            else OWN_CASH_PER_POSITION_RS_PAPER)
 
 # A sanity ceiling so a bad capital read cannot open 400 slots. Not a
 # trading rule -- a guard against a broker API returning nonsense.

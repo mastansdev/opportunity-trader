@@ -119,13 +119,19 @@ def test_a_missing_config_value_reads_as_paper():
         config.TRADING_MODE = before
 
 
-def test_broker_sync_still_reads_it_live():
-    """It was already right, and must stay right -- its docstring is
-    the reason this whole file exists."""
+def test_broker_sync_reads_provenance_not_the_mode():
+    """RE-KEYED 10 September 2026. broker_sync used to read
+    config.TRADING_MODE at call time to decide real-vs-paper. TRADING_MODE
+    is frozen at "PAPER" and the switch does not move it, so it now
+    decides PER POSITION by who opened it (execution._who_opened), read
+    fresh on every call -- the same "not remembered" discipline this
+    whole file is about, one level more precise."""
     with open(os.path.join("core", "broker_sync.py"), encoding="utf-8") as f:
         body = f.read()
-    assert "from config import TRADING_MODE" in body
-    assert "Read at CALL time, never cached" in body
+    assert "_opened_live" in body
+    assert "_who_opened" in body
+    assert "from config import TRADING_MODE" not in body, (
+        "broker_sync is reading the frozen mode again instead of the switch")
 
 
 # ==========================================================

@@ -308,19 +308,34 @@ class BrokerSync:
         return (getattr(executor, "broker_book", None)
                 or getattr(executor, "positions", None))
 
-    def _is_live(self):
-        """Is this a LIVE session? Read at CALL time, never cached.
+    def _opened_live(self, symbol):
+        """Was THIS position opened for real? True / False / None(unknown).
 
-        The mode is read fresh on every call for the same reason
-        core/engine.py's _bot_trading_now does: a value captured at
-        import told him the bot was "placing REAL orders" while
-        TRADING_MODE said PAPER.
+        ---- PROVENANCE, NOT A SESSION FLAG. 10 September 2026. ----
+
+        This used to be a session-wide _is_live() reading TRADING_MODE,
+        which is frozen at "PAPER" and which the switch does not move --
+        so a real position opened with the switch ON reconciled as if it
+        were paper, and a stop that fired at Dhan went unnoticed.
+
+        The switch can flip mid-session, so the book can hold BOTH paper
+        and real positions at once. Which is which is decided per
+        position by who opened it, remembered on the fill
+        (trading/execution._who_opened). Unknown is None -- his own
+        manual holdings and anything with no bot fill on record -- and
+        every caller here treats unknown as "leave it alone".
         """
+        execution = getattr(self, "execution", None)
+        who = getattr(execution, "_who_opened", None)
+        if who is None:
+            return None
         try:
-            from config import TRADING_MODE
-            return str(TRADING_MODE).upper() == "LIVE"
+            answer = who(symbol)
         except Exception:                                   # noqa: BLE001
-            return False
+            return None
+        if answer is None:
+            return None
+        return answer == "live"
 
     def _drop_closed_fn(self):
         """How to remove a position Dhan no longer has, or None.
@@ -329,7 +344,7 @@ class BrokerSync:
         DELETES from the bot's own book -- it places no order and
         touches nothing at the broker.
 
-        ---- NEVER IN PAPER. 21 August 2026. ----
+        ---- NEVER A PAPER POSITION. 21 August 2026. ----
 
         A PAPER position does not exist at Dhan and never will. That
         is not a discrepancy, it is the definition of a simulation.
@@ -350,19 +365,18 @@ class BrokerSync:
         PAPER because there was no reader at all, so the reconciler
         had never once been asked this question outside LIVE.
 
-        READING the broker is safe in every mode. RECONCILING against
-        it is only meaningful when the two books are supposed to
-        describe the same money. Read at call time -- the mode is
-        edited between sessions.
-        """
-        try:
-            from config import TRADING_MODE
-            live = str(TRADING_MODE).upper() == "LIVE"
-        except Exception:                                   # noqa: BLE001
-            live = False
-        if not live:
-            return None
+        ---- KEYED TO PROVENANCE NOW, NOT THE MODE. 10 Sep 2026. ----
 
+        The guard used to be a session-wide TRADING_MODE == "LIVE", so
+        the whole reconciler was OFF in PAPER. With the switch as the
+        whole answer that gate was both wrong ways at once: a real
+        position (switch ON) was never reconciled, and a mixed book
+        after a mid-session flip could not be handled at all. So the
+        drop is wired whenever there is a book to drop from, and it
+        REFUSES per position: only a position the bot opened for real is
+        ever removed. Unknown is left alone -- reconciling against Dhan
+        is only meaningful when both books describe the same money.
+        """
         engine = getattr(self, "engine", None)
         if engine is None:
             return None
@@ -371,6 +385,12 @@ class BrokerSync:
             return None
 
         def drop(symbol):
+            # The independent second refusal: never delete a position
+            # that was not opened for real. A paper position does not
+            # exist at Dhan (the 21 August simulation), and his own
+            # manual holdings are never in only_in_bot to begin with.
+            if self._opened_live(symbol) is not True:
+                return
             book.pop(symbol, None)
             book.pop(str(symbol).upper(), None)
 
@@ -427,32 +447,36 @@ class BrokerSync:
         #                                         on a position that is
         #                                         not there.
         #
-        # Only the second is a problem, and it is the bot's problem.
-        stale = result["only_in_bot"] or result["quantity_differs"]
+        # Only the second is a problem, and it is the bot's problem --
+        # and only when the bot opened that position for real (below).
 
-        # ---- IN PAPER THERE IS NO SECOND CASE. 24 August 2026. ----
+        # ---- A PAPER POSITION IS NOT A DISCREPANCY. 24 August 2026,
+        #      re-keyed to provenance 10 September 2026. ----
         #
         #     "old paper trades are treated as still dhan holdings"
         #                                    -- operator, 24 Aug 2026
         #
-        # _drop_closed_fn() below already refuses to DELETE a paper
-        # position, and its docstring states the principle: "A PAPER
-        # position does not exist at Dhan and never will. That is not
-        # a discrepancy, it is the definition of a simulation."
+        # _drop_closed_fn() below already refuses to DELETE a position
+        # not opened for real, and its docstring states the principle:
+        # "A PAPER position does not exist at Dhan and never will. That
+        # is not a discrepancy, it is the definition of a simulation."
         #
-        # The warning was never given the same rule. On the 24 August
+        # The WARNING must follow the same rule. On the 24 August
         # pre-open the bot carried three simulated positions from
         # Friday -- CDSL, JBMA, NCC -- compared them against his real
         # eight-holding Dhan account, and announced once a MINUTE for
         # 37 minutes that each "was closed elsewhere". Nothing closed
         # them. They were never open anywhere but in the simulation.
         #
-        # The comparison itself is the error, not its consequence, so
-        # it is dropped here rather than silenced at the print. What
-        # Dhan actually holds is still read and still shown -- that is
-        # the whole point of the PAPER broker view.
-        if stale and not self._is_live():
-            stale = []
+        # This used to be blanked whole when a session-wide _is_live()
+        # (TRADING_MODE) said PAPER. The switch can flip mid-session, so
+        # the book can hold both kinds at once: filter to the positions
+        # the bot opened for REAL rather than blanking the lot. A paper
+        # or unknown-origin row is neither warned about nor dropped;
+        # what Dhan actually holds is still read and still shown.
+        only_in_bot_real = [r for r in result["only_in_bot"]
+                            if self._opened_live(r.get("symbol")) is True]
+        stale = only_in_bot_real or result["quantity_differs"]
         theirs = result["only_at_broker"]
 
         # THE FIRST LOOK DEFINES WHAT IS "OLD". Everything Dhan reports
@@ -603,7 +627,11 @@ class BrokerSync:
             # safe direction, and it is the same Dhan -> bot rule this
             # module already follows everywhere else. So it is done
             # now, loudly, one line per position.
-            for row in result["only_in_bot"]:
+            # only_in_bot_real, not result["only_in_bot"]: a paper or
+            # unknown-origin position that Dhan does not have is not a
+            # discrepancy (24 Aug), so it is neither warned about here
+            # nor dropped. drop() below refuses it too, independently.
+            for row in only_in_bot_real:
                 warn(f"  {row['symbol']}: the bot still holds "
                      f"{row['bot_qty']:.0f}, Dhan has none -- it was "
                      f"closed elsewhere.")

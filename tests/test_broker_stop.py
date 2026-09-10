@@ -52,24 +52,31 @@ from trading.broker_stop import BrokerStop, hard_stop_price
 
 
 @pytest.fixture(autouse=True)
-def _these_tests_are_about_LIVE(monkeypatch):
-    """---- ADDED 19 AUGUST 2026, AND IT IS NOT A LOOSENING. ----
+def _these_tests_are_about_REAL_POSITIONS(monkeypatch):
+    """---- ADDED 19 AUGUST 2026, RE-KEYED TO THE SWITCH 10 SEP 2026. ----
 
     Every test in this file exercises what the broker stop does when
-    it is ARMED, against a fake Dhan. They were passing while
+    it is ARMED, against a fake Dhan. They were once passing while
     TRADING_MODE was PAPER, because nothing checked.
 
-    That is precisely what went wrong at 14:26 that day: a PAPER buy
-    of NILKAMAL produced a REAL resting SELL at Dhan, because
-    BROKER_STOP_ENABLED read its own flag and nothing else. Placement
-    now refuses unless TRADING_MODE is LIVE.
+    That is precisely what went wrong at 14:26 on 19 August: a PAPER
+    buy of NILKAMAL produced a REAL resting SELL at Dhan, because
+    BROKER_STOP_ENABLED read its own flag and nothing else.
 
-    So these tests must SAY they are about live trading. Declaring it
-    here is the honest form -- the alternative was relaxing the guard
-    to keep a suite green, which is how the fault would come back.
+    The guard no longer reads TRADING_MODE at all -- the switch is the
+    whole answer, and which positions are real is decided per position
+    by who opened them. So the way these tests SAY they are about real
+    positions is the predicate in stop() above, which reports every
+    symbol as opened for real. Declaring it there is the honest form;
+    the alternative was relaxing the guard to keep a suite green, which
+    is how the fault would come back.
+
+    TRADING_MODE is still pinned to LIVE here so nothing ELSE these
+    tests touch (capital sizing, the loss cap read via other modules)
+    drifts on the ambient default. It does not gate the broker stop.
 
     tests/test_a_real_stop_never_guards_a_paper_trade.py holds the
-    other side: that PAPER sends nothing at all.
+    other side: a PAPER-opened position sends nothing at all.
     """
     monkeypatch.setattr("config.TRADING_MODE", "LIVE")
 
@@ -109,8 +116,15 @@ class FakeDhan:
 
 
 def stop(dhan=None, enabled=True, resync=0.01):
+    # Every test in this file exercises what an ARMED stop does against
+    # a fake Dhan, so every position it places is one opened for real.
+    # The per-position predicate (added 10 Sep 2026, replacing the
+    # TRADING_MODE gate) therefore says "live" for all of them. The
+    # refusal for a PAPER-opened position lives in
+    # tests/test_a_real_stop_never_guards_a_paper_trade.py.
     return BrokerStop(dhan or FakeDhan(), "NSE_EQ", "MTF",
-                      enabled=enabled, resync_pct=resync)
+                      enabled=enabled, resync_pct=resync,
+                      is_live_position=lambda s: True)
 
 
 # ---------------------------------------------------------------

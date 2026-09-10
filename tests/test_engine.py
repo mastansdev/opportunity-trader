@@ -2899,7 +2899,7 @@ def test_daily_loss_halt_blocks_new_entries(monkeypatch):
     # mode". These tests are about the BRAKE, so they arm it
     # explicitly rather than depending on whichever mode the suite
     # happens to run in.
-    monkeypatch.setattr("core.engine._daily_cap_applies", lambda: True)
+    monkeypatch.setattr("core.engine._daily_cap_applies", lambda *a, **k: True)
 
     import core.engine as engine_module
     monkeypatch.setattr(engine_module, "DAILY_MAX_LOSS_RS", 500.0)
@@ -2991,7 +2991,7 @@ def test_the_loss_cap_still_closes_the_door(monkeypatch):
     # daily cap -12K per day in paper mode. no use at all in paper
     # mode". This test is about the BRAKE, so it arms it explicitly
     # rather than depending on whichever mode the suite runs in.
-    monkeypatch.setattr("core.engine._daily_cap_applies", lambda: True)
+    monkeypatch.setattr("core.engine._daily_cap_applies", lambda *a, **k: True)
     import core.engine as engine_module
     monkeypatch.setattr(engine_module, "DAILY_MAX_LOSS_RS", 500.0)
 
@@ -3323,7 +3323,7 @@ def test_daily_loss_halt_uses_the_carried_pnl(monkeypatch):
     # mode". These tests are about the BRAKE, so they arm it
     # explicitly rather than depending on whichever mode the suite
     # happens to run in.
-    monkeypatch.setattr("core.engine._daily_cap_applies", lambda: True)
+    monkeypatch.setattr("core.engine._daily_cap_applies", lambda *a, **k: True)
 
     import core.engine as em
     monkeypatch.setattr(em, "DAILY_MAX_LOSS_RS", 8000.0)

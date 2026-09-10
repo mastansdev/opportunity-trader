@@ -86,23 +86,6 @@ SHORT = "SHORT"
 GONE = ("TRADED", "CANCELLED", "REJECTED", "EXPIRED")
 
 
-def _trading_is_live():
-    """Is TRADING_MODE LIVE right now? Never raises.
-
-    Unreadable means NOT live: refusing to rest a protective order
-    costs a restart, while resting one against a simulated position
-    costs money and cannot be taken back once it fills.
-
-    Read at call time, never cached -- he edits .env between sessions
-    and a stale answer here places live orders.
-    """
-    try:
-        from config import TRADING_MODE
-        return str(TRADING_MODE).upper() == "LIVE"
-    except Exception:                                       # noqa: BLE001
-        return False
-
-
 class BrokerStop:
     """Resting stop orders at Dhan, one per open position.
 
@@ -112,11 +95,29 @@ class BrokerStop:
     """
 
     def __init__(self, dhan_client, exchange_segment, product_type,
-                 enabled=False, resync_pct=0.01, tag_prefix="OTSTOP"):
+                 enabled=False, resync_pct=0.01, tag_prefix="OTSTOP",
+                 is_live_position=None):
         self.dhan = dhan_client
         self.segment = exchange_segment
         self.product = product_type
         self.enabled = bool(enabled)
+        # ---- WHICH POSITIONS ARE REAL. 10 September 2026. ----
+        #
+        # A resting order at Dhan is a live instruction and may only
+        # protect a position that was itself opened for real. Until
+        # today that was decided by config.TRADING_MODE, read at
+        # placement time. TRADING_MODE is frozen at "PAPER" and the
+        # switch does not move it, so this refused EVERY stop while the
+        # switch was ON -- real positions with no broker backstop.
+        #
+        # THE SWITCH IS THE WHOLE ANSWER. The engine passes a predicate
+        # that answers, per symbol, whether that position was opened for
+        # real (trading/execution._who_opened). None means no predicate
+        # was wired, and place() then FAILS CLOSED -- refuses -- because
+        # the 19 August NILKAMAL fault is a real order resting against a
+        # simulated position, and the safe direction when we cannot tell
+        # is to place nothing. Cancelling is never gated: see cancel().
+        self._is_live_position = is_live_position
         # How far the live stop must ratchet ABOVE the resting trigger
         # before the resting order is moved up to follow it. Every
         # modify is an API call on the order path; syncing on every
@@ -236,22 +237,26 @@ class BrokerStop:
             return None
 
         # ---- A REAL ORDER MAY NOT PROTECT A PRETEND POSITION ----
-        #      19 August 2026.
+        #      19 August 2026, re-keyed to the switch 10 September 2026.
         #
-        # The second, independent check. core/engine.py already
-        # refuses to arm this when TRADING_MODE is not LIVE, and this
-        # one exists because on 19 August a PAPER buy of NILKAMAL at
-        # 14:26:33 produced a REAL resting SELL at Dhan ten seconds
-        # later. One flag decided it, and that flag knew nothing about
-        # whether the rest of the system was simulating.
+        # The second, independent check. On 19 August a PAPER buy of
+        # NILKAMAL at 14:26:33 produced a REAL resting SELL at Dhan ten
+        # seconds later, because one flag decided it and that flag knew
+        # nothing about whether the rest of the system was simulating.
         #
-        # Read at call time, never cached: he edits .env between
-        # sessions, and a stale answer here places live orders.
-        if not _trading_is_live():
-            warn(f"[BROKER_STOP] REFUSED to rest a stop for {symbol}: "
-                 f"TRADING_MODE is not LIVE. A resting order at the "
-                 f"broker is a live instruction and the position it "
-                 f"would protect is simulated.")
+        # It is now decided PER POSITION, by who opened it -- not by a
+        # session-wide TRADING_MODE, which was frozen at "PAPER" and so
+        # (once the switch became the whole answer) refused every real
+        # stop instead. The predicate is the engine's, reading the
+        # fill's own remembered provenance. No predicate wired -> refuse:
+        # a real order resting against a position we cannot vouch for is
+        # the one thing this must never do.
+        if self._is_live_position is None or not self._is_live_position(symbol):
+            warn(f"[BROKER_STOP] REFUSED to rest a stop for {symbol}: it "
+                 f"was not opened for real (the switch was OFF when it was "
+                 f"bought, or its origin is unknown). A resting order at "
+                 f"the broker is a live instruction and must never protect "
+                 f"a simulated position.")
             return None
 
         try:

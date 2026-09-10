@@ -32,14 +32,32 @@ accepted against real shares and sold them at a level the bot made up.
 He put it better than this comment can: "otherwise it would have
 worst."
 
+---- RE-KEYED TO THE SWITCH. 10 September 2026. ----
+
+    "OFF = paper & ON = Real trades thats it & final" -- his rule
+
+The refusal used to read config.TRADING_MODE. TRADING_MODE is frozen
+at "PAPER" and the switch does not move it, so once the switch became
+the whole answer this refused EVERY stop while the switch was ON --
+real positions with no broker backstop, the opposite failure and just
+as expensive.
+
+The rule is unchanged; only its INPUT is. A resting order at Dhan may
+only protect a position that was itself opened for real, and which
+positions are real is decided PER POSITION by who opened it
+(trading/execution._who_opened) -- not by a session-wide flag. That is
+strictly stronger: a book holding both paper and real positions after
+a mid-session flip is handled one position at a time.
+
 TWO INDEPENDENT REFUSALS, because one flag deciding a live order is
 what caused this:
 
-  1. core/engine.py will not ARM the broker stop unless TRADING_MODE
-     is LIVE, and says so at startup.
+  1. core/engine.py arms the broker stop on the pure capability
+     (BROKER_STOP_ENABLED) and hands it a predicate that answers, per
+     symbol, whether that position was opened for real.
   2. trading/broker_stop.place() refuses again at the moment of
-     placement, reading TRADING_MODE at CALL TIME -- he edits .env
-     between sessions and a cached answer here places live orders.
+     placement, asking that predicate -- and with NO predicate wired
+     it fails closed and places nothing.
 
 Author : H&M Opportunity Trader
 ==========================================================
@@ -49,7 +67,7 @@ import pathlib
 
 import pytest
 
-from trading.broker_stop import BrokerStop, _trading_is_live
+from trading.broker_stop import BrokerStop
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -73,99 +91,119 @@ class _Dhan:
         return {"status": "success", "data": {"orderId": "123"}}
 
 
-def _stop(enabled=True):
-    return BrokerStop(dhan_client=_Dhan(), exchange_segment="NSE_EQ",
-                      product_type="MTF", enabled=enabled)
+def _stop(opened=None, enabled=True):
+    """A BrokerStop whose per-position predicate says which symbols were
+    opened for real. `opened` maps SYMBOL -> "live"/"paper"; anything
+    absent is unknown (None)."""
+    opened = {k.upper(): v for k, v in (opened or {}).items()}
+    return BrokerStop(
+        dhan_client=_Dhan(), exchange_segment="NSE_EQ",
+        product_type="MTF", enabled=enabled,
+        is_live_position=lambda s: opened.get(str(s).upper()) == "live")
 
 
 # ---------------------------------------------------------------
-# THE PLACEMENT REFUSES
+# THE PLACEMENT REFUSES A PAPER-OPENED POSITION
 # ---------------------------------------------------------------
 
-def test_no_order_is_sent_while_trading_mode_is_paper(monkeypatch):
-    """THE NILKAMAL CASE. Same call, same flag, and nothing leaves."""
-    monkeypatch.setattr("config.TRADING_MODE", "PAPER")
-    stop = _stop()
+def test_no_order_is_sent_for_a_paper_opened_position():
+    """THE NILKAMAL CASE. It was bought on paper; the protective SELL
+    must not leave the machine."""
+    stop = _stop(opened={"NILKAMAL": "paper"})
     got = stop.place("NILKAMAL", "1", 28, 2023.75)
     assert got is None
     assert stop.dhan.sent == [], "a real order was sent for a paper trade"
 
 
-def test_it_refuses_for_every_non_live_mode(monkeypatch):
-    for mode in ("PAPER", "paper", "BACKTEST", "", "REPLAY", None):
-        monkeypatch.setattr("config.TRADING_MODE", mode)
-        stop = _stop()
-        assert stop.place("X", "1", 10, 100.0) is None
-        assert stop.dhan.sent == []
+def test_it_refuses_when_the_origin_is_unknown():
+    """Unknown fails closed. His own manual holdings and anything with
+    no bot fill on record must not grow a bot stop."""
+    stop = _stop(opened={})            # nothing on record for "X"
+    assert stop.place("X", "1", 10, 100.0) is None
+    assert stop.dhan.sent == []
 
 
-def test_an_unreadable_mode_is_treated_as_NOT_live(monkeypatch):
-    """Refusing costs a restart. Placing costs money that cannot be
-    taken back once it fills."""
-    import builtins
-
-    real_import = builtins.__import__
-
-    def _boom(name, *a, **k):
-        if name == "config":
-            raise RuntimeError("config is broken")
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", _boom)
-    assert _trading_is_live() is False
+def test_no_predicate_wired_fails_closed():
+    """A BrokerStop built without a predicate cannot vouch for any
+    position, so it places nothing. The expensive mistake is a real
+    order nobody meant; a refused one costs a restart."""
+    stop = BrokerStop(dhan_client=_Dhan(), exchange_segment="NSE_EQ",
+                      product_type="MTF", enabled=True)
+    assert stop.place("NILKAMAL", "1", 28, 2023.75) is None
+    assert stop.dhan.sent == []
 
 
-def test_it_is_read_at_CALL_time_not_cached():
-    """He edits .env between sessions. A mode captured at import would
-    place live orders on the strength of yesterday's setting."""
-    src = (ROOT / "trading" / "broker_stop.py").read_text(encoding="utf-8")
-    body = src[src.find("def _trading_is_live"):src.find("class BrokerStop")]
-    assert "from config import TRADING_MODE" in body, (
-        "TRADING_MODE is being read somewhere other than at call time")
-
-
-def test_a_live_mode_still_places_the_stop(monkeypatch):
+def test_a_live_opened_position_still_gets_its_stop():
     """The control. A guard that refuses everything would pass every
     test above and leave every real position unprotected."""
-    monkeypatch.setattr("config.TRADING_MODE", "LIVE")
-    stop = _stop()
+    stop = _stop(opened={"NILKAMAL": "live"})
     stop.place("NILKAMAL", "1", 28, 2023.75)
-    assert stop.dhan.sent, "LIVE trading lost its protective stop"
+    assert stop.dhan.sent, "a real position lost its protective stop"
+
+
+def test_a_mixed_book_is_handled_one_position_at_a_time():
+    """THE REASON IT IS PER POSITION. After a mid-session flip the book
+    holds both. The real one is protected; the paper one is not."""
+    stop = _stop(opened={"REALCO": "live", "PAPERCO": "paper"})
+    stop.place("PAPERCO", "1", 10, 100.0)
+    stop.place("REALCO", "2", 5, 200.0)
+    sent = [s["security_id"] for s in stop.dhan.sent]
+    assert sent == ["2"], "the paper position was protected, or the real one was not"
+
+
+def test_the_predicate_is_read_at_CALL_time_not_cached():
+    """The switch can flip while a position is open. The predicate is
+    asked at placement, so it reflects who opened THIS symbol -- not a
+    value captured when the BrokerStop was built."""
+    src = (ROOT / "trading" / "broker_stop.py").read_text(encoding="utf-8")
+    place = src[src.find("def place("):]
+    place = place[:place.find("\n    def ", 10)]
+    code = "\n".join(ln for ln in place.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "self._is_live_position(symbol)" in code, (
+        "placement no longer asks the per-symbol predicate")
+    assert "TRADING_MODE" not in code, (
+        "placement is reading the frozen mode again instead of the switch")
 
 
 # ---------------------------------------------------------------
-# AND IT IS NEVER ARMED IN THE FIRST PLACE
+# AND THE ENGINE ARMS IT ON CAPABILITY, GATES IT PER POSITION
 # ---------------------------------------------------------------
 
-def test_the_engine_will_not_arm_it_outside_live_mode():
-    """Two independent checks, because ONE flag deciding a live order
-    is exactly what caused this."""
+def test_the_engine_arms_on_capability_not_on_the_mode():
+    """`enabled` is the pure capability now. TRADING_MODE must not
+    decide whether a real stop can rest -- that is what left real
+    positions unprotected while the switch was ON."""
     src = (ROOT / "core" / "engine.py").read_text(encoding="utf-8")
     code = "\n".join(ln for ln in src.splitlines()
                      if not ln.lstrip().startswith("#"))
-    assert "enabled=BROKER_STOP_ENABLED and _stop_live," in code, (
-        "the broker stop can be armed without checking TRADING_MODE")
-    assert '_stop_live = str(TRADING_MODE).upper() == "LIVE"' in code
+    assert "enabled=BROKER_STOP_ENABLED," in code, (
+        "the broker stop is no longer armed on the pure capability flag")
+    assert "_stop_live" not in code, (
+        "the removed TRADING_MODE gate is back on the broker stop")
+    assert 'str(TRADING_MODE).upper() == "LIVE"' not in code
 
 
-def test_the_refusal_is_announced_at_startup():
-    """He turned BROKER_STOP_ENABLED on deliberately. If it is not
-    going to arm, he has to be told once, loudly -- silence would read
-    as protection he does not have."""
+def test_the_engine_hands_it_a_per_position_predicate():
+    """Two independent checks, because ONE flag deciding a live order
+    is exactly what caused this. The engine's check is the predicate,
+    keyed on who opened the position."""
     src = (ROOT / "core" / "engine.py").read_text(encoding="utf-8")
-    assert "BROKER_STOP_ENABLED is on" in src
-    assert "TRADING_MODE is" in src
+    code = "\n".join(ln for ln in src.splitlines()
+                     if not ln.lstrip().startswith("#"))
+    assert "is_live_position=" in code
+    assert "_who_opened" in code
 
 
 def test_cancelling_is_still_never_gated():
-    """Cancelling removes exposure. It must work in every mode, or a
-    stray order from an earlier LIVE session could not be cleaned up
-    after switching back to PAPER."""
+    """Cancelling removes exposure. It must work whatever the switch
+    says, or a stray order from an earlier real session could not be
+    cleaned up after switching back to paper."""
     src = (ROOT / "trading" / "broker_stop.py").read_text(encoding="utf-8")
     cancel = src[src.find("def cancel"):]
     cancel = cancel[:cancel.find("\n    def ", 10)]
-    assert "_trading_is_live" not in cancel, (
-        "cancelling a live order now depends on the mode -- a stray "
+    assert "_is_live_position" not in cancel, (
+        "cancelling a live order now depends on provenance -- a stray "
         "order could not be cleared")
 
 
@@ -173,14 +211,13 @@ def test_cancelling_is_still_never_gated():
 # THE SHAPE OF THE FAULT, PINNED
 # ---------------------------------------------------------------
 
-def test_the_order_it_would_send_is_a_forever_order(monkeypatch):
-    """What LIVE actually sends, pinned. Dhan's Forever Order endpoint
-    is the right instrument for a stop that must outlive the process
-    -- and the payload it receives is checked here rather than
+def test_the_order_it_would_send_is_a_forever_order():
+    """What a real stop actually sends, pinned. Dhan's Forever Order
+    endpoint is the right instrument for a stop that must outlive the
+    process -- and the payload it receives is checked here rather than
     assumed, because on 19 August the payload and the booked order
     disagreed."""
-    monkeypatch.setattr("config.TRADING_MODE", "LIVE")
-    stop = _stop()
+    stop = _stop(opened={"NILKAMAL": "live"})
     stop.place("NILKAMAL", "1", 28, 2023.75)
     sent = stop.dhan.sent[0]
     assert sent["transaction_type"] == "SELL"
