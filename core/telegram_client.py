@@ -113,10 +113,42 @@ class TelethonReader:
         import asyncio
 
         loop = getattr(client, "loop", None)
-        if loop is None or loop.is_running():
-            # No loop to drive, or we are already inside one. Fall back
-            # to the unbounded call rather than refusing to read at all
-            # -- the bound is an improvement, not a precondition.
+
+        # ---- A COROUTINE MUST NOT ESCAPE THIS FUNCTION. 10 Sep 2026 ----
+        #
+        #     "Telegram OCR Failed"                     -- the operator
+        #
+        # When Telegram PUSHES a photo it is dispatched INSIDE pump()'s
+        # running loop (run_until_complete(sleep(90))), so telethon's
+        # sync wrapper hands back an un-awaited COROUTINE rather than
+        # bytes. Every caller from here is synchronous -- _shape() ->
+        # _store() -> core.image_text.read() -- and read() dies on it
+        # with "a bytes-like object is required, not 'coroutine'". On
+        # 10 September that was 100% of pushed pictures, and push now
+        # delivers nearly everything.
+        #
+        # We cannot drive the download here: the loop is already running
+        # and nothing in this call chain can await. So give up CLEANLY --
+        # close the coroutine so it does not leak an "was never awaited"
+        # warning, and return None. None is "no image THIS time", which
+        # _shape() already handles (it appends nothing and moves on). The
+        # transcript is recovered afterwards by the re-read pass on the
+        # poller thread, outside the loop, where the download CAN be
+        # driven -- see core/telegram_feed.reread_missing_photos().
+        if loop is not None and loop.is_running():
+            coro = client.download_media(message, file=bytes)
+            close = getattr(coro, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:                             # noqa: BLE001
+                    pass
+            return None
+
+        if loop is None:
+            # No loop object at all: telethon's sync wrapper drives its
+            # own and returns bytes. Telethon 1.44 always sets
+            # client.loop, so this is the defensive arm, not the hot one.
             return client.download_media(message, file=bytes)
 
         async def bounded():
