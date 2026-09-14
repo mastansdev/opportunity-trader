@@ -162,6 +162,82 @@ def _command_reader(engine, stop_event):
 # it turns that patch into an AttributeError -- loud, instant, and at
 # collection time.
 
+# ---- IS THE BOT'S CLOCK THE EXCHANGE'S CLOCK? 14 Sep 2026. ----
+#
+#     "did u resolve the time delay, mis timing with nse/system time
+#      with bot time?"                          -- the operator
+#
+# Two causes of the lag he SAW were fixed today: the board rebuild
+# freezing the main loop, and the Telegram column printing a UTC stamp
+# raw. Neither answered this question, and nothing ever has.
+#
+# Every tick carries LTT -- the exchange's own last-traded time -- and
+# received_at, this machine's clock, is captured beside it at enqueue.
+# The two have sat together in the queue since the worker was written
+# and nothing has ever subtracted one from the other.
+#
+# WHY IT MATTERS MORE THAN A DISPLAY. Every time rule the bot has reads
+# the machine clock: the ORB window, LAST_ENTRY_TIME 15:15, the
+# square-off, move age, "held 45 minutes" in the drift exit. If this
+# laptop's clock drifts from NSE, all of them are wrong together,
+# quietly, and the bot goes on trading as if they were right.
+#
+# WHAT THE NUMBER IS, said rather than hidden. LTT is stamped by the
+# exchange when the trade printed; received_at is when this process
+# took the packet off the socket. The gap is feed latency PLUS any
+# clock offset and the two cannot be separated from here. A steady gap
+# under a couple of seconds is a healthy feed on a correct clock;
+# minutes means one of the two is wrong, which is what he asked.
+#
+# AT MODULE LEVEL, not inside main(), so it can be tested. The first
+# version of this lived in main() and read two config names that were
+# never imported -- a NameError that only a live tick would have found.
+_CLOCK = {"worst": 0.0, "n": 0, "sum": 0.0, "said": None}
+
+
+def _clock_watch(tick_time, received_at, now=None, state=None):
+    """Measure the exchange's clock against this machine's.
+
+    Returns the reported line when it reports, else None. Costs one
+    subtraction per tick and one log line a minute, and decides
+    nothing. Never raises -- it runs on the tick worker.
+    """
+    from config import CLOCK_DRIFT_WARN_SECONDS, CLOCK_REPORT_SECONDS
+    clock = _CLOCK if state is None else state
+    try:
+        if tick_time is None or received_at is None:
+            return None
+        gap = (received_at - tick_time).total_seconds()
+    except Exception:                                      # noqa: BLE001
+        return None
+    # A tick stamped in the FUTURE means the offset runs the other way.
+    # Kept signed so the direction is readable: positive means this
+    # machine is behind the exchange.
+    clock["n"] += 1
+    clock["sum"] += gap
+    if abs(gap) > abs(clock["worst"]):
+        clock["worst"] = gap
+    moment = time.monotonic() if now is None else now
+    # None, not 0.0: the first version used zero for BOTH "never
+    # reported" and a real timestamp, so a caller whose clock read 0.0
+    # re-primed on every tick and the line never came out. A sentinel
+    # that can collide with a real value is not a sentinel.
+    if clock["said"] is None:
+        clock["said"] = moment
+        return None
+    if moment - clock["said"] < CLOCK_REPORT_SECONDS or clock["n"] < 20:
+        return None
+    average = clock["sum"] / clock["n"]
+    line = (f"[CLOCK] The exchange's timestamps run {average:+.1f}s from "
+            f"this machine on average over {clock['n']} ticks (worst "
+            f"{clock['worst']:+.1f}s). Positive means this machine is "
+            f"BEHIND the exchange. Feed latency and clock offset are "
+            f"both in this number.")
+    (warn if abs(average) > CLOCK_DRIFT_WARN_SECONDS else diagnostic)(line)
+    clock.update({"worst": 0.0, "n": 0, "sum": 0.0, "said": moment})
+    return line
+
+
 def main():
     # ---- ONE BOT AT A TIME, AND THIS IS THE FIRST LINE ----------
     # Refuses rather than warns. A warning at 09:00 scrolls off the
@@ -1678,6 +1754,7 @@ def main():
             except queue.Empty:
                 pass          # a quiet second still gets a decision
             else:
+                _clock_watch(tick_time, received_at)
                 try:
                     market_data.on_tick(
                         symbol, price, tick_time, now=received_at,

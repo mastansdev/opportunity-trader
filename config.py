@@ -738,6 +738,17 @@ CIRCUIT_RULE_DIRECTION_AWARE = True
 # cadence choice, not a batching necessity.
 CIRCUIT_POLL_INTERVAL_SECONDS = 3
 
+# ---- THE BOT'S CLOCK AGAINST THE EXCHANGE'S. 14 September 2026. ----
+# How often main._clock_watch() reports the gap between the exchange's
+# own LTT and this machine's clock, and how big that gap has to be
+# before the line is a warning rather than a diagnostic. Every time
+# rule the bot has -- the ORB window, LAST_ENTRY_TIME, the square-off,
+# move age, the drift exit's "held 45 minutes" -- reads the machine
+# clock, so a drift moves all of them together and nothing else would
+# notice. Measurement only; it decides nothing.
+CLOCK_REPORT_SECONDS = 60
+CLOCK_DRIFT_WARN_SECONDS = 5.0
+
 # ----------------------------------------------------------
 # Dashboard -- Top Gainers / Top Losers (2026-07-23, replaces the
 # old ORB Bullish/Bearish watchlist panel)
