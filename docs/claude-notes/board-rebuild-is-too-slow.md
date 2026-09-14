@@ -77,3 +77,22 @@ find the real cost. Do not optimise a guess.
 
 See [[verify-the-value-the-live-path-reads]] and
 [[his-trading-rules]].
+
+## DECOUPLED -- 14 September 2026
+
+Measured from the 10 Sep log: 89 slow rebuilds, 20.0s to 98.5s. The
+cost is two panels every time -- `ranked` up to 35.9s and `shortlist`
+up to 18.6s; everything else under 3s. (This CORRECTS the guess above
+that the ranker was probably not the slow part. It is.)
+
+It was called inline in the 1s main loop, so a 98s rebuild WAS the
+loop: heartbeats meant to be steady landed 85-100s apart through
+10:22-10:31, and `_candidates["rows"]` -- the list the tick worker
+hands seats from -- stood up to 98s stale.
+
+`main._board_rebuilder` runs it on its own thread now, paced, started
+after the panels are wired. The loop keeps the cheap half (read the
+latest board, publish the candidates) at 1s.
+
+STILL TRUE: `ranked` and `shortlist` are slow in themselves. Making
+them faster is now a throughput question, not a correctness one.

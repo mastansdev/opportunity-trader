@@ -1,6 +1,6 @@
 ---
 name: bot-review-7-to-10-sep-2026
-description: "What the bot actually did 7-10 Sep 2026 (all PAPER, net -21,710), the seven faults found, and the fix order he agreed to"
+description: "What the bot did 7-10 Sep 2026 (all PAPER, net -21,710) and the seven faults -- ALL FIXED by 14 Sep except the late-entry gate, which is held back on purpose"
 metadata: 
   node_type: memory
   type: project
@@ -90,3 +90,26 @@ board rebuild blocking the main loop — see [[board-rebuild-is-too-slow]].
   constant does not exist. `LAST_ENTRY_TIME = "15:15"` is the only
   cutoff, which is why SPLPETRO was bought 08 Sep at 15:00:23 and
   flattened 19 minutes later for -426 net.
+
+## FIXED 14 September 2026
+
+All six remaining faults shipped on `main` and pushed. In fix order:
+
+2. **Telegram OCR half 2** -- `telegram_feed.reread_missing_photos()`
+   re-reads pictures filed with no transcript and writes with UPDATE.
+3. **Board rebuild off the main loop** -- `_board_rebuilder` thread in
+   main.py. This was the cause of BOTH the clock lag and the stale
+   candidate list the seats were filled from.
+4. **Drifting positions** -- `DRIFTED_NO_MOVE` exit: 45 min, never
+   +1.0% high-water, below entry. Replay: +16,432 gross on the 95.
+5. **Fingerprint at exit** -- `engine.CARRIED_FROM_ENTRY`, one list for
+   both exit paths, so `door`/`move_age_min` stop being NULL.
+6. **Telegram clock** -- `_ist_stamp()` on the displayed stamps.
+7. **Log rotation** -- the second FileHandler is gone; verified the old
+   code raises PermissionError 32 and the new code rotates.
+
+STILL OPEN, deliberately: the **late-entry gate** (27 trades over an
+hour old, -21,896). Held back so the three behaviour changes above can
+be attributed in one PAPER session, and so it can be sized on the
+`move_age_min` the bot now records itself. See
+[[late-entries-measured]] and docs/handoff/open-problems-10-sep.md.

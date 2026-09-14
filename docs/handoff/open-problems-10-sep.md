@@ -9,6 +9,35 @@ Re-check before editing.
 
 ---
 
+## Done on 14 Sep (on `main`, pushed)
+
+- **OCR half 2** — `reread_missing_photos()` on the poller thread asks
+  Telegram for the exact post ids that were filed with no transcript,
+  re-reads the picture and writes with UPDATE (INSERT OR IGNORE is why
+  re-fetching never fixed them). Bounded at 25 a pass, newest first.
+  Recovers the ~410 lost over 7-10 Sep.
+- **Board rebuild off the main loop** — `_board_rebuilder` thread. The
+  rebuild (20-98.5s, 89 times on 10 Sep; `ranked` up to 35.9s +
+  `shortlist` up to 18.6s) no longer freezes the 1s loop. Fixes the
+  clock lag AND the stale candidate list the seats were filled from.
+- **A drifting position gives the seat back** — `DRIFTED_NO_MOVE`:
+  45 min held, never +1.0% high-water, below entry now. Asked after the
+  winners-only buying check so it can never book a winner early.
+  Replay on the 95 trades: **+16,432 gross** (-12,768 -> +3,664).
+  PROVISIONAL — measured on the sessions it was chosen on.
+- **The fingerprint survives the exit** — `CARRIED_FROM_ENTRY`, one list
+  used by both exit paths. All 95 trades had `door`/`move_age_min` NULL;
+  from now they are recorded, including on partial exits.
+- **Log rotation** — `capture_library_errors()` built a SECOND
+  FileHandler on the same file, so the 25 MB rename threw WinError 32.
+  Same handler now, library threshold moved to a filter. Verified: old
+  code raises PermissionError 32, new code rotates.
+- **Telegram clock** — `last_post`/`last_read`/`last_try` now go through
+  `to_ist()`. The tab read 5h30m behind because `at` is tagged UTC and
+  was printed raw; real lag is 0.2 min.
+
+---
+
 ## Done on 10 Sep (on `main`)
 
 - **"The switch decides the slot, the loss cap, the broker stop and the
@@ -180,10 +209,30 @@ e. **Stale data files** behind the 4 known test failures (F&O list,
 
 ## Agreed order
 
-1. Switch — **done**
-2. Telegram OCR — half 1 done, **half 2 next**
-3. Board rebuild off the main loop (fixes delay + clock lag + stale
-   candidates)
-4. Seats: late entries and a rule for drifting positions
-5. Fingerprint at exit (so problem 1 can be measured from the store)
-6. Telegram clock display, log rotation
+1. Switch — **done** (10 Sep)
+2. Telegram OCR — **done** (half 1 10 Sep, half 2 14 Sep)
+3. Board rebuild off the main loop — **done** (14 Sep)
+4. Seats — drifting positions **done** (14 Sep); **late entries still
+   open**, deliberately: see below
+5. Fingerprint at exit — **done** (14 Sep)
+6. Telegram clock display, log rotation — **done** (14 Sep)
+
+## What is deliberately NOT done yet
+
+**The late-entry gate.** 27 entries on moves over an hour old lost
+21,896 — the whole week's loss — so it is the largest single item left.
+It is held back on purpose:
+
+- Three changes already alter behaviour for the next session: the drift
+  exit, the board timing (which stocks reach the candidate list and
+  when), and OCR recovery (more stocks with a published reason). Adding
+  a second seat rule on top makes tomorrow's result impossible to
+  attribute.
+- The drift exit frees seats mid-session, which is itself part of why
+  the bot was buying hour-old movers — the book was full for 290 of 306
+  minutes and the only way in was when something exited. The late-entry
+  problem may be smaller once seats turn over.
+- `move_age_min` is recorded from now on (item 5). The gate can be sized
+  on data the bot collected itself instead of a candle replay.
+
+Run a PAPER session, then size it.

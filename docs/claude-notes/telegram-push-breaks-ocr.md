@@ -84,3 +84,14 @@ pictures aren't re-downloaded every 90s; bound it (daily channels);
 
 Related: [[telegram-catchup-should-walk-forward]],
 [[telegram-channel-roles]], [[day-trader-telugu-weekends-and-links]].
+
+## BOTH HALVES DONE -- 14 September 2026
+
+Half 2 shipped: `core/telegram_feed.reread_missing_photos()`, called
+from the poller loop after `poll()`. It selects rows with a photo and
+an empty `ocr_text`, asks Telegram for those exact ids
+(`fetch(ids=...)`, one request for up to a hundred), re-reads the
+picture and writes with **UPDATE** -- which was the missing piece:
+`_store()` uses INSERT OR IGNORE on (channel, message_id), so even
+`catch_up()` re-reading the image had its write dropped. Bounded at
+`REREAD_MAX_PER_PASS = 25`, newest hole first.

@@ -1,6 +1,6 @@
 - [His trading rules](his-trading-rules.md) — the complete rule set in his own words; read this instead of asking him again
 - [Phone work via cloud sessions](phone-work-via-cloud-sessions.md) — from 10 Sep he codes from the Claude app, laptop off; repo + CLAUDE.md + docs/ carry the context; never push the backup branch
-- [Board rebuild is too slow](board-rebuild-is-too-slow.md) — re-measured 10 Sep: ranked/shortlist are the cost and the rebuild blocks the main loop (clock lag, stale seats)
+- [Board rebuild is too slow](board-rebuild-is-too-slow.md) — ranked/shortlist are the cost; decoupled onto its own thread 14 Sep, which fixed the clock lag and the stale seats
 - [Operator work style](operator-work-style.md) — never assume, every number needs an n; the repo's own audit docs are wrong in places
 - [Opportunity Trader architecture](opportunity-trader-architecture.md) — two entry lanes, one rule file, and which dashboard page is actually live
 - [Open decisions](opportunity-trader-open-decisions.md) — what was decided 12 Aug 2026 and what is still waiting on him
@@ -30,6 +30,7 @@
 - [The month is a remainder, and the bot marks itself](the-month-is-a-remainder-and-the-bot-marks-itself.md) — 5L monthly target that divides by nothing, and the nightly self review; the bleed column is the yardstick
 - [Every change needs its effect on trading stated](every-change-needs-its-effect-on-trading-stated.md) — his benchmark question, asked every time; answer it before he has to ask
 - [Adding funds mid-session](adding-funds-mid-session-needs-a-toggle.md) — DONE 7 Sep 2026; the bot follows the Dhan balance live, no toggle, no restart
-- [Review: what the bot did 7-10 Sep 2026](bot-review-7-to-10-sep-2026.md) — all four days PAPER, net -21,710, the seven faults in fix order; #1 fixed 10 Sep
+- [Review: what the bot did 7-10 Sep 2026](bot-review-7-to-10-sep-2026.md) — all four days PAPER, net -21,710, all seven faults FIXED by 14 Sep except the late-entry gate, held back on purpose
 - [Late entries, measured](late-entries-measured.md) — moves over an hour old cost 21,896 on 27 trades; 41% of entries fire in the first three minutes
-- [Telegram push breaks the OCR](telegram-push-breaks-ocr.md) — a pushed photo returned an un-awaited coroutine; half 1 fixed 10 Sep, transcript recovery (half 2) still open
+- [Telegram push breaks the OCR](telegram-push-breaks-ocr.md) — a pushed photo returned an un-awaited coroutine; both halves fixed; recovery re-reads and UPDATEs, because INSERT OR IGNORE was silently dropping the repair
+- [The seat goes back when it never worked](the-seat-goes-back-when-it-never-worked.md) — DRIFTED_NO_MOVE, 14 Sep: 45 min, never +1.0%, below entry; +16,432 on the replay and the -10,669 it knowingly pays
