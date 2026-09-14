@@ -1,10 +1,27 @@
 {
- "verified_at": "2026-09-04 06:55:37",
- "checked": 1972,
+ "verified_at": "2026-09-09 15:56:07",
+ "checked": 1991,
  "source": "https://images.dhan.co/api-data/api-scrip-master.csv",
- "mismatches": [],
+ "mismatches": [
+  "HEG: master 1336, Dhan 7368",
+  "QUICKHEAL: master 13131, Dhan 13116",
+  "MGEL: master 1598, Dhan 1593",
+  "BIRLACABLE: master 6815, Dhan 477",
+  "VIVIANA: master 763637, Dhan 763636",
+  "CLEDUCATE: master 20233, Dhan 20223",
+  "COFFEEDAY: master 11169, Dhan 11165",
+  "SHIVALIK: master 7026, Dhan 7016",
+  "MANAKSTEEL: master 7463, Dhan 7482",
+  "RBZJEWEL: master 20874, Dhan 20893",
+  "PENINLAND: master 5358, Dhan 2256",
+  "RUBYMILLS: master 10123, Dhan 2939",
+  "ARIES: master 15204, Dhan 15208",
+  "PAR: master 5631, Dhan 5637",
+  "LANCORHOL: master 23027, Dhan 23030",
+  "BIRLAPREC: master 762593, Dhan 762596"
+ ],
  "not_found": [
   "KEL"
  ],
- "clean": true
+ "clean": false
 }

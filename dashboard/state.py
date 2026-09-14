@@ -5471,6 +5471,25 @@ class DashboardState:
         if held is not None:
             return held
 
+        # ---- TIME THE SHARED WALK ITSELF. 14 September 2026. ----
+        #
+        # This is memoised per build, so whichever panel calls it FIRST
+        # pays for all 1,314 symbols and every later caller gets it
+        # free. The per-panel timer then reports the cost against that
+        # first caller, which made the board look like `shortlist` was
+        # expensive (14.5s average across 1,126 slow rebuilds) while
+        # `gainers_losers` looked cheap at 2.5s. They do the same work;
+        # one of them just got there first.
+        #
+        # That mis-reading was acted on twice before it was caught, and
+        # it matters because the conclusions are opposite: "a display
+        # panel is burning 14s" argues for switching it off, while "the
+        # shared row walk costs 12s" does not -- build_ranked() is
+        # built from these same rows and ENTRIES come off it.
+        #
+        # So the walk is timed on its own line. Nothing else changes.
+        _gl_started = time.perf_counter()
+
         snapshot = self.engine.get_circuit_snapshot()
 
         # ---- A DROPPED CALL MADE 382 STOCKS CEASE TO EXIST. 2 Sep ----
@@ -5714,6 +5733,7 @@ class DashboardState:
         # Never overrides live data -- `if rows` returns above.
         if not rows:
             rows = self._gl_rows_from_the_close()
+        self._panel_ms["gl_rows"] = (time.perf_counter() - _gl_started) * 1000.0
         self._gl_rows_this_build = rows
         return rows
 
