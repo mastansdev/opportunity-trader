@@ -37,6 +37,21 @@ ROW = {"symbol": "RATNAMANI", "action": "BUY", "score": 45.99,
 class _Engine:
     open_positions = {"JBMA": {}, "NCC": {}, "CDSL": {}}
 
+    # ---- A CATCH-ALL DOUBLE ANSWERS "YES" TO EVERY FLAG. ----
+    #                              14 September 2026.
+    #
+    # __getattr__ below returns a LAMBDA for anything not defined here,
+    # and a lambda is truthy. So the moment refuse_reason() started
+    # asking `getattr(engine, "entries_paused", False)`, this double
+    # said "yes, he paused it" and every test in this file got the
+    # pause message instead of the cause it was checking for.
+    #
+    # The production check is right to treat truthy as paused -- when
+    # he has pressed PAUSE, failing towards "do not buy" is the safe
+    # direction. It is the double that must be explicit. Any future
+    # boolean the engine grows needs a line here for the same reason.
+    entries_paused = False
+
     def __init__(self, alert_only=True):
         self.alert_only = alert_only
 
