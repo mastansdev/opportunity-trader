@@ -2004,9 +2004,90 @@ class Engine:
         except Exception:                                  # noqa: BLE001
             return ""
         summary = str(got.get("reason_summary") or "").strip()
-        if not summary:
-            return "  [PRICE ONLY -- no event behind it]"
-        return f"  [EVIDENCE: {summary}]"
+        head = ("  [PRICE ONLY -- no event behind it]" if not summary
+                else f"  [EVIDENCE: {summary}]")
+        return head + self._price_action_clause(symbol)
+
+    def _price_action_clause(self, symbol, price=None):
+        """What the stock has actually DONE, as a readable clause.
+
+        ---- THE ALERTS DID NOT SAY WHAT IT DID. 14 Sep 2026. ----
+
+            "the alerts i'm receiving is not useful as they are purely
+             orb breakout stocks which didn't had idea about price
+             action it made. old alerts must be replaced as per my
+             request of freshness of the stock rank, price action
+             things"                              -- the operator
+
+        An alert used to name the stock, the mechanism that fired and
+        the levels -- and nothing about the thing he actually decides
+        on. "ABC LONG -- ORB breakout" is true of a stock making a new
+        high and equally true of one that ran 6% at 09:20 and has been
+        sliding since. He cannot tell those apart, so the alerts became
+        noise.
+
+        Three facts, the ones he named:
+
+            FRESHNESS   how much of today's move is already spent,
+                        measured from the OPEN so a gap is not counted
+                        as something he missed. The same reading the
+                        entry gate uses -- see
+                        config.ENTRY_MAX_EXTENSION_PCT, where 61 trades
+                        bought 2% or more extended lost 25,026.
+
+            DIRECTION   where it is against its own high. At its high
+                        is not the same trade as 2% below it.
+
+            WHO IS WINNING  buyers or sellers, from the order flow --
+                        the same reading BUYING_DRIED_UP books winners
+                        on. "falling or raising? whether buyers or
+                        sellers are dominating?" was his question.
+
+        Returns "" when nothing can be read. Never raises: an alert
+        with a thinner sentence is worth far more than an exception on
+        the trading loop, and this runs on it.
+        """
+        bits = []
+        try:
+            row = (self.get_circuit_snapshot() or {}).get(symbol) or {}
+        except Exception:                                  # noqa: BLE001
+            row = {}
+
+        def _f(value):
+            try:
+                out = float(value)
+            except (TypeError, ValueError):
+                return None
+            return out if out > 0 else None
+
+        ltp = _f(price) or _f(row.get("ltp")) or _f(row.get("close"))
+        opened = _f(row.get("open"))
+        high = _f(row.get("high"))
+
+        if ltp and opened:
+            bits.append(f"{(ltp - opened) / opened * 100:+.1f}% from the open")
+        if ltp and high:
+            off = (high - ltp) / high * 100
+            bits.append("at its high" if off < 0.15
+                        else f"{off:.1f}% off its high")
+
+        # Buyers or sellers. None means the book was too thin to
+        # classify, and None is never dressed up as an answer.
+        flow = None
+        try:
+            check = getattr(self, "buying_check", None)
+            if callable(check):
+                flow = check(symbol) or None
+        except Exception:                                  # noqa: BLE001
+            flow = None
+        if flow is not None:
+            still = flow.get("still_buying")
+            if still is True:
+                bits.append("BUYERS STILL IN")
+            elif still is False:
+                bits.append("BUYING HAS DRIED UP")
+
+        return f"  [MOVE: {', '.join(bits)}]" if bits else ""
 
     def _sector_co_move_reason(self, symbol):
         """Is this stock's whole group moving today? A sentence or None.
