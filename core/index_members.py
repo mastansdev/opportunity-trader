@@ -263,6 +263,7 @@ class IndexMembers:
 
         fetcher = self.fetcher or requests_fetcher()
         changed = False
+        answered = False
         for key, source in self.groups.items():
             # A group is {"url":..., "column":...}. A plain string is
             # accepted so a caller can still pass just a URL.
@@ -283,9 +284,32 @@ class IndexMembers:
             if symbols != self._members.get(key):
                 self._members[key] = symbols
                 changed = True
+            # WE ASKED, AND NSE ANSWERED. Recorded even when the answer
+            # is identical -- see the note below.
+            answered = True
             decision(f"[INDEX] {key}: {len(symbols)} symbols.")
 
-        if changed or self._fetched_at is None:
+        # ---- "SAVED" AND IT SAVED NOTHING. 14 September 2026. ----
+        #
+        # This stamped fetched_at only when the MEMBERSHIP CHANGED. F&O
+        # membership changes about once a month, so a successful daily
+        # refresh normally changes nothing -- and then nothing was
+        # written, fetched_at stayed where it was, and is_stale() went
+        # on reporting True forever.
+        #
+        # He ran the tool on 14 September and it printed
+        #
+        #     [INDEX] fno: 211 symbols.
+        #     [INDEX] Saved: ... (as of 2026-08-31 21:43:16)
+        #
+        # -- "Saved" with a fortnight-old date, and the file untouched.
+        # The list was right the whole time; the freshness flag could
+        # not be cleared by doing the thing that clears it.
+        #
+        # fetched_at means WHEN WE LAST ASKED. Whether the answer was
+        # the same is a different fact, and `changed` is still returned
+        # for the caller that cares.
+        if answered or changed or self._fetched_at is None:
             self._fetched_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             self._save()
         return changed
