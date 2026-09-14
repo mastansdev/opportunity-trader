@@ -1543,6 +1543,23 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                     # LATE_COLUMNS for the measurement behind each.
                     "run_up_pct": _num(row.get("change_pct")),
                     "move_age_min": _move_age(symbol, now),
+                    # ---- WHAT THE GATE SAW. 14 September 2026. ----
+                    #
+                    # The freshness gate refuses on extension_pct and
+                    # nothing wrote it down, so the bot would have
+                    # turned most candidates away on a number that
+                    # existed for one microsecond and was never
+                    # recorded. There would be no way to ask, of a
+                    # single trade, "how far into the move were we when
+                    # we bought this one" -- which is the only honest
+                    # way to judge the gate, one case at a time.
+                    #
+                    # Recorded for the trades it TOOK. The ones it
+                    # refused carry their reason into
+                    # core/signal_journal.py already.
+                    "extension_pct": _num(row.get("extension_pct")),
+                    "drift_since_rank_pct": _num(
+                        row.get("drift_since_rank_pct")),
                     "reason_kind": (row.get("news_kind")
                                     or row.get("reason_kind")),
                     "reason_pct_of_company": _reason_size(row, symbol),

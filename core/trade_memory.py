@@ -161,6 +161,10 @@ class TradeMemory:
             # How much of the move it actually kept -- see LATE_COLUMNS.
             Column("peak_price", Float),
             Column("peak_mtm", Float),
+            # How far into the move it was when bought -- see
+            # LATE_COLUMNS.
+            Column("extension_pct", Float),
+            Column("drift_since_rank_pct", Float),
             Column("recorded_at", DateTime(timezone=True), default=_utcnow),
             # ---- ONE ROW PER STOCK PER DAY LOST HALF A SESSION ----
             #      1 September 2026.
@@ -307,6 +311,33 @@ class TradeMemory:
         # Recorded, never consulted -- like every other column here.
         "peak_price": "REAL",
         "peak_mtm": "REAL",
+        #
+        # ---- WHAT THE FRESHNESS GATE SAW. 14 September 2026. ----
+        #
+        #   extension_pct          how far above today's OPEN the stock
+        #                          already was when it was bought
+        #   drift_since_rank_pct   what it did between being ranked and
+        #                          being filled
+        #
+        # The gate refuses on the first of these, so without it the bot
+        # would turn most candidates away on a number nobody could
+        # check afterwards.
+        #
+        # AND IT IS RECORDED RATHER THAN BACKTESTED, deliberately. His
+        # objection, 14 September: "i never trusted on your illogical
+        # back results. u were clubbing, averaging, static calculating
+        # like mean, median which is not good for stocks. we will never
+        # be able to trade in all stocks at all time." He is right, and
+        # the error was worse than averaging -- each rule was measured
+        # against a history that the rule itself would have changed,
+        # because the seats would have freed at different times and
+        # different stocks would have been bought. Three rules measured
+        # in isolation and then added together.
+        #
+        # So these are judged FORWARD, one trade at a time, from
+        # sessions nobody tuned anything on. Recorded, never consulted.
+        "extension_pct": "REAL",
+        "drift_since_rank_pct": "REAL",
     }
 
     def _widen_the_unique_constraint(self):
@@ -519,6 +550,9 @@ class TradeMemory:
                 # is a fact about this trade and not a candle replay.
                 peak_price=closed_position.get("peak_price"),
                 peak_mtm=closed_position.get("peak_mtm"),
+                extension_pct=closed_position.get("extension_pct"),
+                drift_since_rank_pct=closed_position.get(
+                    "drift_since_rank_pct"),
                 recorded_at=_utcnow(),
             )
             with self.engine.begin() as conn:

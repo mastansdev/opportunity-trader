@@ -333,6 +333,11 @@ CARRIED_FROM_ENTRY = (
     "move_age_min",
     "reason_kind",
     "reason_pct_of_company",
+    # What the freshness gate saw when it let this one through: how far
+    # into today's move it already was, and what it did between being
+    # ranked and being bought. See config.ENTRY_MAX_EXTENSION_PCT.
+    "extension_pct",
+    "drift_since_rank_pct",
 )
 
 
