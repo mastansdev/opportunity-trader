@@ -715,6 +715,17 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None,
     if str(row.get("action") or "").upper() != "BUY":
         return "not a long -- he does not short"
 
+    # ---- PAUSED. HE IS AWAY FROM THE DESK. 14 September 2026. ----
+    #
+    # Asked early and about the SESSION rather than the stock, so the
+    # reason he is shown names the pause and not whichever gate the
+    # stock would have met next. See Engine.entries_paused: the switch
+    # is untouched, open positions are still managed, and this refusal
+    # is one he is told about.
+    if getattr(engine, "entries_paused", False):
+        return ("new entries are PAUSED -- you stopped them. It passed "
+                "every other gate; nothing was bought")
+
     plan = row.get("plan") or {}
     if not plan.get("ok"):
         return str(plan.get("why") or "no tradeable plan")
@@ -1422,7 +1433,13 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
             # STOCK and must stay silent; "already holding 5 of 5" is
             # about the BOOK. One substring caught both, which is why
             # this matches the shapes rather than a word.
+            # A PAUSE IS THE SAME SHAPE AS A FULL BOOK: the stock
+            # passed everything and lost to something that has nothing
+            # to do with the stock. Those are the refusals he can act
+            # on himself, and the ones he asked to keep hearing about
+            # while he is away from the desk.
             lost_a_seat = ("book full (" in why
+                           or "PAUSED" in why
                            or " of " in why and "already holding" in why)
             if lost_a_seat and alert is not None:
                 try:

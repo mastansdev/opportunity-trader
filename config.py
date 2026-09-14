@@ -3361,7 +3361,8 @@ RECORDER_LAST_MINUTE = "15:28"
 # Rs 12,000 is the LIVE guardrail and stays his number -- chosen
 # 11 August against his real account, reaffirmed 3 September ("keep
 # 12000 as it is"). It is NOT scaled for paper and is NOT applied in
-# paper at all; see DAILY_LOSS_CAP_APPLIES_IN_PAPER below.
+# paper at all; see DAILY_LOSS_CAP_ENABLED below, which is now False
+# on BOTH sides of the switch at his instruction (14 Sep).
 DAILY_MAX_LOSS_RS = 12000.0
 
 
@@ -3398,7 +3399,31 @@ MONTHLY_TARGET_RS = 5_00_000.0
 # as daily_loss_rs, and Infinity is not valid JSON -- it would break
 # the desk rather than lift the cap. core/engine.py checks this before
 # it checks the number.
-DAILY_LOSS_CAP_APPLIES_IN_PAPER = False
+# ---- OFF, AND OFF ON BOTH SIDES. 14 September 2026. ----
+#
+#     "No daily loss in both modes. its wantedly switched OFF; i need
+#      some mechanism like OFF the new entries completely once my
+#      profit or loss or any work & i need to move away from system"
+#                                          -- the operator
+#
+# This was a paper-only exemption: the cap applied to real money and
+# not to paper. That is the dual setting he abolished the same day, and
+# he has now said which way it resolves -- OFF for both. The brake is
+# HIS, not the bot's: he stops it when he decides to stop, with PAUSE
+# below, and DAILY_MAX_LOSS_RS stops being a thing that ends his
+# session without being asked.
+#
+# SAID PLAINLY, because it is his money: with this False there is no
+# automatic floor under a bad day in either mode. A run of stop-outs
+# keeps taking new entries until he pauses it or the entry rules stop
+# qualifying anything. The 7-10 September book lost 21,710 over four
+# sessions with the cap already inactive in paper, so this is not a new
+# exposure -- it is the same one, now also true when the switch is ON.
+#
+# Set DAILY_LOSS_CAP_ENABLED True to put the Rs 12,000 brake back on
+# both sides at once. There is deliberately no way to have it on one
+# side only.
+DAILY_LOSS_CAP_ENABLED = False
 
 
 # ==========================================================

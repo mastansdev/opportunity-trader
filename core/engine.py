@@ -529,7 +529,7 @@ def _daily_cap_applies(execution=None):
 
     ---- IT FOLLOWED THE MODE, NOT THE SWITCH. 10 September 2026. ----
     This read config.TRADING_MODE, frozen at "PAPER". With
-    DAILY_LOSS_CAP_APPLIES_IN_PAPER False, a session with the switch ON
+    the cap disabled in paper, a session with the switch ON
     -- real orders, real money -- ran with NO daily loss cap, because
     the cap only armed on TRADING_MODE == "LIVE". Real money at risk
     means the brake is armed, and the switch is what says whether real
@@ -537,12 +537,16 @@ def _daily_cap_applies(execution=None):
     read live; if the switch is live, the cap always applies.
     """
     try:
-        from config import DAILY_LOSS_CAP_APPLIES_IN_PAPER
+        from config import DAILY_LOSS_CAP_ENABLED
     except Exception:                                      # noqa: BLE001
         return True
-    if _switch_is_live(execution):
-        return True
-    return bool(DAILY_LOSS_CAP_APPLIES_IN_PAPER)
+    # ONE ANSWER FOR BOTH SIDES. 14 September 2026. This used to say
+    # "always in LIVE, and in paper only if the flag allows" -- a rule
+    # that behaved differently depending on whose money it was, which
+    # is the distinction he abolished. `execution` is still taken so
+    # every caller is unchanged and so the signature records that this
+    # question was once answered two ways.
+    return bool(DAILY_LOSS_CAP_ENABLED)
 
 
 # ---- A REFUSED EXIT IS NOT AN EXIT. 31 August 2026. ----
@@ -1043,6 +1047,31 @@ class Engine:
         # gate fires on every candle close for the rest of the day
         # once tripped; log the moment it trips, once, loudly.
         self._daily_halt_logged = None
+        # ---- HE STEPS AWAY, THE BOT STOPS BUYING. 14 Sep 2026. ----
+        #
+        #     "i need some mechanism like OFF the new entries
+        #      completely once my profit or loss or any work & i need
+        #      to move away from system. so that bot can alert me about
+        #      the opportunity but no buy. like in telegram"
+        #
+        # NOT A THIRD STATE, and the difference matters because the
+        # third state is what cost him ten days in August. The SWITCH
+        # still answers one question only -- whose money -- and it is
+        # untouched by this. This answers a different one: may a NEW
+        # position be opened right now. Everything already open is
+        # managed exactly as before: stops, trails, the profit lock,
+        # BUYING_DRIED_UP and the drift exit all keep running, because
+        # walking away from an open book is not the same as abandoning
+        # it.
+        #
+        # And it is LOUD rather than silent. A refused entry under a
+        # pause alerts him with the stock and the reason, which is the
+        # whole point of pausing rather than shutting the bot down:
+        # "alert me about the opportunity but no buy".
+        #
+        # Off on every restart, like the switch. A process that comes
+        # back while he is away comes back trading.
+        self.entries_paused = False
 
         # Frozen-price feed detection -- see config.py's
         # FROZEN_PRICE_STREAK_CANDLES docstring (HFCL, 2026-07-23).

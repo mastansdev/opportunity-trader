@@ -146,7 +146,9 @@ _HELP = """*Opportunity Trader*
 `SELL SYM`        quoted, needs YES
 `EXITALL`         quoted, needs YES
 
-`ON` / `OFF`  arm or disarm new entries
+`ON` / `OFF`  REAL money or paper -- whose money, nothing else
+`PAUSE`       stop opening NEW positions; keep managing what is open
+`RESUME`      start opening new positions again
 `HELP`        this"""
 
 
@@ -718,6 +720,10 @@ class TelegramDesk:
                 return self._history(arg)
             if verb in ("ON", "OFF"):
                 return self._arm(verb == "ON")
+            if verb in ("PAUSE", "HOLD", "STOP"):
+                return self._pause(True)
+            if verb in ("RESUME", "GO", "CONTINUE", "UNPAUSE"):
+                return self._pause(False)
             if verb in ("BUY", "SELL", "EXITALL"):
                 return self._quote(verb, arg, qty)
             return f"Unknown command `{verb}`. Send `HELP`."
@@ -1223,6 +1229,51 @@ class TelegramDesk:
         state = "ON -- REAL" if on else "OFF -- PAPER"
         decision(f"[TG] Bot set to {state} from Telegram. {message}")
         return f"Bot is now *{state}*." + chr(10) + str(message)
+
+    def _pause(self, paused):
+        """Stop or start NEW entries. Not the switch, and not a mode.
+
+        ---- HE STEPS AWAY FROM THE DESK. 14 September 2026. ----
+
+            "i need some mechanism like OFF the new entries completely
+             once my profit or loss or any work & i need to move away
+             from system. so that bot can alert me about the
+             opportunity but no buy. like in telegram"
+
+        THE SWITCH IS NOT INVOLVED. ON/OFF answers whose money; this
+        answers whether a NEW position may be opened. Both can be set
+        independently and neither reads the other -- which is the whole
+        reason this is a separate word rather than another meaning
+        loaded onto OFF. Loading a second meaning onto OFF is precisely
+        what produced the third state he abolished on 31 August.
+
+        WHAT KEEPS RUNNING while paused: every open position. Stops,
+        trails, the profit lock, BUYING_DRIED_UP, the drift exit and
+        the circuit guard are untouched. Walking away from an open book
+        is not abandoning it.
+
+        WHAT HE STILL HEARS: the opportunities. A pick refused by the
+        pause alerts him with the stock and the reason -- see
+        core/auto_entry.refuse_reason(), which treats a pause the same
+        way it treats a full book.
+        """
+        if self.engine is None:
+            return "No engine wired."
+        self.engine.entries_paused = bool(paused)
+        held = len(getattr(self.engine, "open_positions", {}) or {})
+        if paused:
+            decision("[TG] NEW ENTRIES PAUSED from Telegram. "
+                     f"{held} position(s) still managed.")
+            return (f"*New entries PAUSED.*{chr(10)}"
+                    f"{held} open position(s) are still managed -- stops, "
+                    f"trails and exits all keep running.{chr(10)}"
+                    f"You will still be alerted about opportunities; "
+                    f"nothing will be bought.{chr(10)}"
+                    f"Send `RESUME` to start buying again.")
+        decision("[TG] New entries RESUMED from Telegram.")
+        return (f"*New entries RESUMED.*{chr(10)}"
+                f"The bot will open positions again when something "
+                f"qualifies.")
 
     # ---------------- the poll loop ----------------
 
