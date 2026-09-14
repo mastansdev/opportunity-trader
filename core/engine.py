@@ -288,6 +288,59 @@ EXIT_REASON_SQUARE_OFF = "SQUARE_OFF"
 # TOP_N_MOMENTUM_MODE only (config.py) -- fixed bracket exits,
 # never the ratcheting trailing stop. See _check_fixed_bracket().
 EXIT_REASON_FIXED_TARGET = "FIXED_TARGET"
+# ==========================================================
+# WHAT A CLOSED TRADE CARRIES FROM ITS ENTRY.  14 Sep 2026.
+# ==========================================================
+#
+# Every one of these is stamped onto the position when it OPENS -- the
+# reason by _capture_reason(), the fingerprint by core/auto_entry.take()
+# -- and every one is read back by core/trade_memory.record(). Both ends
+# were built and wired. The middle hop dropped them: _exit() rebuilt the
+# closed row from a fixed list of keys that did not contain the
+# fingerprint, so record() read None for all nine, on every trade.
+#
+# All 95 trades from 7-10 September recorded door = NULL and
+# move_age_min = NULL. That is why "which door made money" and "were we
+# late?" had to be answered by replaying candles instead of by asking
+# the store the question it was built to answer.
+#
+# ONE LIST, USED BY BOTH EXIT PATHS. A second hand-written copy is what
+# caused this -- the partial-exit row dropped even more than the full
+# one (no sector, no reason, no fingerprint at all). Adding a key here
+# now reaches every closed trade by every route.
+CARRIED_FROM_ENTRY = (
+    # The reason, AS IT WAS KNOWN AT ENTRY (2026-07-28). Never re-read
+    # at exit -- that would record what turned out to be true rather
+    # than what was known when the decision was made.
+    "sector",
+    "news_kind",
+    "filing_kind",
+    "results_grade",
+    "days_since_results",
+    "had_reason",
+    "reason_summary",
+    "rel_strength",
+    "regime",
+    # The fingerprint -- see core/trade_memory.LATE_COLUMNS. Facts, not
+    # groupings: which door opened the pool to it, how big the volume
+    # was, how old the move already was. Recorded, never consulted.
+    "door",
+    "volume_x",
+    "jump_x",
+    "liveness",
+    "off_high_pct",
+    "run_up_pct",
+    "move_age_min",
+    "reason_kind",
+    "reason_pct_of_company",
+)
+
+
+def _carried_from_entry(position):
+    """The entry context a closed trade takes with it. Missing is None."""
+    return {key: (position or {}).get(key) for key in CARRIED_FROM_ENTRY}
+
+
 EXIT_REASON_BUYING_DRIED_UP = "BUYING_DRIED_UP"
 
 # The seat given back by a position that never worked. Tagged its own
@@ -5963,6 +6016,11 @@ class Engine:
             "exit_reason": reason,
             "holding_seconds": holding_seconds,
             "pnl": pnl,
+            # A PART-EXIT IS A CLOSED TRADE TOO. It reached
+            # trade_memory with no sector, no reason and no fingerprint
+            # -- strictly less than the full exit recorded, and both
+            # were hand-written lists that drifted apart. Same list now.
+            **_carried_from_entry(position),
         })
 
         # Reduce the OPEN position's qty in place -- used_margin(),
@@ -6406,22 +6464,12 @@ class Engine:
             "exit_reason": reason,
             "holding_seconds": holding_seconds,
             "pnl": pnl,
-            # Entry context, carried through so the learning loop can
-            # ask "which CONDITIONS worked", not just "what was the P&L".
-            "sector": position.get("sector"),
-            # THE REASON, as it was known AT ENTRY (2026-07-28). Stamped
-            # onto the position by _capture_reason() when the trade
-            # opened -- never re-read at exit, which would record what
-            # turned out to be true rather than what was known when the
-            # decision was made.
-            "news_kind": position.get("news_kind"),
-            "filing_kind": position.get("filing_kind"),
-            "results_grade": position.get("results_grade"),
-            "days_since_results": position.get("days_since_results"),
-            "had_reason": position.get("had_reason"),
-            "reason_summary": position.get("reason_summary"),
-            "rel_strength": position.get("rel_strength"),
-            "regime": position.get("regime"),
+            # Entry context AND the fingerprint, carried through so the
+            # learning loop can ask "which CONDITIONS worked", not just
+            # "what was the P&L". One list, shared with the partial-exit
+            # row above -- see CARRIED_FROM_ENTRY for what was dropped
+            # here for every trade until 14 September.
+            **_carried_from_entry(position),
         })
 
         self._watch_after_exit(symbol, price, exit_time)
