@@ -304,6 +304,19 @@ class TrailingStopEngine:
                                            state.get("has_event")))
                     if candidate > state["stop"]:
                         state["stop"] = candidate
+
+            # ---- AND THE PROFIT LOCK, ON TOP. 14 Sep 2026. ----
+            #
+            # Applied to the peak as it now stands, after whichever
+            # branch above ran, so it is a FLOOR under the stop and
+            # never a replacement for either. It only ever raises --
+            # a lock that could lower a stop is a giveaway.
+            #
+            # See config.PROFIT_LOCK_ARM_PCT: the 1:1 lock above arms
+            # at +3.75% and 94 of his 95 trades never got there.
+            locked = self._profit_lock(state)
+            if locked is not None and locked > state["stop"]:
+                state["stop"] = locked
         else:
             if peak is None or price < peak:
                 state["peak"] = price
@@ -313,6 +326,62 @@ class TrailingStopEngine:
                 if candidate < state["stop"]:
                     state["stop"] = candidate
         return state["stop"]
+
+    @staticmethod
+    def _profit_lock(state):
+        """The floor his slab rule puts under the stop, or None.
+
+            "once mtm profit cross 5K then shift the Trailing stop loss
+             to 5K price of that stock then increase for every 1 k
+             upside movement"                     -- 14 September 2026
+
+        Once the high-water gain reaches PROFIT_LOCK_ARM_PCT, the stop
+        may never sit more than PROFIT_LOCK_GIVEBACK_PCT below the
+        highest price seen. Continuous rather than in notches, which is
+        the same rule with the steps made infinitely small.
+
+        LONG only -- the short side has no measurement behind it and a
+        rule without one does not belong in the exit path.
+
+        Returns None whenever it cannot say, and None never moves a
+        stop. Read at call time: he changes these between sessions.
+        """
+        try:
+            from config import (PROFIT_LOCK_ARM_PCT, PROFIT_LOCK_ENABLED,
+                                PROFIT_LOCK_GIVEBACK_PCT)
+        except Exception:                                      # noqa: BLE001
+            return None
+        if not PROFIT_LOCK_ENABLED:
+            return None
+        entry = state.get("entry")
+        peak = state.get("peak")
+        try:
+            entry = float(entry or 0)
+            peak = float(peak or 0)
+        except (TypeError, ValueError):
+            return None
+        if entry <= 0 or peak <= 0:
+            return None
+        if (peak - entry) / entry * 100.0 < float(PROFIT_LOCK_ARM_PCT):
+            return None
+
+        # ---- AND IT HANDS OVER. 14 September 2026. ----
+        #
+        # A flat 0.5% give-back is TIGHTER than the 1.5R trail once the
+        # trade is really running: at 4R it would sit at 1066.64 where
+        # the R trail sits at 1045.00, so a 10% winner would be closed
+        # on an ordinary 0.5% pullback. His 7-10 September book could
+        # not show that -- exactly ONE of 95 trades ever passed 6% --
+        # and a rule measured only where the big winners are absent
+        # must not be the one governing them.
+        #
+        # So this covers the GAP the 1:1 lock leaves: from the arm up
+        # to 1.5R, where nothing held a profit before. The moment that
+        # lock engages, the bounded R-relative design takes over and
+        # this says nothing.
+        if state.get("locked"):
+            return None
+        return peak * (1 - float(PROFIT_LOCK_GIVEBACK_PCT) / 100.0)
 
     def _lock_at_one_to_one(self, state, peak):
         """The stop once the stock has run near its target, or None.

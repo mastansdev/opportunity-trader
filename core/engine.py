@@ -336,6 +336,35 @@ CARRIED_FROM_ENTRY = (
 )
 
 
+def _peak_of(engine, symbol, position):
+    """{"peak_price", "peak_mtm"} -- the most this position was ever
+    worth, from the trail that has watched it since entry.
+
+    Both None when the trail cannot say. A missing reading is never
+    written as zero: "it never went up" and "nobody was watching" are
+    different facts, and a zero would quietly become the second one
+    wearing the first one's clothes.
+    """
+    peak = None
+    trail = getattr(engine, "trailing_stop", None)
+    if trail is not None:
+        try:
+            peak = trail.get_peak(symbol)
+        except Exception:                                  # noqa: BLE001
+            peak = None
+    if not peak:
+        return {"peak_price": None, "peak_mtm": None}
+    try:
+        entry = float((position or {}).get("entry_price") or 0)
+        qty = float((position or {}).get("qty") or 0)
+        peak = float(peak)
+    except (TypeError, ValueError):
+        return {"peak_price": None, "peak_mtm": None}
+    if entry <= 0:
+        return {"peak_price": peak, "peak_mtm": None}
+    return {"peak_price": peak, "peak_mtm": (peak - entry) * qty}
+
+
 def _carried_from_entry(position):
     """The entry context a closed trade takes with it. Missing is None."""
     return {key: (position or {}).get(key) for key in CARRIED_FROM_ENTRY}
@@ -6470,6 +6499,18 @@ class Engine:
             # row above -- see CARRIED_FROM_ENTRY for what was dropped
             # here for every trade until 14 September.
             **_carried_from_entry(position),
+            # ---- HOW MUCH OF IT DID WE KEEP. 14 September 2026. ----
+            #
+            #     "after gaining around 8k bot booked profit of 700 rs
+            #      change by giving back almost all the mtm profits"
+            #
+            # The trail has tracked the high of this position on every
+            # tick since entry; nothing was writing it down, so "what
+            # was it worth at its best" could only be answered by
+            # replaying candles afterwards. Now it is a fact about the
+            # trade. See core/trade_memory.LATE_COLUMNS for why this is
+            # recorded rather than acted on.
+            **_peak_of(self, symbol, position),
         })
 
         self._watch_after_exit(symbol, price, exit_time)

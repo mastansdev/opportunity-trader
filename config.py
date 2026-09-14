@@ -975,6 +975,86 @@ TRAILING_STOP_WINDOW_CANDLES = 5   # LEGACY -- see PEAK_TRAIL_PCT below
 # close much before this number touched." Correct use -- it is a
 # backstop, not a plan.
 ENABLE_PEAK_TRAIL = True
+
+
+# ==========================================================
+# LOCK THE PROFIT ONCE THERE IS ONE.  14 September 2026.
+# ==========================================================
+#
+#     "some stocks i observed, after gaining around 8k bot booked
+#      profit of 700 rs change by giving back almost all the mtm
+#      profits"
+#     "if we trade on slab wise like once mtm profit cross 5K then
+#      shift the Trailing stop loss to 5K price of that stock then
+#      increase for every 1 k upside movement"
+#                                          -- the operator
+#
+# HE IS RIGHT, AND A LOCK ALREADY EXISTED -- it just could not be
+# reached. core/exit_plan.live_stop() moves the stop to 1:1 once the
+# trade runs NEAR_TARGET_R = 1.5R. With the hard stop at 2.5%, R is
+# 2.5%, so the lock arms at +3.75%. Measured over 7-10 September:
+#
+#     trades whose peak MTM reached Rs 8,000 (about 6%)   1 of 95
+#     trades whose peak MTM reached Rs 5,000 (about 3.7%) 8 of 95
+#
+# So on a normal day it never armed, and a position that ran +2% and
+# came back had nothing holding it. That is the 8k -> 700 he saw.
+#
+# WHAT WAS MEASURED. His slab rule, replayed on all 95 trades against
+# the minute candles:
+#
+#     arm Rs 3,000, step Rs 1,000   +9,558 gross   19 trades touched
+#     arm Rs 5,000, step Rs 1,000   +9,226 gross    7 trades touched
+#
+# and it IMPROVED the BUYING_DRIED_UP trades by +12,541 rather than
+# clipping them, which is what three earlier attempts all did (a
+# breakeven ratchet, a proportional give-back, and a large-gain-only
+# guard -- all three lost money and none shipped).
+#
+# WHY IT IS A PERCENTAGE AND NOT RUPEES. Not because paper and live
+# differ -- they do not, and must not: "no dual channels/settings/
+# processes at all", his instruction the same day, and the slot is now
+# Rs 50,000 on both sides of the switch. The reason is LEVERAGE. MTF
+# margin is quoted per stock and runs 2x to 4.3x, so the same Rs 50,000
+# slot buys between Rs 1.0 lakh and Rs 2.15 lakh of stock, and Rs 5,000
+# of profit is 5% of one position and 2.3% of another. A percentage
+# asks the same question of every stock, and Rs 5,000 on a typical
+# Rs 2 lakh position IS this 2.5%.
+#
+#     arm 2.5%, give back 0.5%   +8,059 gross, 18 trades
+#                                (+5,524 with the best trade removed)
+#
+# ---- AND IT HANDS OVER AT 1.5R. ----
+#
+# A flat 0.5% give-back is TIGHTER than exit_plan's 1.5R trail once a
+# trade is really running: at 4R it would sit at 1066.64 where the R
+# trail sits at 1045.00, so a 10% winner would be closed on an ordinary
+# 0.5% pullback. This book could not show that -- exactly ONE of 95
+# trades ever passed 6% -- and a rule measured where the big winners
+# are absent must not be the one governing them.
+#
+# So it covers only the GAP the 1:1 lock leaves, from the arm up to
+# 1.5R, and the moment that lock engages the bounded R-relative design
+# takes over. Re-measured with the handover in place:
+#
+#     +7,110 gross on 17 trades
+#     BUYING_DRIED_UP +11,188, MANUAL_EXIT -4,078
+#
+# Most of the benefit, and the runners are left alone.
+#
+# WHAT IT DOES NOT DO: cap the upside. It is a FLOOR under the stop,
+# never a target. Above the arm the stop simply cannot sit more than
+# the give-back below the highest price seen -- which is his "increase
+# for every 1k upside movement", continuously rather than in notches.
+# Below the arm nothing changes at all and the existing trail governs.
+#
+# PROVISIONAL, like the rest of this week: measured on the four
+# sessions it was chosen on. PROFIT_LOCK_ENABLED = False removes it.
+PROFIT_LOCK_ENABLED = True
+# The gain that arms it, as a percent of the entry price.
+PROFIT_LOCK_ARM_PCT = 2.5
+# Once armed, the most it may give back from the highest price seen.
+PROFIT_LOCK_GIVEBACK_PCT = 0.5
 PEAK_TRAIL_PCT = 0.025
 
 # ---- A STOCK AT ITS HIGH HAS NOT STOPPED BEING BOUGHT. 3 Sep 2026 ----

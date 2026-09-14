@@ -158,6 +158,9 @@ class TradeMemory:
             Column("move_age_min", Float),
             Column("reason_kind", String(24), index=True),
             Column("reason_pct_of_company", Float),
+            # How much of the move it actually kept -- see LATE_COLUMNS.
+            Column("peak_price", Float),
+            Column("peak_mtm", Float),
             Column("recorded_at", DateTime(timezone=True), default=_utcnow),
             # ---- ONE ROW PER STOCK PER DAY LOST HALF A SESSION ----
             #      1 September 2026.
@@ -275,6 +278,35 @@ class TradeMemory:
         "move_age_min": "REAL",
         "reason_kind": "TEXT",
         "reason_pct_of_company": "REAL",
+        #
+        # ---- HOW MUCH OF IT DID WE KEEP. 14 September 2026. ----
+        #
+        #     "after gaining around 8k bot booked profit of 700 rs
+        #      change by giving back almost all the mtm profits"
+        #                                       -- the operator
+        #
+        #   peak_price   the highest the trail ever saw this position
+        #   peak_mtm     (peak - entry) * qty, the most it was ever
+        #                worth, in rupees
+        #
+        # He is right that it happens; what could not be answered was
+        # how OFTEN, and whether protecting it pays. Three protection
+        # rules were simulated against the candles on 14 September --
+        # a breakeven ratchet, a proportional give-back, and one that
+        # only guards large gains -- and ALL THREE lost money, because
+        # every trail tight enough to stop a round-trip also clips the
+        # BUYING_DRIED_UP winners that earn +68,770. Keeping about 45%
+        # of the peak looks like the price of letting winners run.
+        #
+        # "Looks like" is the problem. That whole answer comes from
+        # replaying minute candles over four sessions, because the book
+        # itself never recorded the peak. These two columns mean the
+        # question can be asked of the bot's own trades, per exit rule,
+        # on sessions nobody has tuned anything on.
+        #
+        # Recorded, never consulted -- like every other column here.
+        "peak_price": "REAL",
+        "peak_mtm": "REAL",
     }
 
     def _widen_the_unique_constraint(self):
@@ -483,6 +515,10 @@ class TradeMemory:
                            or _size_of(symbol).get("band")),
                 mcap_cr=(closed_position.get("mcap_cr")
                          or _size_of(symbol).get("cap_cr")),
+                # What it was worth at its best, so the capture ratio
+                # is a fact about this trade and not a candle replay.
+                peak_price=closed_position.get("peak_price"),
+                peak_mtm=closed_position.get("peak_mtm"),
                 recorded_at=_utcnow(),
             )
             with self.engine.begin() as conn:

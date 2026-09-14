@@ -147,20 +147,39 @@ FREE_CASH_FLOOR_RS = 0.0
 # core/engine.py's slot sizing. OWN_CASH_PER_POSITION_RS stays the
 # PAPER default because the bot always comes up OFF, so slots() called
 # with no per_position_rs still sizes a paper book.
-OWN_CASH_PER_POSITION_RS_PAPER = 50_000.0
-OWN_CASH_PER_POSITION_RS_LIVE = 15_000.0
-OWN_CASH_PER_POSITION_RS = OWN_CASH_PER_POSITION_RS_PAPER
+# ---- ONE SLOT, BOTH SIDES OF THE SWITCH. 14 September 2026. ----
+#
+#     "what ever we do in this bot is same for both live & paper modes.
+#      no distinction at all. even capital allocation also u can change
+#      from 15K to what ever paper mode we are doing (50K) ... no dual
+#      channels/settings/processes at all. unified process in complete
+#      bot. only distinguish thing is switch ON = trades in dhan & real
+#      money ; OFF = Paper Mode & Paper Capital"
+#                                          -- the operator
+#
+# Until today this was Rs 50,000 in paper and Rs 15,000 live, which is
+# exactly the dual setting he is refusing: a paper session that proves
+# a behaviour then behaves differently the moment the switch goes ON
+# proves nothing. The switch decides WHOSE MONEY and nothing else.
+#
+# WHAT THIS CHANGES, said plainly. A live position becomes about 3.3x
+# bigger. On his real balance near Rs 1,00,000 that is TWO seats rather
+# than six, and at 4x MTF a seat is about Rs 2,00,000 of stock, so the
+# 2.5% stop costs about Rs 5,000. Against DAILY_MAX_LOSS_RS = 12,000
+# the day ends after roughly two stop-outs. That is the trade he is
+# choosing: fewer, larger positions that behave identically to the ones
+# he has been watching in paper.
+OWN_CASH_PER_POSITION_RS = 50_000.0
 
 
-def own_cash_per_position(live):
-    """Rupees of his own cash per seat: LIVE Rs 15,000, PAPER Rs 50,000.
+def own_cash_per_position(live=None):
+    """Rupees of his own cash per seat. The SAME on both sides.
 
-    The switch decides, read at CALL time by the caller (the engine
-    reads execution.live). See the note above for why the two differ
-    and why this is no longer a value bound at import.
+    `live` is still accepted so the caller need not change and so the
+    signature still says out loud that this question was once answered
+    two different ways. It is ignored: see the note above.
     """
-    return (OWN_CASH_PER_POSITION_RS_LIVE if live
-            else OWN_CASH_PER_POSITION_RS_PAPER)
+    return OWN_CASH_PER_POSITION_RS
 
 # A sanity ceiling so a bad capital read cannot open 400 slots. Not a
 # trading rule -- a guard against a broker API returning nonsense.

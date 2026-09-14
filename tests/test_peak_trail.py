@@ -73,8 +73,15 @@ def _long(entry=1000.0, stop_pct=STOP_PCT):
 
 
 def _old_rule(monkeypatch):
+    """Rule 1 ALONE. Turns off everything layered on top of it since.
+
+    PROFIT_LOCK_ENABLED joins the list on 14 September: these tests
+    exist to prove the 2.5% trail still behaves exactly as it did, and
+    a newer floor sitting under the stop would answer for it.
+    """
     import core.trailing_stop as ts_mod
     monkeypatch.setattr(ts_mod, "ENABLE_ONE_TO_ONE_LOCK", False)
+    monkeypatch.setattr("config.PROFIT_LOCK_ENABLED", False)
 
 
 # ---------------------------------------------------------------
@@ -89,18 +96,74 @@ def test_the_planned_stop_is_the_stop_the_trade_actually_gets():
     assert ts.get_stop("TEST") == pytest.approx(982.0)
 
 
-def test_nothing_moves_until_the_stock_has_run_one_and_a_half_times_its_risk():
+# ===============================================================
+# RULE 3 -- lock the profit once there IS one (2026-09-14)
+# ===============================================================
+#
+#     "after gaining around 8k bot booked profit of 700 rs change by
+#      giving back almost all the mtm profits"
+#     "once mtm profit cross 5K then shift the Trailing stop loss to 5K
+#      price of that stock then increase for every 1 k upside movement"
+#                                          -- the operator
+#
+# Rule 2 solved this for trades that reach 1.5R. Measured over his
+# 7-10 September book, almost nothing does:
+#
+#     peak MTM reached Rs 8,000 (about 6%)     1 of 95 trades
+#     peak MTM reached Rs 5,000 (about 3.7%)   8 of 95 trades
+#
+# So the lock was real and unreachable, and a position that ran +2%
+# and came back had nothing holding it.
+#
+# Replayed on all 95 trades against the minute candles:
+#
+#     his slab, arm Rs 3,000 / step Rs 1,000   +9,558 gross
+#     as a percentage, arm 2.5% / give 0.5%    +8,059 gross
+#     retuning Rule 2's own R parameters       +4,506 gross
+#     a breakeven ratchet                      +1,476 (a wash)
+#     a proportional give-back                 -2,213 (all negative)
+#
+# WHY IT SUPERSEDES "NOTHING MOVES UNTIL 1.5R". That invariant came
+# from 12 trades on 8 August; this is 95. And it is not the creeping
+# trail that invariant was defending against: below the arm NOTHING
+# moves, exactly as before. Above it the stop may not sit more than
+# 0.5% under the highest price seen.
+#
+# IT DOES NOT TOUCH DEEPAKNTR. That trade ran 1.81R, past the handover,
+# so Rule 2 still books its +1.80%. Rule 3 only covers the gap between
+# its arm and 1.5R -- which is precisely where the 7-10 September book
+# died, and why the same period shows +7,110 with the handover in
+# place (BUYING_DRIED_UP +11,188, MANUAL_EXIT -4,078).
+#
+# THE HONEST WEAKNESS: the arm is a flat percentage while the rest of
+# this file is R-relative, so a name given a wide 3% stop arms sooner
+# in R terms than a name given 1.8%. That is visible in
+# test_a_wider_planned_stop_moves_the_lock_with_it below. It was
+# measured that way, on real trades with their real stops, and still
+# came out ahead -- but it is a seam, and PROFIT_LOCK_ENABLED = False
+# removes it in one line.
+
+
+def test_nothing_moves_until_the_profit_lock_arms():
     """A stop that creeps from the first tick is the 2.5% trail under a
     new name, and it is what turned DEEPAKNTR's +3.26% into +0.68%."""
     ts = _long(1000.0)
-    for price in (1005.0, 1010.0, 1020.0, 1026.0):     # up to +1.44R
+    # Below the 2.5% arm nothing moves, which is the original rule
+    # intact -- a stop that crept from the first tick is what turned
+    # DEEPAKNTR's +3.26% into +0.68%.
+    for price in (1005.0, 1010.0, 1020.0):             # up to +2.0%
         ts.update_on_price("TEST", price)
         assert ts.get_stop("TEST") == pytest.approx(982.0)
+    # At +2.6% the profit lock arms and the stop goes ABOVE entry.
+    ts.update_on_price("TEST", 1026.0)
+    assert ts.get_stop("TEST") == pytest.approx(1020.87)
 
 
 def test_at_one_and_a_half_times_the_risk_the_stop_locks_one_to_one():
     ts = _long(1000.0)
     ts.update_on_price("TEST", 1027.0)                 # +1.5R exactly
+    # The profit lock HANDS OVER here: once the 1:1 lock engages, the
+    # bounded R-relative design governs and Rule 3 says nothing.
     assert ts.get_stop("TEST") == pytest.approx(1018.0)
 
 
@@ -172,8 +235,14 @@ def test_a_wider_planned_stop_moves_the_lock_with_it():
     """R is the stock's own risk, not a fixed percentage. A name given a
     3% stop must run further before anything locks."""
     ts = _long(1000.0, stop_pct=0.03)
+    # THE SEAM, stated rather than hidden: R is this stock's own risk,
+    # but the profit lock's arm is a flat 2.5%, so +3.0% arms it even
+    # though that is only 1.0R here. The R-relative lock still governs
+    # what happens ABOVE it.
     ts.update_on_price("TEST", 1030.0)                 # only +1.0R
-    assert ts.get_stop("TEST") == pytest.approx(970.0)
+    assert ts.get_stop("TEST") == pytest.approx(1024.85)
+    # At 1.5R the 1:1 lock engages and Rule 3 hands over to it, so the
+    # R-relative answer is the one that stands.
     ts.update_on_price("TEST", 1045.0)                 # +1.5R
     assert ts.get_stop("TEST") == pytest.approx(1030.0)
 
@@ -208,6 +277,9 @@ def test_DEEPAKNTR_books_1_8_pct_instead_of_0_68_pct():
     peak 1,832.70, then back through 1,806."""
     ts = _long(1774.90)
     ts.update_on_price("TEST", 1832.70)                # ran 1.81R
+    # Past 1.5R, so Rule 3 has handed over and this is Rule 2's answer,
+    # unchanged. Rule 3 covers the gap BELOW this, which is where his
+    # 7-10 September trades actually died.
     assert ts.get_stop("TEST") == pytest.approx(1806.85, abs=0.05)
     assert ts.is_hit("TEST", 1806.00)
     booked = (1806.85 - 1774.90) / 1774.90 * 100
