@@ -1791,6 +1791,60 @@ def main():
     )
     reader_thread.start()
 
+    # ---- THE BOARD REBUILD WAS BLOCKING EVERYTHING. 14 Sep 2026. ----
+    #
+    #     "today i observed bot is late around mx 5 mins at some point
+    #      of time & later recovered to correct time but it is never
+    #      sync with real current time"            -- the operator
+    #
+    # dashboard_state.refresh() recomputes twenty-seven panels and it
+    # was called INLINE in the main loop, once a second. Measured from
+    # his 10 September log: 89 rebuilds over 20.0s to 98.5s, the cost
+    # every time being two panels -- `ranked` up to 35.9s and
+    # `shortlist` up to 18.6s, everything else under 3s.
+    #
+    # A rebuild that takes 98s inside a 1s loop IS the loop. Nothing
+    # else in it ran while one was in flight, and the log shows exactly
+    # that: heartbeats meant to be steady landed 85-100s apart through
+    # 10:22-10:31. So the clock froze and jumped -- which is what he
+    # saw -- and `_candidates["rows"]`, the list the tick worker hands
+    # seats from, stood as much as 98s stale. The seats filled fast with
+    # whatever was on the OLD board instead of what was moving now.
+    #
+    # So the expensive thing gets its own thread. It rebuilds as fast as
+    # it can manage and swaps the snapshot in atomically (state.py does
+    # that already, under its own lock); the main loop reads the latest
+    # one each second, free. Nothing about WHICH stocks qualify changes
+    # -- take() applies the same gates to the same rows. What changes is
+    # how old the board is when the worker reads it, and that the clock
+    # now keeps time.
+    #
+    # Effect on trading: a stock that starts moving reaches the
+    # candidate list a rebuild sooner, and the bot's clock, heartbeat,
+    # square-off check and daily-cap check all run on schedule instead
+    # of whenever a rebuild happens to finish.
+    def _board_rebuilder(stop):
+        """Rebuild the dashboard snapshot, forever, off the main loop."""
+        while not stop.is_set():
+            started = time.monotonic()
+            try:
+                dashboard_state.refresh()
+            except Exception as exc:                       # noqa: BLE001
+                # A panel that raises must not end the rebuild loop --
+                # the board would freeze silently and every later stock
+                # would be invisible to the ranker.
+                warn(f"[BOARD] Rebuild failed ({exc}). Keeping the last "
+                     f"board; retrying.")
+            # Pace it. A rebuild that finishes quickly must not spin
+            # this thread at 100% CPU on a laptop that is also running
+            # the feed -- and the panels it reads do not change faster
+            # than this anyway.
+            waited = time.monotonic() - started
+            if stop.wait(max(DASHBOARD_REFRESH_INTERVAL_SECONDS - waited,
+                             0.2)):
+                break
+
+
     def _print_dashboard_banner():
         """SAY WHERE IT IS, and say it once.
 
@@ -1981,6 +2035,16 @@ def main():
              f"is unaffected.")
     dashboard_state.refresh()  # panels fill in; the port is already open
 
+    # NOW the rebuild loop may start: every provider the panels read is
+    # wired by this line, and the first board above is already built, so
+    # the thread's first pass is a refresh rather than the first fill.
+    # Started here rather than beside the other workers for that reason.
+    board_thread = threading.Thread(
+        target=_board_rebuilder, args=(stop_event,), name="board",
+        daemon=True
+    )
+    board_thread.start()
+
     feed, feed_thread = start_feed()
     feed_state["thread"] = feed_thread
 
@@ -2100,8 +2164,14 @@ def main():
             # Dashboard snapshot refresh -- its own cadence, decoupled
             # from the heartbeat/state-save cadence, so tightening or
             # loosening one never affects the other.
+            # The REBUILD itself runs on the board thread now (see
+            # _board_rebuilder above) -- it used to be the next line
+            # here, and it is what froze this loop for up to 98s at a
+            # time. What stays is the cheap work: reading the latest
+            # board and publishing the candidate list. get_snapshot() is
+            # a lock-protected dict read, so this costs nothing and the
+            # worker gets a fresh list every second.
             if time.monotonic() - last_dashboard_refresh >= DASHBOARD_REFRESH_INTERVAL_SECONDS:
-                dashboard_state.refresh()
                 last_dashboard_refresh = time.monotonic()
 
                 # ---- THE CHECKLIST IS NOT ONLY A DOOR. 7 Aug 2026. ----
