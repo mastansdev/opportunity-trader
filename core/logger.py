@@ -186,6 +186,49 @@ def quieten_repeats(every_seconds=900):
     root.addFilter(_SayItOnce(every_seconds))
 
 
+OURS = "opportunity_trader"
+
+
+def _is_ours(record):
+    """Did the bot write this line, or did a library?"""
+    name = getattr(record, "name", "") or ""
+    return name == OURS or name.startswith(OURS + ".")
+
+
+class _LibrariesAtWarning(logging.Filter):
+    """One handler serving two loggers, with two different thresholds.
+
+    The bot's own records pass at whatever level the handler is set to.
+    A library's record needs WARNING -- the point of capturing them is
+    what BREAKS (the 403 on the proxy tunnel that never reached the
+    file), not every retry and socket close.
+    """
+
+    def filter(self, record):
+        if _is_ours(record):
+            return True
+        return record.levelno >= logging.WARNING
+
+
+class _NameForLibraries(logging.Formatter):
+    """The bot's lines keep the shape he greps; a library's carries its
+    name, because "which library said this" is the whole point.
+
+    The bot's format is byte-for-byte what _build_logger() set, so every
+    existing grep over logs/ keeps working.
+    """
+
+    def __init__(self):
+        super().__init__("%(asctime)s [%(levelname)s] %(message)s")
+        self._named = logging.Formatter(
+            "%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+
+    def format(self, record):
+        if _is_ours(record):
+            return super().format(record)
+        return self._named.format(record)
+
+
 def capture_library_errors(root=None):
     """Send THIRD-PARTY log output to the same file as everything else.
 
@@ -235,16 +278,40 @@ def capture_library_errors(root=None):
         return None
     for handler in log.handlers:
         if isinstance(handler, logging.FileHandler):
-            mirror = logging.FileHandler(
-                handler.baseFilename, encoding="utf-8", delay=True)
-            mirror.setLevel(logging.WARNING)
-            mirror.setFormatter(logging.Formatter(
-                "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"))
-            root.addHandler(mirror)
+            # ---- TWO HANDLES ON ONE FILE. 14 September 2026. ----
+            #
+            #     PermissionError: [WinError 32] The process cannot
+            #     access the file because it is being used by another
+            #     process                     -- his terminal, 7 Sep
+            #
+            # The paragraph above says "the SAME file handler is
+            # attached to root". It was not: this built a SECOND
+            # FileHandler on handler.baseFilename, so the log file was
+            # open twice in one process. RotatingFileHandler.doRollover()
+            # renames the file at LOG_MAX_BYTES, and on Windows a rename
+            # fails while another handle is open. Monday's log reached
+            # 26 MB, which is exactly when he saw it -- the rollover
+            # threw, and from that point the session was logging into a
+            # file that could not be rotated.
+            #
+            # So it is the same object now, as promised, and nothing
+            # else holds the file.
+            #
+            # ONE HANDLER, TWO AUDIENCES. The handler's level belongs to
+            # the bot's own logger (DEBUG/INFO), and a library at that
+            # level would import every urllib3 retry into a file that is
+            # already 15 MB a session. A filter draws the line instead:
+            # ours passes at the handler's level, everything else needs
+            # WARNING. That is what the mirror's setLevel(WARNING) was
+            # for, expressed in the one place that can now tell the two
+            # apart.
+            handler.addFilter(_LibrariesAtWarning())
+            handler.setFormatter(_NameForLibraries())
+            root.addHandler(handler)
             root.setLevel(min(root.level or logging.WARNING,
                               logging.WARNING))
             root._ot_file_attached = True
-            return mirror
+            return handler
     return None
 
 
