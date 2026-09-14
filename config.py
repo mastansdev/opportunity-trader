@@ -3372,6 +3372,67 @@ DAILY_LOSS_CAP_APPLIES_IN_PAPER = False
 # it on"). It is therefore PROVISIONAL: it runs in PAPER first and is
 # judged on sessions it has never seen. Turn it off by setting
 # DRIFT_EXIT_ENABLED False -- nothing else changes.
+# ==========================================================
+# A FREED SEAT IS NOT A REASON TO BUY.  14 September 2026.
+# ==========================================================
+#
+#     "do not keep instant buy when ever seat gets free. fill after
+#      complete scanning , freshness of the stock ranked, price action
+#      followed after the rank , what stock did after ranked stage
+#      incase the time between the rank & entry"
+#                                          -- the operator
+#
+# WHAT WAS HAPPENING. 39 of 95 entries (41%) landed in the first three
+# minutes -- 8 positions at 09:16:34 on 7 Sep, 9 at 09:16:38 on 8 Sep.
+# After that the book was full for 290 of the session's 306 minutes,
+# and "[SLOTS] No room for a NEW position" was logged 44 times. So the
+# only way in was when something exited, and whatever sat at the top of
+# the last board got bought the moment a seat opened -- however long
+# ago that board had ranked it.
+#
+#     move age when bought   trades      net
+#     over 60 min old            27   -21,896   <- the whole week's loss
+#
+# HOW FAR INTO THE MOVE IT ALREADY WAS, measured on the same 95 trades
+# against the minute candles (extension = price at entry vs the day's
+# OPEN, so it asks what the stock did DURING the session, not whether
+# it gapped):
+#
+#     already +4% or more    40   -16,568   avg  -414
+#     +2% to +4%             21    -8,458   avg  -403
+#     +0.5% to +2%           15    +4,023   avg  +268
+#     under +0.5%             8    +7,513   avg  +939
+#
+# Monotonic across four buckets, which is why it is believed at all:
+# 61 trades bought at 2% or more extended lost 25,026, and the 23
+# bought below that made 11,536. The bot was not picking wrong stocks
+# so much as picking them late, after the part worth having.
+#
+# THIS IS NOT THE 3% BAR. That one asks whether a move QUALIFIES, from
+# the previous close, and it stays exactly as it is. This asks how much
+# of today's move is already spent. A stock that gaps +3% and then sits
+# still is fresh by this measure; one that has ground up 5% since the
+# open is not.
+#
+# PROVISIONAL, the same as the drift exit: measured on the four
+# sessions it was chosen on. It runs in PAPER and is judged on days it
+# has not seen. ENTRY_MAX_EXTENSION_PCT = None turns it off.
+ENTRY_MAX_EXTENSION_PCT = 2.0
+
+# ---- AND THE LIST ITSELF MUST BE FRESH. ----
+#
+# The other half of his sentence: a seat opening is not new information
+# about the stock. The board is rebuilt continuously on its own thread
+# (20-98s a pass, see main._board_rebuilder), and a row is only as good
+# as the pass that produced it. Past this, the rank is not describing
+# the market any more and the bot waits for the next board rather than
+# buying off a list nobody has re-checked.
+#
+# A MECHANISM BOUND, NOT A TUNED ONE. It is set to comfortably more
+# than one slow rebuild, so in an ordinary session it refuses nothing
+# -- it is there for the pathological case, a board that has stopped
+# rebuilding while the tick worker goes on handing out seats from it.
+ENTRY_RANK_MAX_AGE_SECONDS = 120
 DRIFT_EXIT_ENABLED = True
 # How long a position gets to show something before this asks.
 DRIFT_EXIT_AFTER_MINUTES = 45

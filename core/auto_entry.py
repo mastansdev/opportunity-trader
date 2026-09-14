@@ -726,6 +726,44 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None,
     if row.get("state") == "fading":
         return "fading -- the move has already stopped working"
 
+    # ---- A FREED SEAT IS NOT A REASON TO BUY. 14 Sep 2026. ----
+    #
+    #     "do not keep instant buy when ever seat gets free ...
+    #      freshness of the stock ranked, price action followed after
+    #      the rank"                            -- the operator
+    #
+    # Both halves of that, in order: is this rank still describing the
+    # market, and how much of the move is already gone. See
+    # config.ENTRY_MAX_EXTENSION_PCT for the measurement behind the
+    # second one. Anything unreadable is NOT a refusal -- a missing
+    # reading means nothing, the rule this file already follows for the
+    # tick and the flow.
+    from config import (ENTRY_MAX_EXTENSION_PCT,
+                        ENTRY_RANK_MAX_AGE_SECONDS)
+
+    ranked_at = row.get("ranked_at")
+    if ranked_at is not None and ENTRY_RANK_MAX_AGE_SECONDS and now:
+        try:
+            age = (now - ranked_at).total_seconds()
+        except TypeError:
+            age = None
+        if age is not None and age > float(ENTRY_RANK_MAX_AGE_SECONDS):
+            return (f"the board that ranked it is {age / 60:.0f} min old "
+                    f"-- waiting for a fresh one rather than buying off a "
+                    f"list nobody has re-checked")
+
+    if ENTRY_MAX_EXTENSION_PCT is not None:
+        extension = row.get("extension_pct")
+        if extension is not None:
+            try:
+                extension = float(extension)
+            except (TypeError, ValueError):
+                extension = None
+        if extension is not None and extension >= float(ENTRY_MAX_EXTENSION_PCT):
+            return (f"already {extension:.1f}% above the day's open -- the "
+                    f"part of the move worth having has gone "
+                    f"(measured: 61 such trades lost 25,026)")
+
     held = {str(s).upper() for s in (held or [])}
     if symbol in held:
         return "already holding it -- no pyramiding"
@@ -1032,8 +1070,40 @@ def price_now(row, price_of):
     if ltp <= 0:
         return row
 
+    # WHAT THE BOARD SAID, KEPT. 14 September 2026. This line used to
+    # be the only record of the ranked price and it overwrote it, so
+    # "what did the stock do between being ranked and being bought"
+    # could not be asked at all. setdefault, not assignment: the row
+    # object survives until the next board publishes, and the first
+    # re-pricing is the one that still holds the board's own number.
+    if row.get("ranked_ltp") is None:
+        try:
+            was = float(row.get("ltp") or 0)
+        except (TypeError, ValueError):
+            was = 0.0
+        if was > 0:
+            row["ranked_ltp"] = was
+
     row["ltp"] = ltp
     row["priced_from"] = "tick"
+
+    # HOW MUCH OF TODAY'S MOVE IS ALREADY SPENT. Against the day's
+    # OPEN, so a gap is not counted as something the bot missed -- see
+    # config.ENTRY_MAX_EXTENSION_PCT for the measurement.
+    try:
+        opened = float(live.get("open") or 0)
+        if opened > 0:
+            row["extension_pct"] = (ltp - opened) / opened * 100.0
+    except (TypeError, ValueError):
+        pass
+
+    # And what it did since the rank, which is his actual question.
+    try:
+        ranked = float(row.get("ranked_ltp") or 0)
+        if ranked > 0:
+            row["drift_since_rank_pct"] = (ltp - ranked) / ranked * 100.0
+    except (TypeError, ValueError):
+        pass
 
     try:
         prev = float(live.get("close") or 0)

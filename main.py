@@ -2270,6 +2270,16 @@ def main():
                         # take() is NOT called here any more. Two
                         # callers would be two threads placing orders,
                         # and one stock could be bought twice.
+                        # WHEN THIS BOARD RANKED THEM. Stamped at
+                        # publish, which is the board that produced the
+                        # rows -- so the tick worker can tell a rank
+                        # made moments ago from one it has been holding
+                        # since the last rebuild. See
+                        # config.ENTRY_RANK_MAX_AGE_SECONDS.
+                        _ranked_at = datetime.now()
+                        for _row in _rows:
+                            if isinstance(_row, dict):
+                                _row["ranked_at"] = _ranked_at
                         _candidates["rows"] = _rows
                 except Exception as exc:                   # noqa: BLE001
                     warn(f"[RANKED] Could not route the ranker's picks "
