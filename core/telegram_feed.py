@@ -1752,19 +1752,64 @@ class TelegramFeed:
                 "role": role,
                 "quick": quick,
                 "loop_seconds": POLL_SECONDS if quick else SLOW_POLL_SECONDS,
-                "last_post": row.get("last_post"),
-                "last_read": row.get("last_read"),
+                # ---- THE FEED WAS FAST. THE CLOCK WAS LYING. ----
+                #                            14 September 2026.
+                #
+                #     "Bot is showing delayed time"   -- the operator
+                #
+                # The Telegram tab read 5h30m behind all session. The
+                # feed was not: the real arrival lag is 0.2 minutes at
+                # the median, and late_minutes beside this column said
+                # so, because _late_by() converts both stamps through
+                # core.feed_clock.to_ist().
+                #
+                # This field never did. `at` is stored tagged UTC
+                # ('2026-09-10T05:11:03+00:00') while seen_at is naive
+                # IST, and desk.html prints last_post exactly as it
+                # arrives. So the column showed 05:11 for a post that
+                # landed at 10:41 -- the offset, displayed as a delay.
+                #
+                # One clock for the whole repo. to_ist() is idempotent
+                # on a naive stamp (it reads naive as IST already), so
+                # the raw values still go to _late_by() and
+                # _channel_state() below and nothing is converted twice.
+                "last_post": self._ist_stamp(row.get("last_post")),
+                "last_read": self._ist_stamp(row.get("last_read")),
                 "late_minutes": late,
                 "held": row.get("held") or 0,
                 "pictures": row.get("pictures") or 0,
                 "pictures_read": row.get("read_back") or 0,
                 "named_a_stock": row.get("named") or 0,
-                "last_try": row.get("last_try"),
+                "last_try": self._ist_stamp(row.get("last_try")),
                 "last_error": row.get("last_error"),
                 "state": self._channel_state(role, in_season, row, late,
                                              row.get("last_post")),
             })
         return out
+
+    @staticmethod
+    def _ist_stamp(value):
+        """A stored timestamp as he reads a clock, or the raw value.
+
+        Display only. Every stamp on this panel goes through
+        core.feed_clock.to_ist() -- the one converter in the repo -- so
+        a tagged-UTC `at` and a naive-IST `seen_at` end up on the same
+        clock instead of 5h30m apart.
+
+        Unconvertible values are returned untouched: a stamp nobody can
+        parse is still better on the screen than an empty cell, and this
+        runs on the panel path where nothing may raise.
+        """
+        if not value:
+            return value
+        try:
+            from core.feed_clock import to_ist
+            moment = to_ist(value)
+        except Exception:                                  # noqa: BLE001
+            return value
+        if moment is None:
+            return value
+        return moment.strftime("%Y-%m-%d %H:%M:%S")
 
     @staticmethod
     def _late_by(posted, stored):
