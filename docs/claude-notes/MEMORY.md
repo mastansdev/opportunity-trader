@@ -34,3 +34,4 @@
 - [Late entries, measured](late-entries-measured.md) — moves over an hour old cost 21,896 on 27 trades; 41% of entries fire in the first three minutes
 - [Telegram push breaks the OCR](telegram-push-breaks-ocr.md) — a pushed photo returned an un-awaited coroutine; both halves fixed; recovery re-reads and UPDATEs, because INSERT OR IGNORE was silently dropping the repair
 - [The seat goes back when it never worked](the-seat-goes-back-when-it-never-worked.md) — DRIFTED_NO_MOVE, 14 Sep: 45 min, never +1.0%, below entry; +16,432 on the replay and the -10,669 it knowingly pays
+- [Pooled backtests are not trusted](backtests-that-club-and-average-are-not-trusted.md) — he said so 14 Sep; and my counterfactuals were worse: each rule scored against a history it would have changed
