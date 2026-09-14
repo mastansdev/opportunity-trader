@@ -149,6 +149,13 @@ KEEP_HOURS = 96
 # the second or third page.
 CATCH_UP_PAGES = 40
 
+# How many pictures one recovery pass re-reads. OCR is the expensive
+# thing in the poll loop -- see reread_missing_photos() -- so a pass
+# takes this many and the next pass takes the next ones. At 25 a cycle
+# and a 90s cycle, the ~410 lost over 7-10 Sep are back within an hour
+# of collection.
+REREAD_MAX_PER_PASS = 25
+
 # Messages per page during the walk. The public web view serves about
 # twenty whatever you ask for; the Telegram API serves exactly what you
 # ask for, and serves EVERYTHING if you ask for nothing -- which is how
@@ -2270,6 +2277,11 @@ class TelegramFeed:
                               limit=self._next_limit())
                     if due_full:
                         last_full = time.monotonic()
+                    # Then fill in any picture the push delivered with
+                    # no bytes. After the poll, so a fresh post is
+                    # stored before an old one is repaired, and bounded
+                    # so a backlog cannot starve the next cycle.
+                    self.reread_missing_photos()
                 except Exception as exc:                   # noqa: BLE001
                     warn(f"[TELEGRAM] poll cycle failed ({exc}) -- keeping "
                          f"what is already held, retrying in "
@@ -2295,6 +2307,135 @@ class TelegramFeed:
         dashboard can say so instead of showing stale rows as if they
         were current."""
         return bool(self._thread is not None and self._thread.is_alive())
+
+    # ---- THE TRANSCRIPT THE PUSH LOST. 10 September 2026. ----
+    #
+    #     "Telegram OCR Failed"                     -- the operator
+    #
+    # Half 1 (core/telegram_client._photo_bytes) stopped a pushed photo
+    # CRASHING the reader. It did not get the words back. A photo pushed
+    # inside pump()'s running loop still arrives with no bytes, so the
+    # message is stored with an empty ocr_text -- and nothing revisits
+    # it, for two independent reasons:
+    #
+    #   poll()    skip_known=True with a floor of _newest_stored_id(),
+    #             so a stored post is never asked for again.
+    #   _store()  writes with INSERT OR IGNORE and the primary key is
+    #             (channel, message_id) -- so even when catch_up() DOES
+    #             re-fetch the post and re-read the picture, the write is
+    #             dropped and the empty column stays empty.
+    #
+    # Measured 10 Sep: 125 pictures that day, 125 with no transcript, and
+    # ~410 across 7-10 Sep. Day Trader Telugu posts market-hours news AS
+    # screenshots, so that is the whole of that channel's content.
+    #
+    # This runs on the POLLER thread, where the loop is not running and
+    # the download CAN be driven. It asks Telegram for those exact post
+    # ids -- fetch(ids=...) is ONE request for up to a hundred and walks
+    # past nothing -- reads the picture, and UPDATEs the row. UPDATE is
+    # the point: it is the one write path that can fill a column that
+    # INSERT OR IGNORE refuses to touch.
+    #
+    # Effect on trading: the news inside a pushed screenshot reaches the
+    # matcher and the events store, so a stock whose only published
+    # reason was a picture can be ranked instead of silently refused. A
+    # published reason is mandatory before the ranker will look at a
+    # stock at all, so this is a door, not a display.
+    def reread_missing_photos(self, limit=None):
+        """Re-read stored pictures that were filed with no transcript.
+
+        Returns how many were recovered. Never raises -- a recovery pass
+        must not be able to stop the collection.
+        """
+        if self.client is None or not self.read_images:
+            return 0
+        cap = int(limit or REREAD_MAX_PER_PASS)
+        try:
+            with self._lock:
+                conn = sqlite3.connect(self.db_path)
+                gaps = conn.execute(
+                    "SELECT channel, message_id FROM messages "
+                    "WHERE photos IS NOT NULL AND photos != '' "
+                    "AND (ocr_text IS NULL OR ocr_text = '') "
+                    "ORDER BY at DESC LIMIT ?", (cap,)).fetchall()
+                conn.close()
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[TELEGRAM] re-read: could not list the gaps ({exc})")
+            return 0
+        if not gaps:
+            return 0
+
+        # The store keeps the channel NAME; Telegram wants the handle.
+        handle_of = {}
+        for channel in (self.channels or []):
+            handle = channel.get("handle")
+            if handle:
+                handle_of[channel.get("name") or handle] = handle
+
+        wanted = {}
+        for channel_name, message_id in gaps:
+            handle = handle_of.get(channel_name)
+            if not handle or not str(message_id).isdigit():
+                # A channel no longer configured, or a web-reader row
+                # whose id is not a Telegram post id. Left alone.
+                continue
+            wanted.setdefault((channel_name, handle), []).append(
+                int(message_id))
+
+        filled, filed = 0, []
+        for (channel_name, handle), ids in wanted.items():
+            try:
+                records = self.client.fetch(handle, ids=ids) or []
+            except Exception as exc:                       # noqa: BLE001
+                diagnostic(f"[TELEGRAM] {handle}: re-read fetch failed "
+                           f"({str(exc)[:60]})")
+                continue
+            for record in records:
+                blobs = record.get("photo_data") or []
+                if not blobs:
+                    # Telegram did not serve the image this time either.
+                    # The row keeps its empty column and a later pass
+                    # asks again.
+                    continue
+                url = record.get("url")
+                text = self._read_photo(url, data=blobs[0])
+                if not text:
+                    continue
+                at = record.get("at")
+                when = (at.isoformat() if hasattr(at, "isoformat")
+                        else str(at or ""))
+                try:
+                    with self._lock:
+                        conn = sqlite3.connect(self.db_path)
+                        conn.execute(
+                            "UPDATE messages SET ocr_text = ?, "
+                            "ocr_boxes = ? WHERE channel = ? "
+                            "AND message_id = ?",
+                            (text, _boxes_json(self._ocr_boxes.get(url)),
+                             channel_name, str(record.get("id"))))
+                        conn.commit()
+                        conn.close()
+                except Exception as exc:                   # noqa: BLE001
+                    diagnostic(f"[TELEGRAM] {handle}: could not save the "
+                               f"recovered transcript ({exc})")
+                    continue
+                filled += 1
+                said = (record.get("text") or "").strip()
+                filed.append({"text": said, "ocr_text": text, "at": when,
+                              "channel": channel_name, "url": url,
+                              "grade": record.get("grade"),
+                              "from_image": not said,
+                              "word_boxes": self._ocr_boxes.get(url)})
+
+        # The words are only worth having if they reach the matcher.
+        # remember() is idempotent, so re-filing costs one ignored
+        # INSERT -- see _file_events().
+        if filed:
+            self._file_events(filed)
+        if filled:
+            decision(f"[TELEGRAM] Recovered the text of {filled} "
+                     f"picture(s) that were filed without it.")
+        return filled
 
     def _channels_from_store(self, db_path=None):
         """Every channel that has actually delivered, from the store.
