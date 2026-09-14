@@ -290,6 +290,12 @@ EXIT_REASON_SQUARE_OFF = "SQUARE_OFF"
 EXIT_REASON_FIXED_TARGET = "FIXED_TARGET"
 EXIT_REASON_BUYING_DRIED_UP = "BUYING_DRIED_UP"
 
+# The seat given back by a position that never worked. Tagged its own
+# way so it can be COUNTED against the trades it replaces -- see
+# config.DRIFT_EXIT_ENABLED for the measurement and for why this is
+# provisional.
+EXIT_REASON_DRIFTED = "DRIFTED_NO_MOVE"
+
 # The reading compares now against fifteen minutes ago, so a position
 # younger than that is being judged against the noise around its own
 # entry. It matches STILL_BUYING_LOOKBACK in the flow module, and is
@@ -5631,6 +5637,14 @@ class Engine:
         if self._buying_dried_up(symbol, price, tick_time):
             return
 
+        # ---- AND THE ONE THAT NEVER WORKED. 14 September 2026. ----
+        #
+        # Checked AFTER the buying check on purpose: that one owns every
+        # position in profit, so by the time this is asked the position
+        # is losing and this cannot take a winner off it.
+        if self._drifted_without_working(symbol, price, tick_time):
+            return
+
         # Old fixed-bracket trades (any position opened before the
         # 2026-07-24 ATR redesign, restored from state across a
         # restart) never use the ratcheting trailing stop -- routed
@@ -5976,6 +5990,87 @@ class Engine:
                      f"be resized ({exc}). CHECK DHAN -- it may still be "
                      f"sized for the OLD quantity.")
         return exit_price
+
+    def _drifted_without_working(self, symbol, price, tick_time):
+        """Give the seat back when a position never worked. True if it did.
+
+        ---- 32 TRADES, MINUS 30,444, AND NO RULE. 14 Sep 2026. ----
+
+        Over 7-10 September, 32 positions were flattened BY HAND at
+        15:11-15:22 for a gross loss of 30,444. They drifted at -1 to
+        -2%: never far enough for the -3% stop, never up enough for the
+        buying check, which takes winners only. Nothing owned them, and
+        each one held a seat all day -- and the book was full for 290 of
+        the session's 306 minutes, so a held seat is a refused entry.
+
+        Only 7 of those 32 ever reached +1.0% at any point in the
+        session. That is the measurement this rule is built on: a
+        position that has not shown 1% in 45 minutes is not slow, it is
+        wrong.
+
+        THREE REFUSALS, each one deliberate:
+
+        LOSERS ONLY, AND ONLY AFTER THE BUYING CHECK. A position in
+        profit belongs to the trail and to _buying_dried_up(). This is
+        asked after them and refuses anything at or above entry, so it
+        can never book a winner early.
+
+        IT MUST HAVE HAD TIME. Below DRIFT_EXIT_AFTER_MINUTES it is
+        reading the noise around its own entry -- the same reason the
+        buying check waits fifteen minutes.
+
+        NO READING, NO ACTION. The high-water mark comes from the
+        trailing stop, which has tracked this position on every tick
+        since entry. No peak means the trail is not running for it, and
+        a missing reading is never read as "sell" -- the rule the
+        buying check already follows.
+
+        PROVISIONAL. Measured on the four sessions it was chosen on, so
+        it runs in PAPER and is judged on days it has not seen. The cost
+        is stated in config: it gives up about 10,669 of gains that
+        BUYING_DRIED_UP would have booked later, against 16,091
+        recovered from trades that had no rule at all.
+        """
+        from config import (DRIFT_EXIT_AFTER_MINUTES, DRIFT_EXIT_ENABLED,
+                            DRIFT_EXIT_NEVER_REACHED_PCT)
+        if not DRIFT_EXIT_ENABLED:
+            return False
+        position = self.open_positions.get(symbol)
+        if position is None:
+            return False
+        entry = position.get("entry_price")
+        if entry is None or price is None or not entry > 0:
+            return False
+        # LOSERS ONLY. Anything at or above entry is the buying check's.
+        if price >= entry:
+            return False
+
+        held = self._held_minutes(position, tick_time)
+        if held is None or held < DRIFT_EXIT_AFTER_MINUTES:
+            return False
+
+        peak = None
+        trail = getattr(self, "trailing_stop", None)
+        if trail is not None:
+            try:
+                peak = trail.get_peak(symbol)
+            except Exception:                              # noqa: BLE001
+                peak = None
+        if not peak:
+            return False
+        best_pct = (peak - entry) / entry * 100.0
+        if best_pct >= DRIFT_EXIT_NEVER_REACHED_PCT:
+            # It worked once. Whatever happens now is the trail's.
+            return False
+
+        loss = (price - entry) * (position.get("qty") or 0)
+        decision(
+            f"[DRIFTED] {symbol} at {price:.2f} -- {held:.0f} minutes held "
+            f"and it never got past {best_pct:+.2f}% (needed "
+            f"{DRIFT_EXIT_NEVER_REACHED_PCT:.1f}%). Giving the seat back "
+            f"at Rs {loss:+,.0f} rather than carrying it to the close.")
+        self._exit(symbol, price, EXIT_REASON_DRIFTED, tick_time)
+        return True
 
     def _buying_dried_up(self, symbol, price, tick_time):
         """Close a winner whose buyers have stopped. True if it did.

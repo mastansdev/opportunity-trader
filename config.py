@@ -3320,6 +3320,66 @@ MONTHLY_TARGET_RS = 5_00_000.0
 # it checks the number.
 DAILY_LOSS_CAP_APPLIES_IN_PAPER = False
 
+
+# ==========================================================
+# THE POSITION THAT JUST SAT THERE.  14 September 2026.
+# ==========================================================
+#
+#     "entries, exits all are worrking but not as we wanted"
+#     seats "filled as instant as possible but not right stocks"
+#                                          -- the operator
+#
+# Measured over 7-10 September, 95 trades, from the minute candles:
+#
+#     BUYING_DRIED_UP    46 trades   +68,770 gross   books the winners
+#     TRAILING_STOP                   fires correctly at -3.06/-3.43%
+#     MANUAL_EXIT        32 trades   -30,444 gross   NO RULE AT ALL
+#
+# Those 32 were flattened BY HAND at 15:11-15:22. They drifted at -1 to
+# -2% for most of the session: never far enough to reach the -3% stop,
+# never up enough for anything to book them. Only 7 of the 32 ever
+# reached +1.0% at any point, and the ones that did their best did it
+# in the first ten minutes.
+#
+# _buying_dried_up() will not touch them, deliberately and correctly:
+# "WINNERS ONLY. A losing trade belongs to the stop." The flaw is that
+# a position drifting sideways-down for six hours does not belong to
+# the stop either -- the stop never comes. It belongs to nothing, and
+# the seat it holds is the seat the next real opportunity needed.
+#
+# So: a position that has had long enough to work, never worked, and is
+# losing, gives the seat back.
+#
+# WHAT THE SIMULATION SAID, on those same 95 trades (replayed against
+# the minute candles, exiting at the checkpoint's close):
+#
+#     rule                                   gross delta   fired
+#     45min, never +1.0%, below entry          +16,432      30
+#       of which  MANUAL_EXIT                  +16,091
+#                 TRAILING_STOP                 +9,052   (left before -3%)
+#                 BUYING_DRIED_UP             -10,669   <- the cost
+#
+# THE COST IS REAL AND IT IS STATED: some positions that were down at
+# the 45-minute mark went on to recover and be booked by
+# BUYING_DRIED_UP. This rule closes those early and gives up 10,669 of
+# them. It is kept because the same rule recovers 16,091 from trades
+# that had no rule at all, and the net on the week is +16,432 -- the
+# book goes from -12,768 gross to +3,664.
+#
+# FOUR SESSIONS IS FOUR SESSIONS. These numbers were measured on the
+# same days they were chosen on, which is the one thing his notes say
+# never to trust ("never tune a rule on the same sessions you validate
+# it on"). It is therefore PROVISIONAL: it runs in PAPER first and is
+# judged on sessions it has never seen. Turn it off by setting
+# DRIFT_EXIT_ENABLED False -- nothing else changes.
+DRIFT_EXIT_ENABLED = True
+# How long a position gets to show something before this asks.
+DRIFT_EXIT_AFTER_MINUTES = 45
+# The high-water gain that counts as "it worked". Reached it at any
+# point? Then this rule never touches the position again -- the trail
+# and the buying check own it from there.
+DRIFT_EXIT_NEVER_REACHED_PCT = 1.0
+
 # The operator's own item-5 number: once the session's realized P&L
 # reaches this, stop taking new entries -- the day's goal is met,
 # don't hand it back. Same "existing positions still managed
