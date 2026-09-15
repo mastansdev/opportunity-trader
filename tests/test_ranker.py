@@ -197,6 +197,32 @@ def test_a_bearish_reason_cannot_justify_a_buy():
     assert "RISER" not in [c["symbol"] for c in got["rows"]]
 
 
+def test_an_old_negative_note_does_not_block_a_rising_stock():
+    """15 Sep 2026: "old negative reason must not block a rising stock."
+    TATAINVEST rose 709.55 -> 749.40 and was refused 2,017 times on
+    Earnings 360's 4 AUGUST note ("profit is just mark-to-market gains")."""
+    from datetime import datetime
+    rows = [mover("TATAINVEST", 8.0, "IT")] + [mover(f"P{i}", 1.0, "IT")
+                                               for i in range(4)]
+    note = dict(reason("Reported profit is just mark-to-market gains",
+                       direction="NEGATIVE"),
+                at="2026-08-04T13:14:16+00:00")
+    got = run(rows, mech=lambda s: note, now=datetime(2026, 9, 15, 10, 0))
+    row = next(c for c in got["rows"] if c["symbol"] == "TATAINVEST")
+    assert row["action"] == "BUY"
+    assert row["mechanism"].startswith("old negative note (04 Aug), not today's")
+
+
+def test_a_negative_reason_said_today_still_blocks_a_buy():
+    from datetime import datetime
+    rows = [mover("RISER", 8.0, "IT")] + [mover(f"P{i}", 1.0, "IT")
+                                          for i in range(4)]
+    note = dict(reason("Plant shutdown after fire", direction="NEGATIVE"),
+                at="2026-09-15T04:30:00+00:00")          # 10:00 IST today
+    got = run(rows, mech=lambda s: note, now=datetime(2026, 9, 15, 10, 30))
+    assert "RISER" not in [c["symbol"] for c in got["rows"]]
+
+
 def test_a_matching_reason_is_kept():
     rows = [mover("RISER", 8.0, "IT")] + [mover(f"P{i}", 1.0, "IT")
                                           for i in range(4)]

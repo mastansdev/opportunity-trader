@@ -74,8 +74,27 @@ Author : H&M Opportunity Trader
 """
 
 import math
+from datetime import datetime, timedelta, timezone
 
 from core.logger import diagnostic, when_it_changes
+
+
+def _said_on(at):
+    """The IST calendar date a reason was said, or None if it carries no
+    readable date. Stored stamps are ISO, usually UTC ("+00:00"); a naive
+    one is already the local IST clock. 15 September 2026."""
+    if not at:
+        return None
+    if isinstance(at, datetime):
+        got = at
+    else:
+        try:
+            got = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if got.tzinfo is not None:
+        got = got.astimezone(timezone(timedelta(hours=5, minutes=30)))
+    return got.date()
 
 # ---------------------------------------------------------------
 # What a candidate has to clear before it is even considered
@@ -993,8 +1012,38 @@ def rank(movers, gainers_losers=None, indices=None, mechanism_of=None,
         if direction in ("POSITIVE", "NEGATIVE"):
             wants = "POSITIVE" if side == "BUY" else "NEGATIVE"
             if direction != wants:
-                refuse(symbol, "reason contradicts the move")
-                continue
+                # ---- AN OLD NOTE DOES NOT OVERRULE TODAY'S PRICE. ----
+                #      15 September 2026.
+                #
+                #     "old negative reason must not block a rising stock."
+                #                                         -- the operator
+                #
+                # TATAINVEST rose from 709.55 to 749.40 on 15 Sep and was
+                # refused here 2,017 times. The only reason the bot held
+                # was Earnings 360's note of 4 AUGUST -- "profit is just
+                # mark-to-market gains", NEGATIVE. OPTIEMUS, 2,005 times,
+                # on its own 4 August note. A six-week-old verdict is not
+                # what the market is doing today.
+                #
+                # So only a contradicting reason SAID TODAY refuses. An
+                # older one stays on the row as what it is -- an old note,
+                # labelled with its date -- and stops pointing a direction.
+                # No date at all (the pre-open gapper card is today's by
+                # construction) is treated as today, so a down gap still
+                # refuses a long.
+                said = _said_on(mech.get("at"))
+                today = (now.date() if isinstance(now, datetime)
+                         else datetime.now().date())
+                if said is None or said >= today:
+                    refuse(symbol, "reason contradicts the move")
+                    continue
+                mech = dict(mech)
+                mech["direction"] = None
+                mech["old_contradiction"] = direction
+                mech["text"] = (f"old {direction.lower()} note "
+                                f"({said.strftime('%d %b')}), not today's -- "
+                                f"{text}")
+                text = mech["text"]
 
         # ---- the four measurements ----
         sector_name = row.get("sector")

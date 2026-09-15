@@ -681,6 +681,9 @@ def from_news(hits):
         return {"text": str(text).strip(),
                 "weight": float(hit.get("confidence") or 0.5),
                 "direction": str(hit.get("direction") or UNKNOWN).upper(),
+                # When it was said -- the ranker needs it to tell an old
+                # negative note from today's news. 15 September 2026.
+                "at": hit.get("at"),
                 "source": "news"}
     return None
 
