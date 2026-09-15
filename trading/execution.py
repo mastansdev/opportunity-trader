@@ -179,12 +179,19 @@ class Execution:
             # enforces it -- and it is worth remembering that a
             # reassuring message is exactly as dangerous as a false
             # alarm, and harder to catch.
+            # ---- THIS SENTENCE WENT FALSE ON 6 SEPTEMBER. ----
+            #      Found 15 September 2026.
+            #
+            # It said "the ON switch cannot make this session real".
+            # Since 6 Sep, _live_executor() returns the live executor on
+            # the switch alone ("OFF = paper & ON = Real trades thats it
+            # & final"), so pressing ON in this session DOES place real
+            # orders. A banner saying real money is safe when it is not
+            # is the worst kind of false message. It now says the rule.
             decision(
-                f"[MODE] {str(_live_mode).upper()} -- every order this "
-                f"session is simulated. The Dhan client is connected for "
-                f"READING (holdings, MTF margin) and cannot place an "
-                f"order: _live_executor() refuses on the mode, so the ON "
-                f"switch cannot make this session real.")
+                "[MODE] Switch starts OFF = PAPER, nothing reaches Dhan. "
+                "Press ON = REAL orders at Dhan (MARKET, MTF). The Dhan "
+                "client is also used to READ holdings and MTF margin.")
 
 
         # ---- SIMULATED ORDERS, REAL BOOK. 21 August 2026. ----
