@@ -201,6 +201,30 @@ def main(apply=False, min_mentions=1):
         warn("  This needs the network. Nothing was changed.")
         return
 
+    # ---- NOT A FUND, NOT AN SME. 15 September 2026. ----
+    #
+    #     "remove ... ETFs, gold bonds, SME stocks"   -- the operator
+    #
+    # 74 such rows were deleted from the master that evening. Dhan lists
+    # ETFs as NSE equities, so without this the first channel post that
+    # named GOLDBEES would have put it straight back. NSE's own ETF / SGB
+    # / SME list decides; the name test catches a fund when that list
+    # cannot be downloaded.
+    try:
+        from core.universe_builder import fetch_excluded_symbols, looks_like_a_fund
+        funds = set(fetch_excluded_symbols() or ())
+    except Exception as exc:                               # noqa: BLE001
+        warn(f"  NSE's ETF/SGB/SME list unavailable ({exc}); the name test "
+             f"alone keeps funds out.")
+        from core.universe_builder import looks_like_a_fund
+        funds = set()
+    skipped_funds = [t for t in unknown if t in funds or looks_like_a_fund(t)]
+    for t in skipped_funds:
+        unknown.pop(t, None)
+    if skipped_funds:
+        decision(f"  funds / SME, never added      : {len(skipped_funds)} "
+                 f"({', '.join(sorted(skipped_funds)[:10])})")
+
     real, not_listed = [], []
     for tag, count in sorted(unknown.items(), key=lambda x: -x[1]):
         try:

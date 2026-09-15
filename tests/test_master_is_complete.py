@@ -285,6 +285,11 @@ def test_the_seven_i_gave_up_on_are_classified(rows, symbol, sector):
     """Each took one screener.in page. I had read NSE's list for the
     NAME and never gone on to read the BUSINESS."""
     got = {r["SYMBOL"]: r for r in rows}
+    # 15 Sep 2026: every ETF / SGB / SME row was removed from the master
+    # at his instruction. AVANA, PREMIUM and VIVIDEL were SME stocks, so
+    # their absence is the removal, not a lost classification.
+    if symbol not in got and symbol in {"AVANA", "PREMIUM", "VIVIDEL"}:
+        pytest.skip(f"{symbol} was an SME stock, removed 15 Sep 2026")
     assert symbol in got, f"{symbol} is not in the master"
     assert got[symbol]["SECTOR"] == sector
 

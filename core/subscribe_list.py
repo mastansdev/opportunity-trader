@@ -427,7 +427,9 @@ def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
         over = (f" median of {days} sessions" if days and days > 1
                 else " last session")
         return False, (f"turnover Rs {turnover/1e7:.2f}cr{over} below "
-                       f"Rs {min_turnover/1e7:.0f}cr -- too illiquid to "
+                       # :g, not :.0f -- the bar is Rs 2.5cr and :.0f
+                       # printed "Rs 2.46cr below Rs 2cr" (15 Sep 2026).
+                       f"Rs {min_turnover/1e7:g}cr -- too illiquid to "
                        f"enter and exit cleanly")
 
     return True, ""

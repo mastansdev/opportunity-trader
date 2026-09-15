@@ -105,7 +105,9 @@ def test_the_live_master_still_has_rows_that_would_trip_it():
     df = pd.read_csv(ROOT / "data" / "master_stocks.csv",
                      dtype={"SECURITY ID": str})
     blank = df[df["SECTOR"].isna()]
-    assert len(blank) > 0
+    # 15 Sep 2026: the master reached zero blank sectors (funds, trusts
+    # and SME rows removed; the rest classified from NSE). The guard above
+    # still matters for the next new listing, which arrives unclassified.
     tradeable = blank[blank["SUBSCRIBE"].astype(str).str.upper() == "YES"]
     assert len(tradeable) == 0, (
         f"{len(tradeable)} TRADEABLE row(s) have no sector -- the "
