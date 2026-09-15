@@ -80,5 +80,14 @@ def test_fii_is_labelled_end_of_day():
     assert any("FII -2,300 cr" in f and "end of day" in f for f in got["facts"])
 
 
+def test_a_closing_quote_is_not_todays_move():
+    """15 Sep, 23:08: NIFTY +0.00% from the REST close beside 29 sectors
+    down read as 'mixed'."""
+    got = mc.market_now({"nifty": {"pct": 0.0, "from_rest": True}},
+                        [{"avg_change_pct": -1}] * 29)
+    assert got["nifty_pct"] is None
+    assert got["direction"] == "FALLING"
+
+
 def test_it_never_raises():
     assert mc.explain({"nifty": "junk"}, [None], "junk", [None, {}], now=NOW)

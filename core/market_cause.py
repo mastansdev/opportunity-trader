@@ -125,7 +125,13 @@ def market_now(indices=None, sectors=None, flows=None):
     indices = indices or {}
     for key, name in (("nifty_pct", "nifty"), ("banknifty_pct", "banknifty"),
                       ("vix_pct", "vix")):
-        out[key] = _f((indices.get(name) or {}).get("pct"))
+        row = indices.get(name) or {}
+        # A REST close (before the open, after the close) is not a live
+        # move: on 15 Sep at 23:08 it read NIFTY +0.00% beside 29 sectors
+        # down, and the card said "mixed". Only a live tick is today's move.
+        if row.get("from_rest") or not row.get("available", True):
+            continue
+        out[key] = _f(row.get("pct"))
     for row in (sectors or []):
         move = _f((row or {}).get("avg_change_pct"))
         if move is None:
@@ -148,6 +154,10 @@ def market_now(indices=None, sectors=None, flows=None):
     if nifty is not None and nifty < 0 and down > up:
         out["direction"] = "FALLING"
     elif nifty is not None and nifty > 0 and up > down:
+        out["direction"] = "RISING"
+    elif nifty is None and down > up:
+        out["direction"] = "FALLING"       # no live index: the sectors say
+    elif nifty is None and up > down:
         out["direction"] = "RISING"
     elif nifty is not None or up or down:
         out["direction"] = "MIXED"
