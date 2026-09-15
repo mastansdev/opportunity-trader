@@ -934,7 +934,10 @@ function needPrev(sym){
   fetch("/api/stock/" + encodeURIComponent(sym))
     .then(function(r){ return r.json(); })
     .then(function(c){
-      PREV[sym] = (c && c.prev_close != null) ? num(c.prev_close) : null;
+      /* core/stock_card nests prices under "price"; this read the top
+       * level and Prev close was blank for every stock (15 Sep 2026). */
+      var p = (c && c.price) || c || {};
+      PREV[sym] = (p.prev_close != null) ? num(p.prev_close) : null;
       if (SEL === sym && LAST) drawPlan(LAST);
     })
     .catch(function(){ PREV[sym] = null; });
@@ -996,8 +999,9 @@ function openStock(sym){
                get("/api/why/" + q), get("/api/history/" + q)])
   .then(function(all){
     if (m.hidden) return;
-    if (all[0] && all[0].prev_close != null){
-      PREV[sym] = num(all[0].prev_close);
+    var p0 = (all[0] && all[0].price) || all[0] || {};
+    if (p0.prev_close != null){
+      PREV[sym] = num(p0.prev_close);
       if (SEL === sym && LAST) drawPlan(LAST);
     }
     renderStock(sym, all[0] || {}, all[1] || {}, all[2] || {}, all[3] || {});
@@ -1080,10 +1084,44 @@ function resultsSection(c){
       }).join("") + '</div></div>';
 }
 
+/* ---- WHAT THE COMPANY DOES. 15 September 2026. ----
+ *     "i need to know which stock does what business whenever i clicked
+ *      on stock name in search or highlighted stock name at Table = What
+ *      is moving & why"                              -- the operator
+ * core/stock_card.py nests the master row under "business" and the
+ * quote under "price". This popup read both from the top level, so the
+ * business line and every price box were blank. */
+function businessSection(b){
+  if (!b || !b.name && !b.sector) return "";
+  function list(v){ return Array.isArray(v) ? v.filter(function(x){
+      return x && String(x).toUpperCase() !== "NONE"; }) : []; }
+  var themes = list(b.themes), goods = list(b.commodity_exposure),
+      sens = list(b.economic_sensitivity);
+  var rows = [
+    ["Business", b.does], ["Sector", b.sector], ["Industry", b.industry],
+    ["Type", b.type], ["Ownership", b.ownership],
+    ["Also in / themes", themes.join(" · ")],
+    ["Commodities it depends on", goods.join(" · ")],
+    ["Moves with", sens.join(" · ")]
+  ].filter(function(x){ return x[1] && String(x[1]).trim(); });
+  return '<div class="sec"><h4>What the company does</h4>'
+    + rows.map(function(x){
+        return '<div style="display:flex;gap:10px;padding:3px 0;font-size:12.5px">'
+          + '<span class="dim" style="flex:0 0 150px">' + x[0] + '</span>'
+          + '<span>' + esc(x[1]) + '</span></div>';
+      }).join("")
+    + (b.tradeable === false && b.not_tradeable_because
+        ? '<p style="margin:7px 0 0;font-size:12px;color:var(--warn)">Not traded by the bot: '
+          + esc(b.not_tradeable_because) + '</p>' : '')
+    + '</div>';
+}
+
 function renderStock(sym, c, f, w, h){
+  var b = c.business || {};
+  var p = c.price || c;
   var px = [
-    ["Prev close", c.prev_close], ["Open", c.open], ["CMP", c.last || c.ltp],
-    ["High", c.high], ["Low", c.low], ["Upper circuit", c.upper_circuit]
+    ["Prev close", p.prev_close], ["Open", p.open], ["CMP", p.last || p.ltp],
+    ["High", p.high], ["Low", p.low], ["Upper circuit", p.upper_circuit]
   ];
   var checks = Array.isArray(w.checks) ? w.checks : [];
   var events = Array.isArray(h.events) ? h.events.slice(0, 6) : [];
@@ -1092,8 +1130,10 @@ function renderStock(sym, c, f, w, h){
   $("modal").innerHTML = '<div class="sheet">'
     + '<div class="shd"><div><h3>' + esc(sym) + '</h3>'
     + '<div class="dim" style="font-size:12px">'
-    + esc([c.name, c.sector, c.industry].filter(Boolean).join(" · "))
+    + esc([b.name || c.name, b.sector || c.sector].filter(Boolean).join(" · "))
     + '</div></div><button class="xbtn" id="xclose">&times;</button></div>'
+
+    + businessSection(b)
 
     + '<div class="sec"><h4>Price</h4><div class="px6">'
     + px.map(function(x){
