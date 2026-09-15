@@ -124,8 +124,11 @@ def test_it_names_the_entrant_and_the_incumbents():
     got = si.impact_of("ULTRACEMCO", HEADLINE)
     assert got is not None
     assert got["entrant"] == "ULTRACEMCO"
+    # 15 Sep 2026: CORDSCABLE (Cords Cable Industries, control and
+    # instrumentation cables) was classified from NSE's data that day.
     assert set(got["incumbents"]) == {
-        "APARINDS", "DYCL", "KEC", "KEI", "POLYCAB", "RRKABEL", "UNIVCABLES"}
+        "APARINDS", "CORDSCABLE", "DYCL", "KEC", "KEI", "POLYCAB",
+        "RRKABEL", "UNIVCABLES"}
 
 
 def test_its_own_business_is_not_an_entry():
@@ -139,7 +142,7 @@ def test_a_distant_business_is_context_not_a_market():
     """"WIRES & CABLES" is one phrase. "SUPPORTING INFRASTRUCTURE" is
     twenty characters further on and brought 23 builders with it."""
     got = si.impact_of("ULTRACEMCO", HEADLINE)
-    assert len(got["incumbents"]) == 7
+    assert len(got["incumbents"]) == 8
     assert "JKIL" not in got["incumbents"]
     assert "PATELENG" not in got["incumbents"]
 

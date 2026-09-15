@@ -361,12 +361,16 @@ def main():
               "direction-aware -- a long near its UPPER circuit is held"
               if config.CIRCUIT_RULE_DIRECTION_AWARE else
               "blanket -- closes near EITHER limit, including winners")
+        # 15 Sep 2026: this line was stale. It never said the cap is off
+        # in paper (engine._daily_cap_applies, his 4 Sep rule), and its
+        # "about N failed trades" assumed a 3.8x-leveraged fixed-% stop
+        # that is no longer how a position's risk is set.
         check("daily limits", OK,
-              f"stop new entries at -Rs {config.DAILY_MAX_LOSS_RS:,.0f} "
-              f"(the +Rs {config.DAILY_PROFIT_TARGET_RS:,.0f} goal is "
-              f"announced only -- it no longer stops entries) "
-              f"(about {config.DAILY_MAX_LOSS_RS / (config.MTF_MARGIN_PER_POSITION_RS * 3.8 * config.HARD_STOP_FROM_ENTRY_PCT):.0f} "
-              f"failed trades)")
+              f"switch ON (real): no new entries after -Rs "
+              f"{config.DAILY_MAX_LOSS_RS:,.0f} realised in the day; "
+              f"switch OFF (paper): no loss cap. The +Rs "
+              f"{config.DAILY_PROFIT_TARGET_RS:,.0f} goal is announced "
+              f"only -- it never stops entries")
         check("staleness", OK,
               f"per-symbol, {config.STALENESS_MULTIPLE:.0f}x each stock's "
               f"own normal gap")

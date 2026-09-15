@@ -76,10 +76,17 @@ def test_the_sugar_rally_is_recognised():
 
 def test_a_member_gets_a_sentence_he_can_argue_with():
     """A count and a group, not a verdict. He can disagree with a
-    count."""
-    said = sm.co_move_reason("MAGADSUGAR", SUGAR_DAY)
+    count.
+
+    15 Sep 2026: this named MAGADSUGAR and expected "10". The morning
+    universe dropped MAGADSUGAR (turnover Rs 1.58cr, below the 2.5cr
+    bar), so it is no longer in the group and the count is 9. The test
+    is about the sentence, not about which sugar names are liquid this
+    week, so it reads the member and the count from the group."""
+    moving = sm.co_moving(SUGAR_DAY)["SUGAR"]
+    said = sm.co_move_reason(moving[0], SUGAR_DAY)
     assert said and "SUGAR" in said
-    assert "10" in said, "it does not say how many are moving"
+    assert str(len(moving)) in said, "it does not say how many are moving"
 
 
 def test_a_stock_outside_the_move_gets_nothing():
