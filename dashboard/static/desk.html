@@ -1669,9 +1669,24 @@ function drawSwitch(d){
 async function setMode(state){
   if (!IS_OPERATOR) return alert("View only — no operator link.");
   if (state === "on" && !confirm("Switch to REAL TRADES with real money?")) return;
+  /* ---- A REFUSED SWITCH SAID NOTHING. 15 September 2026. ----
+       "clicked ON , but terminal is not printed anything"
+     The server answers {success:false, error:"not ready to trade: ..."}
+     and this threw the answer away, so a refusal looked like a click
+     that did nothing. Every answer is now shown. */
   try{
-    await fetch("/api/bot_trading/" + state, {method:"POST",
+    var res = await fetch("/api/bot_trading/" + state, {method:"POST",
       headers:{"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+    var j = {};
+    try{ j = await res.json(); }catch(_){ j = {}; }
+    if (!res.ok || j.success === false){
+      alert("Switch " + state.toUpperCase() + " REFUSED: "
+        + (j.error || j.detail || ("HTTP " + res.status))
+        + (j.override ? "\n\n(" + j.override + ")" : ""));
+    } else {
+      alert("Switch is now " + (j.trading ? "ON — REAL orders at Dhan"
+                                          : "OFF — paper"));
+    }
   }catch(e){ alert("The switch did not reach the bot: " + e); }
   tick();
 }
