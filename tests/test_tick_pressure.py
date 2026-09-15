@@ -231,31 +231,3 @@ def test_the_snapshot_attaches_it_to_a_ranked_row():
     assert "tick_ohlc" in src
 
 
-def test_the_board_draws_it():
-    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
-        encoding="utf-8")
-    block = page[page.find("function reasonChips(r)"):
-                 page.find("function capOf(")]
-    assert "r.pressure" in block, (
-        "core/tick_ohlc.py keeps the book and /board does not draw it")
-
-
-def test_a_balanced_book_draws_nothing():
-    """A 52:48 book is noise wearing a number. A chip on every row
-    teaches him to stop reading chips."""
-    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
-        encoding="utf-8")
-    block = page[page.find("function reasonChips(r)"):
-                 page.find("function capOf(")]
-    assert ">= 20" in block, (
-        "every book draws a chip, however balanced -- the threshold "
-        "that keeps the row readable is gone")
-
-
-def test_the_tooltip_says_resting_orders_can_be_pulled():
-    """The single most important caveat on this reading. Size standing
-    in the book is not size that traded."""
-    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
-        encoding="utf-8")
-    assert "can be pulled" in page, (
-        "the chip presents resting depth as if it were done business")

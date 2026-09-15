@@ -435,25 +435,6 @@ def test_the_dashboard_can_switch_it_without_a_restart():
         "switching on must protect what is already open"
 
 
-def test_the_panel_shows_the_state_rather_than_assuming_it():
-    """"I thought it was on" is how a safety net fails."""
-    page = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = page[page.find("function renderBrokerStop"):]
-    block = block[:block.find("function renderBrokerSync")]
-    assert "STOP AT BROKER: OFF" in block and "STOP AT BROKER: ON" in block
-    assert "bstop-warn" in block, "OFF must read as a warning, not neutral"
-    assert "unprotected" in block
-
-
-def test_switching_off_is_confirmed_and_switching_on_is_not():
-    """Adding protection is never the dangerous direction. Removing it
-    cancels live orders at the broker."""
-    page = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = page[page.find('const bst = e.target.closest("[data-bstop]")'):]
-    block = block[:block.find('const b = e.target.closest("[data-buy]")')]
-    assert 'want === "off" && !confirm(' in block
-
-
 def test_the_state_layer_reports_which_positions_are_uncovered():
     src = open("dashboard/state.py", encoding="utf-8").read()
     assert "def build_broker_stop(self, open_positions):" in src

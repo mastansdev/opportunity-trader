@@ -292,16 +292,3 @@ def test_the_price_channel_is_still_served():
     assert '"/ws"' in server
 
 
-def test_the_trading_screen_still_polls_rather_than_listens():
-    """A KNOWN GAP, recorded so it is not rediscovered by surprise.
-
-    Delete this test the day /board opens the websocket -- it will
-    fail then, which is the point.
-    """
-    board = open("dashboard/static/board.html", encoding="utf-8").read()
-    assert "/ws/prices" not in board, (
-        "/board now listens on the price channel -- good. Remove this "
-        "test and assert the push directly.")
-    assert "setInterval(tick" in board, (
-        "the board no longer polls either, so nothing updates its "
-        "prices at all")

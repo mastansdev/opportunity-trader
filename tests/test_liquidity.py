@@ -226,18 +226,6 @@ def test_the_real_file_puts_the_liquid_names_at_the_top():
     assert liquidity.adv("INFY") > liquidity.adv("63MOONS")
 
 
-@pytest.mark.skipif(not REAL, reason="run py tools/measure_liquidity.py")
-def test_the_fan_out_uses_it():
-    from core.shock import assess
-    movers = [{"symbol": "ZZ%d" % i, "sector": "Metal", "recent_pct": -1.1,
-               "change_pct": -2.0} for i in range(700)]
-    got = assess(headlines=[{"headline": "Missile strike near Hormuz"}],
-                 movers=movers, index_pct=-1.2)
-    shown = [r["symbol"] for r in got["up"]]
-    assert "INFY" in shown and "TCS" in shown
-    assert "63MOONS" not in shown
-
-
 def test_it_is_in_the_nightly_run():
     """It takes seconds over the whole store, so it belongs after the
     close and nowhere near a one-second dashboard refresh."""

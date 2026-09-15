@@ -227,38 +227,6 @@ def test_stored_tiers_never_raises_on_a_missing_store(tmp_path):
 # ---------------------------------------------------------------
 # 4. THE PANEL DRAWS IT
 # ---------------------------------------------------------------
-def test_the_panel_draws_the_tier_chip():
-    page = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = page[page.find("const TIER_CLS"):]
-    block = block[:block.find("const col =")]
-    for tier in TIERS:
-        assert tier in block, f"{tier} has no colour on the watchlist"
-    assert "r.tier" in block
-
-
-def test_weak_is_not_drawn_as_a_warning():
-    """Their own guide: the tier counts how many of three frameworks
-    AGREE. WEAK means they disagree, not that the company is bad, and
-    a red chip would read as the opposite."""
-    page = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = page[page.find("const TIER_CLS"):]
-    block = block[:block.find("};", block.find("const TIER_CLS"))]
-    assert "WEAK:\"sl-down\"" not in block.replace(" ", "")
-    assert "EXCEPTIONAL:\"sl-up\"" in block.replace(" ", "")
-
-
-def test_the_unstated_names_are_marked_on_the_panel():
-    """They are shown in the DURING column because an unknown time must
-    be on screen from the open -- and marked, because the card never
-    said."""
-    page = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = page[page.find('panel("watchlist"'):]
-    block = block[:block.find('panel("alerts"')]
-    assert "unstated(today.UNKNOWN)" in block
-    assert "unstated(tomorrow.UNKNOWN)" in block
-    assert "r.unstated" in block
-
-
 def test_the_state_layer_feeds_the_tiers_in():
     src = open("dashboard/state.py", encoding="utf-8").read()
     assert "from core.canslim import stored_tiers as canslim_tiers" in src

@@ -116,32 +116,6 @@ def test_state_is_saved_before_the_hold():
         "_hold_dashboard_for_review(dashboard_state)")
 
 
-def test_the_page_is_told_the_session_ended():
-    """The label half. `session_ended` carries the CLOSE TIME, not a
-    boolean -- "frozen at 15:30" is a fact, "stale" is a mood."""
-    state_src = open("dashboard/state.py", encoding="utf-8").read()
-    assert "def mark_session_ended(self):" in state_src
-    assert '"session_ended": self._session_ended,' in state_src, (
-        "the flag must be re-emitted by every later _build(), or a manual "
-        "refresh in review mode clears the banner")
-
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    assert 'id="endedBanner"' in html
-    assert "snap.session_ended" in html
-    assert 'Closed " + snap.session_ended' in html, (
-        "the header clock must stop saying 'Updated' -- a ticking "
-        "timestamp reads as live whatever the numbers are doing")
-
-
-def test_the_banner_is_not_inside_a_tab():
-    """It has to be true on whichever tab is open."""
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    for tab in ("tabPre", "tabLive", "tabPost"):
-        start = html.find(f'id="{tab}"')
-        end = html.find("</section>", start)
-        assert 'id="endedBanner"' not in html[start:end]
-
-
 # ---------------------------------------------------------------
 # THE BOT SCORES ITSELF. NO CLICKS.
 # ---------------------------------------------------------------

@@ -228,8 +228,11 @@ def test_a_missing_previous_close_still_gives_the_level():
 # ---------------------------------------------------------------
 def test_main_hands_the_dashboard_the_same_quote_the_circuit_monitor_uses():
     src = open("main.py", encoding="utf-8").read()
-    assert "index_quote=dhan_rest_client.quote_data," in src
-    assert "CircuitMonitor(dhan_rest_client.quote_data" in src
+    # 15 Sep 2026: both take the SAME spaced wrapper, so together they
+    # never break Dhan's one-quote-a-second limit.
+    assert "quote_data = spaced(dhan_rest_client.quote_data)" in src
+    assert "index_quote=quote_data," in src
+    assert "CircuitMonitor(quote_data" in src
 
 
 def test_every_index_reader_goes_through_the_fallback():

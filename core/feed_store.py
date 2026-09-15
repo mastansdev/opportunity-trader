@@ -66,7 +66,37 @@ class FeedStore:
         self.db_path = db_path
         self._lock = threading.Lock()
         self._ready = False
+        self._local = threading.local()
         self._ensure()
+
+    # ---- ONE READ CONNECTION PER THREAD. 15 September 2026. ----
+    #
+    # py-spy on the live bot, 10:00: the shortlist rebuild and the tick
+    # worker were both sitting in _connect() -- a NEW sqlite connection
+    # plus a PRAGMA journal_mode=WAL for every single for_symbol() call,
+    # i.e. for every stock, every rebuild, every second. That is the
+    # rebuild that took 40-125s and starved the price thread.
+    #
+    # Reads reuse one connection per thread (sqlite connections may not
+    # cross threads). WAL is a property of the FILE, set once by the
+    # writer in _ensure(); a reader does not need to ask again. Writes
+    # still open and close their own, unchanged.
+    def _reader(self):
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.db_path, timeout=10)
+            conn.row_factory = sqlite3.Row
+            self._local.conn = conn
+        return conn
+
+    def _drop_reader(self):
+        conn = getattr(self._local, "conn", None)
+        self._local.conn = None
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
 
     # ------------------------------------------------------------
 
@@ -215,13 +245,16 @@ class FeedStore:
         if not self._ready or not symbol:
             return None
         try:
-            conn = self._connect()
-            found = conn.execute(
+            # fetchall, not fetchone: a cursor left unfinished holds a
+            # read transaction open on a reused connection, which would
+            # pin an old snapshot and stop the WAL checkpointing.
+            rows = self._reader().execute(
                 "SELECT body FROM feed_rows WHERE kind=? AND symbol=? "
                 "ORDER BY at DESC, seen_at DESC LIMIT 1",
-                (kind, str(symbol).upper())).fetchone()
-            conn.close()
+                (kind, str(symbol).upper())).fetchall()
+            found = rows[0] if rows else None
         except sqlite3.Error:
+            self._drop_reader()
             return None
         if not found:
             return None
@@ -234,13 +267,12 @@ class FeedStore:
         if not self._ready:
             return set()
         try:
-            conn = self._connect()
-            found = conn.execute(
+            found = self._reader().execute(
                 "SELECT DISTINCT symbol FROM feed_rows "
                 "WHERE kind=? AND symbol IS NOT NULL", (kind,)).fetchall()
-            conn.close()
             return {r["symbol"] for r in found}
         except sqlite3.Error:
+            self._drop_reader()
             return set()
 
     def last_write(self, kind):

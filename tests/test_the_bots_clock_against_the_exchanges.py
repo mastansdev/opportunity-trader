@@ -190,4 +190,36 @@ def test_it_is_wired_into_the_tick_worker():
     import pathlib
     src = (pathlib.Path(__file__).resolve().parents[1]
            / "main.py").read_text(encoding="utf-8")
-    assert "_clock_watch(tick_time, received_at)" in src
+    assert "_clock_watch(tick_time, received_at, symbol=symbol)" in src
+
+
+def test_a_stock_that_has_not_traded_does_not_count():
+    """15 Sep 2026: +7.5s with an empty queue. A quiet stock's quote
+    keeps its old last-trade time, so its gap grows every second."""
+    state = _fresh()
+    main._clock_watch(TICK, TICK + timedelta(seconds=1), now=0.0, state=state,
+                      symbol="LIVELY")
+    stale = datetime(2026, 9, 15, 9, 50, 0)
+    line = None
+    for i in range(40):
+        t = TICK + timedelta(seconds=i + 1)
+        main._clock_watch(t, t + timedelta(seconds=1), now=1.0, state=state,
+                          symbol="LIVELY")
+        # the same stale stamp, arriving again and again
+        main._clock_watch(stale, TICK + timedelta(seconds=i), now=1.0,
+                          state=state, symbol="QUIET")
+    line = main._clock_watch(TICK + timedelta(seconds=50),
+                             TICK + timedelta(seconds=51), now=61.0,
+                             state=state, symbol="LIVELY")
+    assert line and "+1.0s" in line, line
+
+
+def test_one_stuck_stock_cannot_move_the_median():
+    state = _fresh()
+    received = TICK + timedelta(seconds=1)
+    main._clock_watch(TICK, received, now=0.0, state=state)
+    for _ in range(30):
+        main._clock_watch(TICK, received, now=1.0, state=state)
+    main._clock_watch(TICK, TICK + timedelta(seconds=900), now=1.0, state=state)
+    line = main._clock_watch(TICK, received, now=61.0, state=state)
+    assert "+1.0s" in line and "worst +900.0s" in line

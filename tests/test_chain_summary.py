@@ -207,25 +207,6 @@ def test_one_read_is_never_a_buy():
 # ---------------------------------------------------------------
 # 4. NOTHING IS THROWN AWAY
 # ---------------------------------------------------------------
-def test_the_panel_collapses_the_chips_rather_than_dropping_them():
-    """The standing rule: do not throw away any information we are
-    receiving. The chips still exist -- they are one click away."""
-    src = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = src[src.find("if (r.chain) {"):]
-    block = block[:block.find("const inline =")]
-    assert "badges.concat(trusted, others, warn)" in block
-    assert "why-more" in block
-    assert "WHY_OPEN.has(r.symbol)" in block
-
-
-def test_every_call_has_a_colour():
-    """BUY loud, AVOID loud, WAIT quiet. The row is readable without
-    reading it."""
-    src = open("dashboard/static/index.html", encoding="utf-8").read()
-    for name in (BUY, WAIT, AVOID):
-        assert re.search(rf"\.chain-{name}\s*\{{", src), f"{name} has no CSS"
-
-
 def test_the_row_carries_the_state_and_the_sort_key():
     src = open("core/shortlist.py", encoding="utf-8").read()
     for key in ('"chain":', '"chain_state":', '"chain_rank":',

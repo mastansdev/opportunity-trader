@@ -130,44 +130,6 @@ def test_the_dashboard_computes_it():
         "the reading is computed but never attached to a ranked row")
 
 
-def test_the_page_renders_it():
-    """---- IT WAS GUARDING A DELETED FILE. 16 August 2026. ----
-
-    This opened dashboard/static/app.html, which went when four
-    dashboards were collapsed into /board and /full. The reading was
-    not ported, so core/runup.py went on computing it and state.py
-    went on attaching it to every ranked row with nothing drawing it
-    -- measured, stored, fresh, and on no screen.
-
-    The test could not say so because it read the page by name and
-    died on FileNotFoundError instead of on its own assertion. Exactly
-    what happened to delivery % the day before.
-    """
-    page = open("dashboard/static/board.html", encoding="utf-8").read()
-    assert "r.runup" in page, (
-        "core/runup.py is wired into the snapshot but /board does not "
-        "draw it -- he still cannot see it")
-    # A chip in the reason cell, beside delivery -- not a column. Most
-    # rows have no reading (no result in the window, or too little
-    # history) and an empty column on a one-table board is dead space.
-    block = page[page.find("function reasonChips(r)"):
-                 page.find("function capOf(")]
-    assert "r.runup" in block, (
-        "the runup reading is somewhere on the page but not in the "
-        "chips he actually reads while deciding")
-
-
-def test_the_runup_chip_is_silent_when_it_cannot_say():
-    """None means "no result in the window" or "not enough history".
-    Both are cannot-say, and neither may print as a judgement."""
-    page = open("dashboard/static/board.html", encoding="utf-8").read()
-    block = page[page.find("function reasonChips(r)"):
-                 page.find("function capOf(")]
-    assert "if (r.runup && r.runup.reading)" in block, (
-        "the chip must be gated on a reading existing, or a stock with "
-        "no result in the window gets a chip that means nothing")
-
-
 def test_it_reports_and_never_vetoes():
     """The line that must not move. If a future change makes SPENT
     block an entry, this fails and the change gets argued about."""

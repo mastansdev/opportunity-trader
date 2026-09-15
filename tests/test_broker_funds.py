@@ -344,16 +344,6 @@ def test_the_bot_keeps_asking_during_the_session():
         "the balance is read once at startup and never again")
 
 
-def test_the_screen_gets_the_reading_and_its_timestamp():
-    src = (ROOT / "dashboard" / "state.py").read_text(encoding="utf-8")
-    assert '"broker_funds"' in src
-    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
-        encoding="utf-8")
-    assert 'id="funds"' in page
-    assert "s.broker_funds" in page
-    assert "bf.at" in page, "the chip shows a balance with no read-time"
-
-
 def test_the_diagnostics_use_the_token_main_actually_uses():
     """Both probes built their client from DHAN_ACCESS_TOKEN in .env
     while main.py mints over TOTP, so they reported DH-901 about a bot

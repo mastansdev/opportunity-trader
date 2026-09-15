@@ -201,6 +201,9 @@ def _parse_hhmm(value):
 # not system clock drift.
 SQUARE_OFF_T = _parse_hhmm(SQUARE_OFF_TIME)
 
+# Continuous trading starts here; see process_tick's pre-open guard.
+_MARKET_OPEN_T = dtime(9, 15)
+
 
 def _entry_cutoff_reason(at_time):
     """Why a NEW position may not be opened right now, or None.
@@ -319,6 +322,9 @@ CARRIED_FROM_ENTRY = (
     "days_since_results",
     "had_reason",
     "reason_summary",
+    # The ranker's own sentence for why it bought -- 15 Sep 2026, "i
+    # want reason next to entry of any stock".
+    "entry_why",
     "rel_strength",
     "regime",
     # The fingerprint -- see core/trade_memory.LATE_COLUMNS. Facts, not
@@ -1074,9 +1080,10 @@ class Engine:
         # whole point of pausing rather than shutting the bot down:
         # "alert me about the opportunity but no buy".
         #
-        # Off on every restart, like the switch. A process that comes
-        # back while he is away comes back trading.
-        self.entries_paused = False
+        # 15 Sep 2026: no assignment here any more. entries_paused is a
+        # view of trade_controller's flag (see the property below), which
+        # starts False and is re-armed at startup only if he left it
+        # paused (restore_pause_state) -- preflight names that file.
 
         # Frozen-price feed detection -- see config.py's
         # FROZEN_PRICE_STREAK_CANDLES docstring (HFCL, 2026-07-23).
@@ -1502,6 +1509,23 @@ class Engine:
                     ENTRY_REASON_MANUAL_SHORT_DASHBOARD, SHORT, qty=qty,
                 )
 
+        # ---- NO AUTOMATIC EXIT BEFORE 09:15. 15 September 2026. ----
+        #
+        # At 09:00:00-09:00:05 this morning eight carried positions were
+        # sold during the PRE-OPEN call auction: OIL, INDORAMA, IKIO on
+        # the trailing stop and GMDCLTD, GANDHAR, SPLPETRO, SUNDRMFAST,
+        # KINGFA on the drift exit. Nothing trades continuously before
+        # 09:15; those prices were indicative auction quotes, and the
+        # ticks carried the last trade's time from the previous session
+        # (15:59:50), which is why tick_time cannot be the guard here --
+        # it read as mid-afternoon. The machine clock is correct
+        # (w32tm against time.google.com: +0.05s), so it is used.
+        #
+        # His own EXIT ALL / SELL still go through: a click is his.
+        if self._wall_clock().time() < _MARKET_OPEN_T:
+            self._process_pending_manual_exits(symbol, price, tick_time)
+            return
+
         # Circuit-proximity exit takes priority over the trailing
         # stop/manual checks below -- see _check_circuit_proximity()'s
         # own docstring. Checked every tick, same immediacy as the
@@ -1803,7 +1827,49 @@ class Engine:
         reasons = self._memory_cache[1].get(symbol)
         return "; ".join(reasons) if reasons else None
 
+    # ---- THE PRICE THREAD WAS READING THE NEWS DATABASE. 15 Sep 2026 ----
+    #
+    #     "bot must work & no lag or error or missed stop reconciled"
+    #
+    # py-spy on the live process, 10:00, 78 samples of the tick worker:
+    #
+    #     48  auto_entry.take -> _journal_pick -> _capture_reason
+    #     14  _try_structural_entry -> _record_breakout_signal
+    #                                -> _capture_reason
+    #
+    # About 80% of the thread that handles prices was spent answering
+    # "what news does this stock have" -- opening SQLite connections in
+    # core/feed_store.py -- for every candidate, every second, just to
+    # write a journal row. The answer does not change second to second.
+    # That thread fell 11 minutes behind between 09:19 and 09:30 and
+    # sold AFCONS on a low it had already left.
+    #
+    # One answer per stock per REASON_CACHE_SECONDS. A replay (on_date
+    # given) is never cached -- it must read exactly what was known then.
+    REASON_CACHE_SECONDS = 60.0
+
+    # The machine clock, as one seam tests can replace. Only the
+    # pre-open exit guard reads it.
+    @staticmethod
+    def _wall_clock():
+        return datetime.now()
+
     def _capture_reason(self, symbol, on_date=None):
+        if on_date is not None:
+            return self._capture_reason_uncached(symbol, on_date)
+        cache = self.__dict__.setdefault("_reason_cache", {})
+        key = (str(symbol).upper(), id(self.news_feed),
+               id(getattr(self, "announcements", None)),
+               id(getattr(self, "results_gate", None)))
+        now = time_module.monotonic()
+        hit = cache.get(key)
+        if hit is not None and now - hit[0] < self.REASON_CACHE_SECONDS:
+            return dict(hit[1])
+        out = self._capture_reason_uncached(symbol, on_date)
+        cache[key] = (now, dict(out or {}))
+        return out
+
+    def _capture_reason_uncached(self, symbol, on_date=None):
         """What was KNOWN about this stock at the moment of entry.
 
         The learning loop had four columns -- sector, hour, relative
@@ -3262,6 +3328,35 @@ class Engine:
             if hhmm < cutoff:
                 return min(cap, ceiling)
         return ceiling
+
+    # ---- ONE PAUSE, NOT TWO. 15 September 2026, 09:05. ----
+    #
+    #     "i clicked exitall then 'EXIT ALL sent -- new entries PAUSED'
+    #      this came . does this mean no fresh buy"
+    #
+    # It did not. There were two pause flags: the dashboard's (on
+    # trade_controller, read only by the structural lane, which is OFF)
+    # and Telegram's (engine.entries_paused, read by the ranked lane
+    # that actually buys). The dashboard said PAUSED and the bot would
+    # have gone on buying. One fact, two places, again.
+    #
+    # The fact now lives on trade_controller only; this is a view of it.
+    # Telegram PAUSE/RESUME and the dashboard buttons all move the same
+    # flag, and auto_entry.refuse_reason reads it through here.
+    @property
+    def entries_paused(self):
+        tc = getattr(self, "trade_controller", None)
+        return bool(tc is not None and tc.is_new_entries_paused())
+
+    @entries_paused.setter
+    def entries_paused(self, paused):
+        tc = getattr(self, "trade_controller", None)
+        if tc is None:
+            return
+        if paused:
+            tc.request_pause_new_entries()
+        else:
+            tc.resume_new_entries()
 
     def _already_attempted(self, symbol, direction):
         """One attempt per (symbol, direction) per day -- kills the
@@ -5771,6 +5866,37 @@ class Engine:
         if stop is None:
             return False
 
+        # ---- IT SOLD AFCONS ON A LOW FROM BEFORE THE STOP. 15 Sep 2026 ----
+        #
+        #     AFCONS  bought 09:16 at 275.99
+        #             day low 268.70 printed ~09:21-09:30
+        #             09:32:35 trail RAISED the stop to 282.28
+        #             09:32:35 "traded to 268.70, through a stop of
+        #                      282.28" -- sold at 284.56
+        #             the real price was ~299, near its upper circuit
+        #
+        # The baseline was the day's low AT ENTRY. So a low made after
+        # entry but BEFORE the stop was raised counted against the new,
+        # higher stop -- the same "it never checked the AFTER" fault as
+        # FIRSTCRY above, one step later. The stop that low "breached"
+        # did not exist when the low printed.
+        #
+        # So the baseline moves whenever the stop moves: a low already
+        # on the board when a stop is set cannot be evidence that stop
+        # was missed. Only a NEW extreme past the new stop counts.
+        #
+        # Kept on the engine, not the position: it is this process's
+        # memory of which stop it last judged. After a restart the first
+        # stop seen is compared with the ENTRY stop -- if it has already
+        # moved, the old low is from before it and does not count.
+        seen = self.__dict__.setdefault("_missed_stop_last_stop", {})
+        last = seen.get(symbol, position.get("initial_stop"))
+        seen[symbol] = stop
+        if last is not None and last != stop:
+            position["exchange_extreme_at_entry"] = now
+            return False
+        baseline = position.get("exchange_extreme_at_entry") or baseline
+
         direction = position.get("direction", LONG)
         if direction == LONG:
             # day low can only fall; a fall after entry is ours
@@ -5907,6 +6033,16 @@ class Engine:
                 except Exception as exc:                   # noqa: BLE001
                     diagnostic(f"[BROKER_STOP] {symbol}: sync failed "
                                f"({exc}); the older trigger stands.")
+
+        # His rupee profit slabs (15 Sep 2026) -- see
+        # core/trailing_stop.apply_profit_slab(). After the trail has
+        # taken this tick's new high, so the slab reads the best MTM.
+        try:
+            slab = self.trailing_stop.apply_profit_slab(symbol, position.get("qty"))
+            if slab is not None and self.broker_stop is not None:
+                self.broker_stop.sync(symbol, slab)
+        except Exception as exc:                           # noqa: BLE001
+            diagnostic(f"[SLAB] {symbol}: skipped ({exc}); the stop stands.")
 
         if not self.trailing_stop.is_hit(symbol, price):
             return

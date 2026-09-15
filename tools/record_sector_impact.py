@@ -33,7 +33,14 @@ from core import sector_impact                             # noqa: E402
 
 def main(argv=None):
     argv = list(argv if argv is not None else sys.argv[1:])
-    since = argv[0] if argv else "2026-08-01"
+    # Nightly passes nothing: the last two weeks is enough to catch
+    # anything filed since the last run, and INSERT OR REPLACE makes a
+    # re-read harmless. A date can still be given to walk further back.
+    if argv:
+        since = argv[0]
+    else:
+        from datetime import date, timedelta
+        since = (date.today() - timedelta(days=14)).isoformat()
 
     got = sector_impact.scan(since=since)
     print()

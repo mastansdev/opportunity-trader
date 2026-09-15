@@ -177,30 +177,6 @@ def test_the_dashboard_computes_it():
         "the reading is computed but never attached to a ranked row")
 
 
-def test_the_page_renders_it():
-    """---- IT WAS DRAWN ON A PAGE HE HAD LEFT. 13 Aug 2026. ----
-
-        "DELIVER % - YES"          -- operator, 8 August 2026
-
-    This checked dashboard/static/app.html. He moved to /board on
-    9 August, so the reading he asked for was being drawn on a screen
-    he no longer opened -- and when the four pages were collapsed to
-    two on 13 August and app.html was deleted, it stopped being visible
-    anywhere at all.
-
-    Measured, stored, fresh (57,674 rows), and on no screen. That is
-    the fault this project keeps repeating, and it is exactly what
-    core/knowledge.py's SHOWS column exists to make obvious.
-
-    Checked against the TRADING screen now, because that is the one he
-    watches.
-    """
-    page = open("dashboard/static/board.html", encoding="utf-8").read()
-    assert "r.delivery" in page, (
-        "core/delivery.py is wired into the snapshot but /board does "
-        "not draw it -- he still cannot see it")
-
-
 def test_it_never_vetoes_an_entry():
     """The line that must not move -- and it moved for the wrong reason
     on 19 August.

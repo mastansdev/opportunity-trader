@@ -92,16 +92,6 @@ def test_the_conflict_leads_the_row():
     assert row["why"][0].startswith("CONFLICT:"), row["why"]
 
 
-def test_a_conflict_is_never_collapsed_behind_a_plus_n():
-    """The frontend treats it as a warning. Nothing that says "your two
-    sources disagree" should require a click to discover."""
-    src = open("dashboard/static/index.html", encoding="utf-8").read()
-    fn = src[src.index("function whyCell(r)"):]
-    fn = fn[:fn.index("\n}\n")]
-    assert "CONFLICT:" in fn, (
-        "whyCell must treat a conflict as always-visible, like CROWDED")
-
-
 # ---------------------------------------------------------------
 # 2. IT MEANS LOOK, NOT BUY OR SELL
 # ---------------------------------------------------------------

@@ -129,18 +129,6 @@ def test_the_biggest_journey_leads():
     assert [r["symbol"] for r in got["up"]] == ["BIG", "SMALL"]
 
 
-def test_the_reversals_reach_the_page():
-    """Computed and not wired to the screen is this project's oldest
-    and most expensive habit -- the watchlist, the broker panel and the
-    chain summary all shipped that way."""
-    src = open("dashboard/state.py", encoding="utf-8").read()
-    assert '"reversals": self._find_reversals(rows),' in src
-    assert '"reversals": stock.get("reversals")' in src
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    assert "function renderReversals" in html
-    assert "renderReversals(_gl)" in html
-
-
 def test_both_thresholds_are_stated_not_buried():
     assert DashboardState.REVERSAL_TRAVEL_PCT >= 1.0
     assert DashboardState.REVERSAL_EXTREME_PCT >= 1.0
@@ -149,34 +137,6 @@ def test_both_thresholds_are_stated_not_buried():
 # ---------------------------------------------------------------
 # 4. THE TWO SCREENS
 # ---------------------------------------------------------------
-def test_the_live_tab_has_two_sides():
-    """The nav is BUILT, not written -- it is inserted at the top of the
-    LIVE tab at load rather than living in the markup, so that the
-    existing 39 panels are not re-laid by hand the evening before he
-    trades on them. Asserting the literal `id="otSideNav"` failed for
-    that reason; this asserts what is actually there."""
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    assert 'nav.id = "otSideNav"' in html
-    assert 'data-side="gainers"' in html and 'data-side="losers"' in html
-    assert "function otApplySide" in html
-    assert "live.insertBefore(nav" in html
-
-
-def test_an_unknown_symbol_is_never_hidden_by_the_side_filter():
-    """Losing a real row to a filter is worse than showing one extra.
-    Asserted in the DOM simulation too -- see tests/dom/side_split.sim.js
-    -- because text like this has passed on broken code before."""
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = html[html.find("function otApplySide"):]
-    block = block[:block.find("function renderReversals")]
-    assert "side === null" in block
-
-
-def test_the_side_choice_survives_a_refresh():
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    assert 'localStorage.setItem("otside"' in html
-
-
 # ---------------------------------------------------------------
 # 5. WHAT IS MOVING NOW, NOT WHAT MOVED THIS MORNING
 # ---------------------------------------------------------------
@@ -260,31 +220,3 @@ def test_the_history_does_not_grow_without_bound():
     assert _time.time() - oldest <= st.MOVING_WINDOW_SECONDS * 1.6
 
 
-def test_the_table_is_not_resorted_by_movement():
-    """A list that reshuffles under a cursor he is about to click BUY
-    in is a hazard of its own. The flag is what the panel colours by;
-    the order stays put."""
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = html[html.find("function renderMoving"):]
-    block = block[:block.find("function renderTopStrip")]
-    assert ".sort(" not in block
-
-
-def test_a_mover_carries_its_reason_or_says_it_has_none():
-    """     "without any thing stock doesn't move, that something is we
-             need to find out"
-
-    A mover with no reason beside it is the thing his whole ideology is
-    against -- so the panel says so out loud rather than leaving a
-    blank cell."""
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    assert "no news found" in html
-    assert "why_now" in html
-
-
-def test_movement_reaches_the_page():
-    src = open("dashboard/state.py", encoding="utf-8").read()
-    assert "self._mark_movement(rows)" in src
-    assert '"moving_now":' in src
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    assert "renderMoving(_gl)" in html

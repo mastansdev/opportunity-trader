@@ -51,39 +51,6 @@ def test_the_snapshot_publishes_the_floor():
     assert "MIN_TRADABLE_PRICE_RS" in src
 
 
-def test_the_board_reads_it_from_the_snapshot_not_a_literal():
-    page = BOARD.read_text(encoding="utf-8")
-    assert "s.min_tradable_price" in page, (
-        "the board does not read the floor from the snapshot")
-    block = page[page.find("const floor ="):page.find("seen[r.symbol] = 1")]
-    assert "50" not in block, (
-        "the floor is hardcoded on the page -- change config and the "
-        "screen and the engine disagree")
-
-
-def test_a_row_under_the_floor_is_dropped():
-    page = BOARD.read_text(encoding="utf-8")
-    block = page[page.find("const floor ="):page.find("seen[r.symbol] = 1")]
-    assert "< floor" in block and "continue" in block
-
-
-def test_a_position_he_already_holds_is_never_hidden():
-    """THE LINE THAT MUST NOT MOVE. If he somehow holds something
-    under the floor, hiding it would be hiding real money at risk."""
-    page = BOARD.read_text(encoding="utf-8")
-    block = page[page.find("const floor ="):page.find("seen[r.symbol] = 1")]
-    assert "inBook[r.symbol]" in block, (
-        "an open position under the floor would vanish from the board")
-
-
-def test_a_row_with_no_price_is_not_dropped():
-    """Missing is not zero. A row that has not ticked yet has no
-    price, and dropping it would empty the table pre-open."""
-    page = BOARD.read_text(encoding="utf-8")
-    block = page[page.find("const floor ="):page.find("seen[r.symbol] = 1")]
-    assert "> 0" in block, "a price of 0 or null would be treated as under"
-
-
 def test_the_engine_still_refuses_them_itself():
     """The screen change must not be mistaken for the rule. The entry
     gate is where it actually matters."""

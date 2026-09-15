@@ -152,46 +152,6 @@ def _html():
     return open("dashboard/static/index.html", encoding="utf-8").read()
 
 
-@pytest.mark.parametrize("label", ["NIFTY 50", "BANKNIFTY", "INDIA VIX"])
-def test_the_three_are_drawn_as_fixed_tiles(label):
-    assert f'idx("{label}"' in _html()
-
-
-def test_midcap_is_no_longer_a_fixed_tile():
-    """He named three. Midcap was mine."""
-    assert 'idx("MIDCAP"' not in _html()
-
-
-def test_the_fourth_tile_shows_only_the_leader():
-    """Fourteen rows pinned to the top would be another jungle. The
-    question -- WHICH sector is moving -- is answered by one name."""
-    html = _html()
-    block = html[html.find("var sectors = mi.sectors"):]
-    block = block[:block.find("host.innerHTML =")]
-    assert "sectors[0]" in block
-
-
-def test_the_click_shows_five():
-    assert "sectors.slice(0, 5)" in _html()
-
-
-def test_it_says_the_rest_are_still_running():
-    """Showing five must not read as "only five are watched"."""
-    assert "are running" in _html()
-
-
-def test_the_open_state_survives_the_one_second_repaint():
-    """The strip is rebuilt every second, so the open/shut flag cannot
-    live on the node."""
-    assert 'localStorage.setItem("otsectors"' in _html()
-
-
-def test_the_sectors_reach_the_page():
-    src = open("dashboard/state.py", encoding="utf-8").read()
-    assert '"sectors": self._build_sector_indices(idx),' in src
-    assert "mi.sectors" in _html()
-
-
 # ---------------------------------------------------------------
 # 5. THE BUG THAT KEPT THEM BLANK FOR A WEEK
 # ---------------------------------------------------------------
@@ -336,46 +296,6 @@ def test_the_sector_band_does_not_claim_to_be_proof():
 #
 # Three belong at the top because each changes what he does next: is
 # today green, can I take another, how many am I carrying.
-def test_the_ribbon_carries_the_three_that_matter():
-    html = _html()
-    for tile in ("<b>TODAY</b>", "<b>CAN DEPLOY</b>", "<b>POSITIONS</b>"):
-        assert tile in html, tile
-
-
-def test_the_nine_cards_are_shut_by_default():
-    html = _html()
-    block = html[html.find("THE NINE CARDS SHUT BY DEFAULT"):]
-    block = block[:block.find("var live = document.getElementById")]
-    assert 'localStorage.getItem("otcards") === "open"' in block, (
-        "they must be shut unless he opened them")
-
-
-def test_market_intelligence_folds_with_them():
-    """Nifty and breadth are already in the ribbon; a regime badge
-    beside three trend cells was one signal drawn three times."""
-    html = _html()
-    assert 'localStorage.getItem("otmkt")' in html
-
-
-def test_nothing_is_deleted_only_hidden():
-    """Every card still computes. CAN DEPLOY reopens the lot."""
-    html = _html()
-    block = html[html.find("THE NINE CARDS SHUT BY DEFAULT"):]
-    block = block[:block.find("var live = document.getElementById")]
-    assert "style.display" in block
-    assert "remove()" not in block
-    assert "innerHTML = \"\"" not in block
-
-
-def test_can_deploy_is_the_way_back_in():
-    html = _html()
-    assert 'id="otCapTile"' in html
-    block = html[html.find("var capTile"):]
-    block = block[:block.find("}\n\nfunction") if "}\n\nfunction" in block
-                  else len(block)][:1200]
-    assert "statCards" in block
-
-
 # ---- POSITIONS x/y --------------------------------------------------
 #     "ex- 0/0 before 09:15 - 1/1 = 1 open & non closed; 2/7 = 2 open &
 #      5 closed"
@@ -383,19 +303,3 @@ def test_can_deploy_is_the_way_back_in():
 # Exercised for real in the node harness below rather than asserted as
 # a string -- "OPEN 2" and "2 of 7 taken" are different days, and only
 # one of them says whether he is trading his plan or chasing.
-def test_positions_shows_open_over_total():
-    html = _html()
-    assert "nOpen + '/' + (nOpen + nClosed)" in html
-
-
-def test_the_total_counts_closed_trades_too():
-    html = _html()
-    assert "snap.closed_positions" in html
-
-
-def test_the_closed_count_is_spelled_out_when_there_is_one():
-    """2/7 answers "how many am I carrying" and "how many have I
-    taken". The word "closed" beside it removes the third reading."""
-    html = _html()
-    block = html[html.find("<b>POSITIONS</b>"):]
-    assert "closed" in block[:400]

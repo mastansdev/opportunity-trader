@@ -1011,6 +1011,17 @@ class DashboardState:
         # snapshot and it runs once a second.
         shortlist = self._timed("shortlist", self._build_shortlist)
 
+        # ---- 24 PANELS REMOVED FROM THE REBUILD. 15 September 2026. ----
+        #
+        #     "bot is doing too many things which we left & i asked you to
+        #      delete them completely ... let bot be simple money making
+        #      machine for me not market recording machine"  -- the operator
+        #
+        # Each was built every rebuild and read by nothing: not /desk,
+        # not the buy or sell path, not Telegram. Checked key by key. The
+        # panels that DO work behind the drawing stay -- broker_sync
+        # (reconciles his Dhan book), book, broker_stop, morning_ready,
+        # fifty_two_week, members, knowledge, auto_watchlist.
         snapshot = {
             "ready": True,
             "updated_at": datetime.now().strftime("%H:%M:%S"),
@@ -1052,15 +1063,14 @@ class DashboardState:
             # the story turned into a list of stocks with a direction, a
             # mechanism, whether the two readers agree, and whether the
             # tape is confirming it -- none of which is on Telegram.
-            "causes": self.build_causes(gainers_losers),
-            "calls": self.build_calls(shortlist, gainers_losers,
-                                      open_positions),
+            # (causes: removed 15 Sep 2026 -- nothing read it)
+            # (calls: removed 15 Sep 2026 -- nothing read it)
             # Top 50 each side WITH the shortlist's reasons joined on --
             # the panel that replaced both of the above on the LIVE tab.
             "movers": self._timed("movers", self.build_movers),
-            "breakouts": self._timed("breakouts", self._build_breakouts),
-            "actions": self._build_actions(),
-            "announcements": self._build_announcements(),
+            # (breakouts: removed 15 Sep 2026 -- nothing read it)
+            # (actions: removed 15 Sep 2026 -- nothing read it)
+            # (announcements: removed 15 Sep 2026 -- nothing read it)
             "news": self._build_news(),
             # ONE ROW PER STOCK, not one row per message. The panel
             # this replaces printed every RSS item and every Telegram
@@ -1069,12 +1079,10 @@ class DashboardState:
             "market_intelligence": self._build_market_intelligence(
                 breadth, gainers_losers, performance
             ),
-            "book_analytics": self._build_book_analytics(
-                open_positions, closed_positions
-            ),
+            # (book_analytics: removed 15 Sep 2026 -- nothing read it)
             "open_positions": self._build_open_positions(open_positions),
             "closed_positions": self._build_closed_positions(closed_positions),
-            "risk_filters": self._build_risk_filters(entry_blocked),
+            # (risk_filters: removed 15 Sep 2026 -- nothing read it)
             "performance": performance,
             "system_health": self._build_system_health(breadth["universe_size"]),
             # 2026-07-24 -- EXIT ALL popup's "Stop New Entries + Exit
@@ -1086,11 +1094,11 @@ class DashboardState:
             # 2026-07-29 -- "everything that bot knows must shown in
             # dashboard". Each of these was already computed and had
             # no way to reach the screen.
-            "alerts": self.build_alerts(),
-            "signal_counts": self.build_signal_counts(),
+            # (alerts: removed 15 Sep 2026 -- nothing read it)
+            # (signal_counts: removed 15 Sep 2026 -- nothing read it)
             "premarket": self.build_premarket(),
-            "preopen": self._preopen_cached(),
-            "calendar": self.build_calendar(),
+            # (preopen: removed 15 Sep 2026 -- nothing read it)
+            # (calendar: removed 15 Sep 2026 -- nothing read it)
             "results_today": self.build_results_today(),
             "watchlist": self._safe_watchlist(),
             # The 09:08 list -- see build_morning_watchlist().
@@ -1146,8 +1154,8 @@ class DashboardState:
             # screen must not carry its own copy of a rule, which is
             # the sediment core/rules.py exists to prevent.
             "min_tradable_price": float(MIN_TRADABLE_PRICE_RS),
-            "ai_spend": self._safe_ai_spend(),
-            "opportunity_memory": self._safe_opportunity_memory(),
+            # (ai_spend: removed 15 Sep 2026 -- nothing read it)
+            # (opportunity_memory: removed 15 Sep 2026 -- nothing read it)
             "broker_sync": self.build_broker_sync(open_positions),
             # Is there a stop at the BROKER, or only in this process?
             # 2 August 2026. He must be able to see the answer without
@@ -1155,13 +1163,13 @@ class DashboardState:
             # what happens when the process is gone, and "I thought it
             # was on" is the failure it would fail as.
             "broker_stop": self.build_broker_stop(open_positions),
-            "orders": self.build_orders(open_positions),
+            # (orders: removed 15 Sep 2026 -- nothing read it)
             "book": self.build_book(open_positions),
-            "telegram": self.build_telegram(),
-            "news_impact": self.build_news_impact(),
-            "morning_brief": self.build_morning_brief(),
-            "corporate_actions": self.build_corporate_actions(),
-            "journal": self.build_journal(),
+            # (telegram: removed 15 Sep 2026 -- nothing read it)
+            # (news_impact: removed 15 Sep 2026 -- nothing read it)
+            # (morning_brief: removed 15 Sep 2026 -- nothing read it)
+            # (corporate_actions: removed 15 Sep 2026 -- nothing read it)
+            # (journal: removed 15 Sep 2026 -- nothing read it)
             # ---- WHAT THE BOT KNOWS, AND WHETHER IT MAY USE IT ----
             #      12 August 2026.
             #
@@ -1205,9 +1213,9 @@ class DashboardState:
             "auto_watchlist": self.build_auto_watchlist(gainers_losers,
                                                         open_positions),
             "members": self.build_members(),
-            "fno": self.build_fno(gainers_losers),
-            "awareness": self.build_awareness(breadth, gainers_losers),
-            "shock": self.build_shock(gainers_losers, open_positions),
+            # (fno: removed 15 Sep 2026 -- nothing read it)
+            # (awareness: removed 15 Sep 2026 -- nothing read it)
+            # (shock: removed 15 Sep 2026 -- nothing read it)
             # THE SWITCH, read back from the engine itself -- never
             # from config. If the page says TRADING and the engine is
             # only alerting, the number on his screen is a lie about
@@ -1243,8 +1251,8 @@ class DashboardState:
             # One map, symbol -> tag, so the chip can be drawn beside a
             # symbol ANYWHERE it appears: gainers, losers, watchlist,
             # F&O, positions.
-            "result_tags": self._result_tags_today(),
-            "result_details": self.result_details(),
+            # (result_tags: removed 15 Sep 2026 -- nothing read it)
+            # (result_details: removed 15 Sep 2026 -- nothing read it)
             # ---- WHAT IS STILL STANDING. 5 September 2026. ----
             #
             #     "this is not measurement on intraday or long term
@@ -1456,16 +1464,6 @@ class DashboardState:
                 tags, detail = {}, {}
         self._tag_cache = {"day": today, "tags": tags, "detail": detail}
         return tags
-
-    def result_details(self):
-        """{symbol: {tag, score, why[], against[], images, channels}}.
-
-        Why the chip says what it says, in the words of the cards it
-        was read from. Populated by the same pass that builds the
-        chips, so it can never drift out of step with them.
-        """
-        self._result_tags_today()
-        return (getattr(self, "_tag_cache", None) or {}).get("detail") or {}
 
     def _morning_ready(self):
         """Did this morning's inputs arrive? Never guessed."""
@@ -1684,78 +1682,6 @@ class DashboardState:
         except Exception as exc:                           # noqa: BLE001
             return {"found": False, "symbol": symbol, "error": str(exc)}
 
-    def build_alerts(self):
-        """The plain-English notes the engine has raised today --
-        positions the bot was not allowed to close, trailing-stop
-        breaches it reported instead of acting on, and news that
-        landed on something held.
-
-        These existed from 29 July but reached the TERMINAL only.
-        get_manual_alerts() had zero callers -- found in that evening's
-        integration check.
-        """
-        try:
-            rows = self.engine.get_manual_alerts() or []
-        except Exception:                                  # noqa: BLE001
-            return []
-
-        # RANKED, not in arrival order -- 30 July 2026.
-        #
-        #     "Rank before considering. Bot will place those stocks in
-        #      alert box. we agreed bot will not trade"
-        #
-        # The engine raises an alert the instant a signal fires, so the
-        # list was in the order the tape happened to produce them. That
-        # is the same first-come-first-served that filled the book with
-        # THYROCARE at 0.03x volume while KSB was refused at 715x -- and
-        # an alert box read top-down reproduces the bug by eye.
-        #
-        # The score comes from the shortlist, which has already weighed
-        # the filing, the results grade, the volume, the pre-open
-        # imbalance and the channel events. An alert for a stock the
-        # shortlist never scored keeps its place by time, at the bottom,
-        # rather than being dropped -- the bot saw something there.
-        try:
-            scores = {r.get("symbol"): r.get("score")
-                      for r in (self._build_shortlist() or {}).get("rows", [])}
-        except Exception:                                  # noqa: BLE001
-            scores = {}
-        if not scores:
-            return rows
-
-        def _symbol_of(row):
-            if isinstance(row, dict):
-                return (row.get("symbol")
-                        or str(row.get("text") or "").split(" ")[1:2] or [None])[0] \
-                    if not row.get("symbol") else row.get("symbol")
-            return None
-
-        ordered = []
-        for index, row in enumerate(rows):
-            symbol = _symbol_of(row)
-            score = scores.get(symbol)
-            if isinstance(row, dict):
-                row = dict(row)
-                row["score"] = score
-            ordered.append((0 if score is None else 1,
-                            score or 0.0, -index, row))
-        # scored first, highest score first, newest first within a tie
-        ordered.sort(key=lambda item: (-item[0], -item[1], -item[2]))
-        return [item[3] for item in ordered]
-
-    def build_signal_counts(self):
-        """Taken vs refused so far today, straight off the journal
-        buffer. Answers "is the bot seeing things and saying no" at a
-        glance, instead of only after close."""
-        try:
-            journal = getattr(self.engine, "signal_journal", None)
-            if journal is None:
-                return None
-            taken, refused = journal.counts()
-            return {"taken": taken, "refused": refused}
-        except Exception:                                  # noqa: BLE001
-            return None
-
     def build_premarket(self):
         """The overnight world -- 18 numbers from core/premarket.py.
         Built 28 July, never shown."""
@@ -1763,94 +1689,6 @@ class DashboardState:
             return self.premarket.snapshot() if self.premarket else None
         except Exception:                                  # noqa: BLE001
             return None
-
-    def build_news_impact(self):
-        """Every story, and the stocks it touches.
-
-            "every news will be connected to their respective stocks in
-             memory brain and the same thing will be displayed upon
-             demand"              -- operator, 30 July 2026
-
-        Until ANTHROPIC_API_KEY is set the links carry direction
-        UNKNOWN -- "these stocks share the subject", which is a
-        different and weaker claim than "these stocks gain", and is
-        labelled as such on screen.
-        """
-        try:
-            if self.news_impact is None:
-                return {"available": False, "rows": [],
-                        "note": "impact memory not wired"}
-            snapshot = self.news_impact.status()
-            rows = self.news_impact.recent(limit=25, hours=36)
-            # THE SECTOR IS THE MISSING LINK, added 30 July 2026.
-            #
-            #     "we want complete picture of news recvd = stock -
-            #      sector linked = memory map"     -- operator
-            #
-            # The store knows story -> stock. The master file knows stock
-            # -> sector. Neither knew the chain, so the panel could say
-            # "this story touches TVSMOTOR" and never "the auto sector has
-            # four stories on it this morning" -- which is the question
-            # that decides whether a move is one company or a theme.
-            #
-            # Joined HERE rather than in core/news_impact.py on purpose:
-            # that module must not grow a dependency on the master file
-            # for a presentation concern.
-            sector_of = {}
-            if self.master_loader is not None:
-                for row in rows:
-                    for bucket in ("positive", "negative", "unknown"):
-                        for hit in (row.get(bucket) or []):
-                            symbol = hit.get("symbol")
-                            if not symbol or symbol in sector_of:
-                                continue
-                            record = self.master_loader.get_by_symbol(symbol)
-                            sector_of[symbol] = ((record or {}).get("SECTOR")
-                                                 or "—")
-                            hit["sector"] = sector_of[symbol]
-                    # second pass so every hit carries it, cached or not
-                    for bucket in ("positive", "negative", "unknown"):
-                        for hit in (row.get(bucket) or []):
-                            hit.setdefault("sector",
-                                           sector_of.get(hit.get("symbol"), "—"))
-            snapshot["rows"] = rows
-            snapshot["available"] = True
-            return snapshot
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[IMPACT] Panel build failed: {exc}")
-            return {"available": False, "rows": [], "note": str(exc)}
-
-    def build_telegram(self):
-        """The four channels the operator watches on a second screen.
-
-            "separate screens for NSE; Trading; Telegram for continous
-             updates. Now we will replace everything by our Dashboard."
-
-        Reading only. Nothing in this panel reaches core/engine.py --
-        these are anonymous third-party channels, the bot cannot tell
-        a paid promotion from a genuine call, and the standing rule is
-        that an entry needs a real reason.
-        """
-        try:
-            if self.telegram is None:
-                return {"available": False, "connected": False, "rows": [],
-                        "note": "not set up -- py tools/telegram_setup.py"}
-            snap = self.telegram.snapshot()
-            # IS IT STILL LISTENING? Added 30 July 2026. Until then the
-            # feed was polled once at startup and never again, so the
-            # panel showed 08:59's messages all day and looked exactly
-            # like a panel that was up to date. A reading panel that has
-            # silently stopped reading is worse than an empty one --
-            # nothing on screen distinguished the two.
-            try:
-                snap["polling"] = bool(self.telegram.poller_alive())
-            except Exception:                              # noqa: BLE001
-                snap["polling"] = None
-            return snap
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[TELEGRAM] Panel build failed: {exc}")
-            return {"available": False, "connected": False, "rows": [],
-                    "note": f"error: {exc}"}
 
     def build_52w(self):
         """How many of our stocks are at a 52-week high or low today.
@@ -1986,152 +1824,6 @@ class DashboardState:
         self._knowledge_cache = (now_s, out)
         return out
 
-    def build_journal(self):
-        """Every signal today, taken AND refused, WITH THE REASON.
-
-            "we will get mostly idea where we are doing wrong & what
-             needs to be corrected"          -- operator, 30 July 2026
-
-        Until now only counts() reached the screen, so "6 taken / 3
-        refused" was visible and WHICH three, and why, was not. The
-        reasons are the entire diagnostic.
-
-        Measured on this session at 12:45 -- 609 signals, and the single
-        biggest refusal reason by a wide margin:
-
-            151  book full (10 positions)
-             42  reports today, numbers not out yet
-             28  against the tape (SHORT_ONLY) -- allowed anyway
-
-        "book full" is not a judgement about the stock. It means ten other
-        names broke out first, which is an accident of timing -- and
-        core/engine.py's own comment calls it "THE most important row in
-        the journal" for exactly that reason.
-        """
-        journal = getattr(self.engine, "signal_journal", None)
-        if journal is None or not hasattr(journal, "today"):
-            return {"available": False, "rows": [], "by_reason": [],
-                    "note": "signal journal not wired"}
-        try:
-            rows = journal.today() or []
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[JOURNAL] Panel build failed: {exc}")
-            return {"available": False, "rows": [], "by_reason": [],
-                    "note": f"error: {exc}"}
-
-        counts = {}
-        slot_refused = 0
-        for r in rows:
-            if r.get("taken"):
-                continue
-            why = (r.get("refused_why") or "").strip()
-            if not why:
-                continue
-            # Collapse the confirmation count so "book full (10) -- 0 of 3"
-            # and "-- 1 of 3" group together. The cap is the reason; how
-            # many confirmations were behind it is detail.
-            key = why.split(" -- ")[0]
-            counts[key] = counts.get(key, 0) + 1
-            if key.startswith("book full"):
-                slot_refused += 1
-        by_reason = sorted(counts.items(), key=lambda kv: -kv[1])
-        return {
-            "available": True,
-            "total": len(rows),
-            "taken": sum(1 for r in rows if r.get("taken")),
-            "by_reason": [{"why": k, "count": v} for k, v in by_reason],
-            # The headline number for the first-come-first-served question.
-            "slot_refused": slot_refused,
-            "rows": [{"symbol": r.get("symbol"),
-                      "direction": r.get("direction"),
-                      "sector": r.get("sector"),
-                      "first_seen": str(r.get("first_seen") or ""),
-                      "break_price": r.get("break_price"),
-                      "taken": bool(r.get("taken")),
-                      "refused_why": r.get("refused_why"),
-                      "open_at_signal": r.get("open_positions_at_signal"),
-                      "volume_mult": r.get("volume_mult"),
-                      "results_grade": r.get("results_grade"),
-                      "confirmations": r.get("confirmations"),
-                      "fired": r.get("fired_count")}
-                     for r in rows[:120]],
-        }
-
-    def build_corporate_actions(self):
-        """Dividends, splits, bonuses and demergers, with ex-dates.
-
-        REAL corporate actions -- not to be confused with _build_actions()
-        above, which is the manual click log. Two different things with
-        confusingly similar names, and the v3 panel was reading the wrong
-        one until 30 July 2026.
-
-        Why the operator needs to see this: an ex-date inside a holding
-        period is a VETO, and the bot applies it silently. On this
-        session's own startup:
-
-            [MEMORY] Price-distorting corporate actions in effect around
-            today -- these will NOT be traded: INOXGREEN (DEMERGER)
-
-        That is the bot refusing a stock for a good reason the screen
-        never showed.
-        """
-        if self.stock_memory is None:
-            return {"available": False, "rows": [], "counts": {},
-                    "note": "stock memory not wired"}
-        try:
-            counts = self.stock_memory.event_counts() or {}
-            blocked = sorted(self.stock_memory.price_distorting_symbols() or [])
-            # ONE query, not 973.
-            #
-            # The first version of this looped over every master symbol
-            # calling facts_for(symbol) -- 973 separate SQL round trips on
-            # EVERY dashboard refresh, several times a minute. It hung the
-            # test suite outright, and on the live dashboard it would have
-            # made the refresh loop slower and slower as the universe grew,
-            # for a panel that changes about twice a week.
-            #
-            # all_symbols_with_facts() already does exactly this in a
-            # single windowed query and returns it grouped by symbol. It
-            # existed before I wrote the loop.
-            grouped = self.stock_memory.all_symbols_with_facts(
-                window_days=21) or {}
-            rows = []
-            for symbol, facts in grouped.items():
-                for fact in facts:
-                    ex = fact.get("ex_date")
-                    rows.append({"symbol": symbol,
-                                 "action": fact.get("action_type"),
-                                 "ex_date": (ex.isoformat()
-                                             if hasattr(ex, "isoformat")
-                                             else (str(ex) if ex else None)),
-                                 "detail": fact.get("detail"),
-                                 "source": fact.get("source")})
-            rows.sort(key=lambda r: r.get("ex_date") or "")
-            return {"available": True, "counts": counts,
-                    "rows": rows[:40], "total": self.stock_memory.count(),
-                    # The ones the bot will REFUSE today. This is the line
-                    # that turns a silent veto into a visible one.
-                    "not_traded": blocked}
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[MEMORY] Corporate actions panel failed: {exc}")
-            return {"available": False, "rows": [], "counts": {},
-                    "note": f"error: {exc}"}
-
-    def build_morning_brief(self):
-        """The overnight brief -- opinion, clearly labelled as opinion.
-
-        Fail-quiet like every other optional panel: no key, no client or
-        a bad answer costs this panel and nothing else.
-        """
-        if self.morning_brief is None:
-            return {"available": False,
-                    "note": "morning brief not wired -- needs "
-                            "ANTHROPIC_API_KEY and core/morning_brief.py"}
-        try:
-            return self.morning_brief.snapshot()
-        except Exception as exc:                           # noqa: BLE001
-            return {"available": False, "note": f"brief unavailable ({exc})"}
-
     def _build_institutional(self):
         """FII / DII, from whichever source actually has it.
 
@@ -2214,108 +1906,6 @@ class DashboardState:
     # orders go through, and being rate-limited mid-session is worse
     # than a five-second-old order list.
     ORDERS_MIN_SECONDS = 5
-
-    def build_orders(self, open_positions=None):
-        """Today's orders at the broker: filled, pending, rejected.
-
-        ---- THE PANEL THAT WOULD HAVE SAVED HIM RS 11,000 ----
-
-            "no NIFTY 50, BANKNIFTY, ORDERS TABLE = EXECUTED, PENDING,
-             CANCELLED"
-            "1st click no response & no way to check in dashboard, then
-             i clicked the second one. now both orders gave me loss of
-             huge amount"
-                                        -- operator, 3 August 2026
-
-        PENDING is the reason this exists. A filled order shows up as a
-        position eventually; an order sitting unconfirmed at the
-        exchange shows up NOWHERE, and that silence is what made him
-        click BUY a second time on YASHO at 09:18.
-
-        Grouped rather than listed flat, because the question he is
-        actually asking is "is anything of mine still in flight?" --
-        one number, at the top, answerable in a glance.
-
-        Never raises. `available: False` means WE COULD NOT ASK, which
-        must never be drawn the same way as "you have no orders".
-        """
-        import time
-
-        executor = getattr(self.engine, "execution", None)
-        executor = getattr(executor, "executor", executor)
-        reader = getattr(executor, "orders", None)
-        if reader is None:
-            return {"available": False,
-                    "note": "PAPER mode -- there is no broker order book."}
-
-        now = time.monotonic()
-        cached = getattr(self, "_orders_cache", None)
-        if cached is not None and now - getattr(self, "_orders_at", 0.0) \
-                < self.ORDERS_MIN_SECONDS:
-            # The broker rows are cached; the HOLDING/CLOSED labels are
-            # not. His book changes faster than this panel refetches,
-            # and a row still showing HOLDING after he exited would be
-            # a lie with money behind it.
-            return self._label_orders(cached, open_positions)
-
-        try:
-            rows = reader()
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[ORDERS] Could not read the order book: {exc}")
-            return {"available": False, "note": f"could not ask Dhan: {exc}"}
-        if rows is None:
-            return {"available": False,
-                    "note": "could not reach Dhan -- this is NOT 'no orders'"}
-
-        # Dhan's own vocabulary, mapped onto the three words he asked
-        # for. TRANSIT and PENDING both mean "at the exchange, not done"
-        # -- the state that had nowhere to show.
-        LIVE = ("PENDING", "TRANSIT", "PART_TRADED", "PARTIALLY_TRADED",
-                "OPEN", "TRIGGER_PENDING", "MODIFIED", "VALIDATION_PENDING")
-        DONE = ("TRADED", "EXECUTED", "COMPLETE", "FILLED")
-        GONE = ("CANCELLED", "CANCELED", "REJECTED", "EXPIRED")
-
-        pending, filled, cancelled = [], [], []
-        for row in (rows if isinstance(rows, list) else []):
-            status = str(row.get("orderStatus") or "").strip().upper()
-            item = {
-                "symbol": row.get("tradingSymbol") or row.get("symbol") or "",
-                "side": str(row.get("transactionType") or "").upper(),
-                "qty": row.get("quantity"),
-                "filled_qty": row.get("filledQty") or row.get("filled_qty"),
-                "price": row.get("averageTradedPrice") or row.get("price"),
-                "product": row.get("productType") or "",
-                "type": row.get("orderType") or "",
-                "status": status,
-                "order_id": row.get("orderId") or row.get("order_id") or "",
-                "at": row.get("updateTime") or row.get("createTime") or "",
-                "why": row.get("omsErrorDescription") or "",
-            }
-            if status in LIVE:
-                pending.append(item)
-            elif status in DONE:
-                filled.append(item)
-            elif status in GONE:
-                cancelled.append(item)
-            else:
-                # An unknown status is treated as STILL IN FLIGHT. The
-                # dangerous mistake is calling something finished when
-                # it is not -- that is the mistake that cost him money.
-                item["status"] = status or "UNKNOWN"
-                pending.append(item)
-
-        out = {
-            "available": True,
-            "pending": pending,
-            "filled": filled,
-            "cancelled": cancelled,
-            "n_pending": len(pending),
-            "n_filled": len(filled),
-            "n_cancelled": len(cancelled),
-        }
-        self._orders_cache = out
-        self._orders_at = now
-        return self._label_orders(out, open_positions)
 
     # ---- FIVE STATES, EACH ONE A DIFFERENT COLOUR ----
     #      3 August 2026.
@@ -2434,216 +2024,6 @@ class DashboardState:
     CAUSE_HOURS = 8
     CAUSE_MAX = 6
 
-    def build_causes(self, gainers_losers):
-        """What happened, which stocks it hits, and whether the tape agrees.
-
-        ---- THE WHOLE PIPELINE, ASSEMBLED. 3 August 2026. ----
-
-            "again why user need to bother on this? provide him the
-             completed picture. our bot had complete pipe line from
-             scratch to AI where the decision can be build along with
-             direction . why can't we make trader life simpler by using
-             advanced mechanism & sorting everything"
-
-        Today the government suggested scrapping MDR on digital
-        payments. Every part of this bot did its job:
-
-            09:28  Day Trader Telugu posts it as an IMAGE
-                   OCR reads it
-                   the matcher finds PAYTM and MOBIKWIK by name
-            09:28  core/news_impact.py REASONS outward and adds three
-                   companies nobody named -- PINELABS, CCAVENUE,
-                   FINOPB -- each with a mechanism:
-                       "Zero MDR removes a key merchant transaction fee
-                        revenue stream for Paytm's payments business"
-            09:42  News Pulse finally carries the same story
-
-        Fourteen minutes of edge, five stocks, written reasoning. He
-        saw none of it, and learned about MDR from the news.
-
-        AND THE TWO ENGINES DISAGREED
-        -----------------------------
-        core/news_impact.py said NEGATIVE for PAYTM: no MDR, no fee
-        revenue. core/ai_news.py said POSITIVE at 0.75: lower friction,
-        more volume. Both are defensible and they are opposite. The
-        tape rallied, so the AI reader was right and the rule engine
-        was wrong -- five times over.
-
-        The first build of this panel printed that argument on his
-        screen under the word CONTESTED and left him to settle it. That
-        was the mistake. A split between the two readers means this bot
-        does not have a direction, and a stock with no direction gets
-        no row -- it is dropped here, in the background, before the
-        payload is built. Averaging them would be worse still: a
-        confident nothing.
-
-        WHAT REACHES THE SCREEN
-        -----------------------
-        The story in plain words, the stock, the mechanism, BUY or
-        SELL. The tape check, the confidence scores and the
-        disagreement all still run -- they decide the ORDER and decide
-        what is withheld -- but they are the bot's reasoning, not his
-        reading. "volumes supports the data" is his rule; enforcing it
-        is this function's job, not his.
-        """
-        if self.news_impact is None:
-            return {"rows": [], "note": "news impact not wired"}
-        try:
-            stories = self.news_impact.recent(limit=40,
-                                              hours=self.CAUSE_HOURS)
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[CAUSE] Could not read the impact store: {exc}")
-            return {"rows": [], "note": str(exc)}
-
-        gl = gainers_losers or {}
-        live = {}
-        for side in ("gainers", "losers"):
-            for row in gl.get(side) or []:
-                live[row.get("symbol")] = row
-
-        rows = []
-        for story in stories:
-            hits = (story.get("positive") or []) + (story.get("negative") or [])
-            if not hits:
-                continue
-
-            stocks = []
-            for hit in hits:
-                symbol = hit.get("symbol")
-                now = live.get(symbol) or {}
-                said = str(hit.get("direction") or "").upper()
-
-                # The other reader's verdict on the same symbol, from
-                # the event store's ai_direction column.
-                other = self._ai_direction(symbol)
-                contested = bool(other and other != said)
-
-                pct = now.get("change_pct")
-                if pct is None:
-                    agrees = None
-                elif said == "POSITIVE":
-                    agrees = pct > 0
-                else:
-                    agrees = pct < 0
-
-                stocks.append({
-                    "symbol": symbol,
-                    "direction": said,
-                    "confidence": hit.get("confidence"),
-                    "why": hit.get("reason"),
-                    "change_pct": pct,
-                    "moving": now.get("moving"),
-                    "recent_pct": now.get("recent_pct"),
-                    # None means "no price yet", which is not the same
-                    # as "the tape disagrees".
-                    "tape_agrees": agrees,
-                    "contested_by_ai": contested,
-                    "ai_says": other if contested else None,
-                })
-
-            # ---- THE BOT DECIDES. HE DOES NOT ARBITRATE. ----
-            #      3 August 2026.
-            #
-            #   "i do not want user to trouble with some highfive name
-            #    ("tape agrees / disagrees", "contested") . why again &
-            #    again repeated mistakes. do u really think the user can
-            #    able to understand the words & act on it? even if he
-            #    understand why bot needs to show ? let the background
-            #    work as required but on dashboard end user will see the
-            #    impacted direction of the impacted stock & JUST BUY /
-            #    SELL"
-            #
-            # He is right. Today's MDR story is the proof: news_impact
-            # said NEGATIVE on all five payment stocks, ai_news said
-            # POSITIVE, and the tape rallied. Two readers, one wrong,
-            # and my answer was to print the argument on his screen and
-            # let him referee it while a position moved.
-            #
-            # A stock the readers split on is a stock this bot does not
-            # have an answer for. It is REMOVED. Not greyed out, not
-            # flagged, not annotated -- removed, because an action he
-            # cannot take is noise, and today the action on offer would
-            # have been a SHORT into a rally.
-            #
-            # The disagreement is still recorded (see the diagnostic
-            # below) so core/outcomes.py can score which reader is right
-            # over time. That is background work. It is not his problem.
-            dropped = [s for s in stocks if s["contested_by_ai"]]
-            for s in dropped:
-                diagnostic(
-                    f"[CAUSE] {s['symbol']} withheld: news_impact says "
-                    f"{s['direction']}, the AI reader says {s['ai_says']}. "
-                    f"No agreed direction, so no button.")
-            stocks = [s for s in stocks if not s["contested_by_ai"]]
-            if not stocks:
-                continue
-
-            # ---- A CAUSE HAS TO HAVE EFFECTS. 3 August 2026. ----
-            #
-            #   "WHY THINGS ARE MOVING ... showing like same the news i
-            #    do not want this type at all. once you check u will
-            #    get better clarity than i say. pls check"
-            #
-            # Checked, and he is right. Read out of the real
-            # news_memory.db, eleven of the twelve stories here were a
-            # single company's own earnings:
-            #
-            #   #BUTTERFLY  Earnings -> Press Release   1 stock
-            #   #SAMHI      Earnings -> Press Release   1 stock
-            #   #THOMASCOOK Earnings -> Press Release   1 stock
-            #
-            # That is not cause and effect. It is the News panel and the
-            # Filed Today panel, printed a third time in a different
-            # typeface -- and both of those already carry it with a
-            # button.
-            #
-            # The twelfth was the whole point of this panel:
-            #
-            #   #INDUSTOWER  concall says telecom towers are shifting
-            #                from lead-acid to lithium-ion
-            #                -> INDUSTOWER, GRAVITA, POCL
-            #
-            # Two of those three are companies the message never names.
-            # Nobody reading the filing would have found them, and no
-            # feed prints them. THAT is what he built this bot for:
-            #
-            #   "without any thing stock doesn't move, that something is
-            #    we need to find out"
-            #
-            # So one stock is not a cause -- it is news about a company,
-            # and it has two homes already. Two or more is a chain.
-            if len(stocks) < self.CAUSE_MIN_STOCKS:
-                continue
-
-            # Strongest conviction first, then whatever is moving.
-            stocks.sort(key=lambda s: (-(s["confidence"] or 0),
-                                       -abs(s.get("recent_pct") or 0)))
-            confirmed = sum(1 for s in stocks if s["tape_agrees"] is True)
-            # A routing note is not a headline. "Concall Recording ->
-            # Concall Transcript" describes how the bot moved a file
-            # between two of its own stages; the MECHANISM the readers
-            # extracted is what actually happened, and it is already
-            # sitting on the strongest stock.
-            rows.append({
-                "headline": _headline_for(story, stocks),
-                "at": story.get("at") or story.get("seen_at"),
-                "source": story.get("source"),
-                "stocks": stocks,
-                "n_stocks": len(stocks),
-                "confirmed": confirmed,
-                # Background bookkeeping. Nothing renders these -- they
-                # exist so core/outcomes.py can grade the two readers
-                # against what the stocks actually did.
-                "withheld": [s["symbol"] for s in dropped],
-                "contested": bool(dropped),
-            })
-
-        # A story the market is acting on outranks one it has ignored.
-        rows.sort(key=lambda r: (-r["confirmed"], -r["n_stocks"]))
-        return {"rows": rows[:self.CAUSE_MAX],
-                "note": "" if rows else "no reasoned story in the last "
-                                        f"{self.CAUSE_HOURS} hours"}
-
     # How often the REST fallback may ask. The tiles refresh every
     # second; Dhan's quote endpoint must not be asked every second.
     INDEX_REST_SECONDS = 30
@@ -2750,65 +2130,6 @@ class DashboardState:
 
     # Ten a side, the same count he asked for in the pre-open panel.
     FNO_TOP = 10
-
-    def build_fno(self, gainers_losers):
-        """F&O stocks only: what is up, what is down, biggest first.
-
-        ---- ONE CHIP, ONE VIEW. 4 August 2026. ----
-
-            "keep that F&O tab inside the fixed box as chip if i click
-             on that it shows me whats happening in those stocks which
-             are gaining by how much % & which are falling ... make two
-             tables with top 10 Gainers & losers of F&O"
-            "do not mix up them."
-
-        My first attempt put ALL / NIFTY 50 / F&O beside the side switch
-        and used it to narrow every table on the LIVE tab. One button
-        changed the whole screen, which is not what he asked for and is
-        the opposite of a dashboard that eases the work.
-
-        This is a panel of its own, fed by the same movers the LIVE
-        tables use, filtered to the F&O list and cut to ten a side.
-        Nothing else on the page changes when he opens it.
-        """
-        members = self.build_members().get("fno") or {}
-        symbols = set(members.get("symbols") or [])
-        if not symbols:
-            return {"available": False,
-                    "note": "F&O membership not loaded -- "
-                            "py tools/index_members.py"}
-
-        rows = []
-        for side in ("gainers", "losers"):
-            for row in (gainers_losers or {}).get(side) or []:
-                symbol = str(row.get("symbol") or "").upper()
-                if symbol in symbols and row.get("change_pct") is not None:
-                    rows.append(row)
-
-        rows.sort(key=lambda r: -(r.get("change_pct") or 0))
-        up = [r for r in rows if (r.get("change_pct") or 0) > 0]
-        down = [r for r in rows if (r.get("change_pct") or 0) < 0]
-
-        def dress(items):
-            out = []
-            for row in items:
-                out.append({
-                    "symbol": row.get("symbol"),
-                    "sector": row.get("sector"),
-                    "ltp": row.get("ltp"),
-                    "change_pct": row.get("change_pct"),
-                    "recent_pct": row.get("recent_pct"),
-                    "moving": row.get("moving"),
-                    "coverage": _coverage(row.get("symbol")),
-                })
-            return out
-
-        return {"available": True,
-                "gainers": dress(up[:self.FNO_TOP]),
-                # Biggest faller first, not smallest.
-                "losers": dress(list(reversed(down))[:self.FNO_TOP]),
-                "n_members": len(symbols),
-                "n_moving": len(rows)}
 
     def build_auto_watchlist(self, gainers_losers, open_positions):
         """His three rows, built by the bot, on every refresh.
@@ -2966,6 +2287,27 @@ class DashboardState:
         # and market breadth need every stock, candidate or not.
         # Narrowing what is TRADED must not narrow what is SEEN.
         movers = []
+
+        # ---- IT BOUGHT SUNTV ON FRIDAY'S MOVE. 15 September 2026. ----
+        #
+        # main.py restarted at 11:03:51. The first board (11:04:03) had
+        # no live quotes yet, so _compute_gl_rows() fell back to the
+        # 11 Sep close, labelled at_close -- correct for a SCREEN after
+        # hours. But this ranker read those rows as today's tape:
+        #
+        #     SUNTV  "up 4.5%, 32x its normal volume"  <- 11 Sep: 455.55
+        #            -> 476.00 on 3.3M shares
+        #     today: open 476, high 476, low 469, down 1.1%, 1.1 lakh sh
+        #
+        # and it was bought at 11:04:40 at 471.64. The same stale rows
+        # were behind this morning's AWFIS/PINELABS/SMSPHARMA "first
+        # seen 07:08" picks, refused at 10:30 only by the restart pause.
+        #
+        # A closed session is something to look at, never to buy from.
+        if self._board_is_a_past_close(gainers_losers):
+            return {"available": True, "rows": [],
+                    "note": "the board is showing a past close -- nothing "
+                            "is a candidate until live quotes arrive"}
 
         # ---- THE RANKER COULD NOT SEE THE STOCK EARLY. ----
         #      4 August 2026.
@@ -3745,6 +3087,15 @@ class DashboardState:
         got["available"] = True
         return got
 
+    def _board_is_a_past_close(self, gainers_losers):
+        """True when this build's rows came from a stored close, not a
+        live quote. Either marker is enough -- the table's own flag, or
+        the rows _compute_gl_rows() handed this build."""
+        if (gainers_losers or {}).get("at_close"):
+            return True
+        rows = getattr(self, "_gl_rows_this_build", None) or []
+        return bool(rows) and all(r.get("at_close") for r in rows)
+
     def build_early(self, gainers_losers, open_positions):
         """The 09:15-09:30 lane: stocks graded EXCELLENT/GREAT/GOOD
         overnight, bought at the open before the day's tape widens the
@@ -3770,6 +3121,10 @@ class DashboardState:
             from core.position_plan import plan as position_plan
         except Exception as exc:                           # noqa: BLE001
             return {"available": False, "note": str(exc)}
+
+        # Same guard as build_ranked: a past close is never a candidate.
+        if self._board_is_a_past_close(gainers_losers):
+            return {"available": True, "rows": []}
 
         movers = []
         for side in ("gainers", "losers"):
@@ -4416,88 +3771,6 @@ class DashboardState:
         cache[name] = (time.monotonic() + lifetime, got)
         return got
 
-    def _safe_opportunity_memory(self):
-        """What each opportunity family has been WORTH, measured.
-
-        ---- THE LEARNING HAD NO SCREEN. 16 August 2026. ----
-
-            "i want you to develop a brain memory module in to bot with
-             self evaluating & learning"
-
-        core/opportunity.py does the evaluating. It ran only in Python,
-        so the half he actually asked for -- what the memory has
-        LEARNED -- was invisible. Fifth time in two days that something
-        measured and stored reached no screen.
-
-        CACHED FOR 30 MINUTES. evaluate() walks 13,996 events and every
-        family's price history: 3.8 seconds measured. The board polls
-        every 3, so calling it per snapshot would stall the screen --
-        which is the fault that made the whole dashboard stale on 13
-        August. The readings span 120 days; they do not move inside
-        half an hour.
-
-        (That last sentence is deliberately not worded with the word
-        for a mean. tests/test_cause_and_effect.py slices this file
-        from build_causes to _ai_direction and forbids that word in the
-        span, to stop two disagreeing readers being blended into one
-        number. It strips # comments but not docstrings, so this method
-        landing inside the slice broke it -- the SEVENTH time a test
-        here has matched prose. The rule it protects is right and has
-        nothing to do with this panel, so the sentence moved rather
-        than the test.)
-        """
-        import time
-
-        now = time.time()
-        held = getattr(self, "_opp_memory_cache", None)
-        if held and now - held[0] < 1800:
-            return held[1]
-        try:
-            from core import opportunity
-
-            got = opportunity.evaluate()
-            got["verdict"] = opportunity.verdict()
-            got["computed_at"] = datetime.now().strftime("%H:%M")
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[OPPORTUNITY] Memory panel failed ({exc}). Everything "
-                 f"else is unaffected.")
-            got = {"available": False, "families": [], "note": str(exc)}
-        self._opp_memory_cache = (now, got)
-        return got
-
-    def _safe_ai_spend(self):
-        """This month's AI spend, per purpose. Never raises.
-
-        Per PURPOSE, not just a total, because the total is what hid
-        the problem: the ledger reported Rs 126 while three of five
-        paid callers wrote no row at all. A breakdown makes a caller
-        that stops reporting visible, where a single number does not.
-        """
-        try:
-            import sqlite3
-            from core.ai_budget import AiBudget
-
-            meter = AiBudget()
-            got = meter.status()
-            got["by_purpose"] = []
-            try:
-                con = sqlite3.connect(f"file:{meter.db_path}?mode=ro",
-                                      uri=True)
-                got["by_purpose"] = [
-                    {"purpose": p, "calls": c, "rs": round(r or 0.0, 2)}
-                    for p, c, r in con.execute(
-                        "SELECT purpose, COUNT(*), SUM(rs) FROM spend "
-                        "WHERE month = ? GROUP BY purpose ORDER BY SUM(rs) "
-                        "DESC", (got["month"],))]
-                con.close()
-            except Exception:                              # noqa: BLE001
-                pass
-            return got
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[AI SPEND] Panel failed ({exc}). Everything else is "
-                 f"unaffected.")
-            return {"available": False, "note": str(exc)}
-
     def _opportunity_for(self, row):
         """Which opportunity families this row's own reason text names.
 
@@ -4573,52 +3846,6 @@ class DashboardState:
                          "pct": data["pct"]})
         return rows
 
-    def build_awareness(self, breadth, gainers_losers):
-        """Market Situational Awareness. Informs; never blocks.
-
-            "Market Situational Awareness is the ability to understand
-             the complete market environment before making any trading
-             decision & during open position."
-            "bot must inform the situation like a caution not block"
-
-        Five legs, all of which the bot was already fetching and none
-        of which reached a decision. See core/awareness.py -- the whole
-        reason this exists is that market_trend, regime and
-        overall_score were three labels on his screen driven by one
-        number.
-        """
-        try:
-            from core.awareness import assess
-        except Exception as exc:                           # noqa: BLE001
-            return {"available": False, "note": str(exc)}
-
-        adv = (breadth or {}).get("advances") or 0
-        dec = (breadth or {}).get("declines") or 0
-        total = adv + dec
-        pct = (adv / total * 100) if total else None
-
-        try:
-            reading = assess(
-                premarket=self.premarket,
-                indices=self.indices(),
-                sector_rows=self._sector_rows(gainers_losers),
-                # NOT self.market_flows. That is the NSE fetcher alone,
-                # which has never returned a figure. _build_institutional
-                # is the one that falls through to News Pulse, and it is
-                # what the ribbon draws -- two sources for one number
-                # would put "FII bought 277" on the line and "no flow
-                # figure yet" in the panel beneath it, in the same
-                # second. 3 August 2026.
-                market_flows=_Snapshot(self._build_institutional()),
-                breadth_pct=pct,
-                events=self._recent_headlines(),
-            )
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[AWARE] Reading failed: {exc}")
-            return {"available": False, "note": str(exc)}
-        reading["available"] = True
-        return reading
-
     def _recent_headlines(self, hours=2, limit=25):
         """Market-wide headlines from the channels, newest first.
 
@@ -4641,85 +3868,6 @@ class DashboardState:
                         "at": row.get("at")})
         return out
 
-    def build_shock(self, gainers_losers, open_positions):
-        """Something big just happened -- or nothing did.
-
-            "if any major thing happened & how the bot knows? how it
-             will alert the trader to look into the matter"
-
-        Returns {} when the market is behaving. A screen that finds a
-        crisis every day finds none on the day there is one.
-        """
-        try:
-            from core.shock import assess
-        except Exception as exc:                           # noqa: BLE001
-            return {}
-
-        movers = []
-        for side in ("gainers", "losers"):
-            for row in (gainers_losers or {}).get(side) or []:
-                movers.append(row)
-
-        nifty = {}
-        if self.index_monitor:
-            nifty = (self.indices() or {}).get("nifty") or {}
-
-        # open_positions is a DICT keyed by symbol, not a list of rows.
-        # I wrote the list version from memory and ten existing tests
-        # caught it -- iterating a dict yields the keys, so every
-        # position arrived here as a bare string. Both shapes are
-        # accepted now because build_shock is also called directly from
-        # tests. 3 August 2026.
-        held = []
-        items = (open_positions or {})
-        pairs = items.items() if hasattr(items, "items") \
-            else [((p or {}).get("symbol"), p) for p in items]
-        for symbol, position in pairs:
-            if not isinstance(position, dict):
-                continue
-            entry = position.get("entry_price")
-            last = None
-            try:
-                last = self.market_data.get_latest_price(symbol)
-            except Exception:                              # noqa: BLE001
-                last = None
-            pct = None
-            if entry and last:
-                pct = round((last - entry) / entry * 100, 2)
-                if str(position.get("direction", "LONG")).upper() == "SHORT":
-                    pct = -pct
-            # ---- pnl WAS ALWAYS None. 24 August 2026. ----
-            #
-            # A stored position has entry_price, qty, initial_stop,
-            # atr_stop, stop_mode -- and no "pnl" key, so this read
-            # returned None every time and the shock banner showed his
-            # open positions with a blank P&L during the one event
-            # where it matters. `change_pct` on the line above already
-            # had a fallback to the computed `pct`; this one did not.
-            #
-            # Found by tests/test_the_code_reads_keys_that_exist.py,
-            # which was written after the same fault printed
-            # "[CARRY] ... stop None" for three protected positions.
-            qty = position.get("qty")
-            pnl = position.get("pnl")
-            if pnl is None and entry and last and qty:
-                pnl = round((last - entry) * qty, 2)
-                if str(position.get("direction", "LONG")).upper() == "SHORT":
-                    pnl = -pnl
-            held.append({"symbol": symbol,
-                         "qty": qty,
-                         "change_pct": position.get("change_pct", pct),
-                         "pnl": pnl})
-
-        try:
-            return assess(headlines=self._recent_headlines(),
-                          movers=movers,
-                          index_pct=nifty.get("pct"),
-                          positions=held) or {}
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[SHOCK] Check failed: {exc}")
-            return {}
-
     def _ai_direction(self, symbol):
         """What core/ai_news.py said about this stock most recently.
 
@@ -4735,107 +3883,6 @@ class DashboardState:
             if row.get("symbol") == symbol and row.get("ai_direction"):
                 return str(row["ai_direction"]).upper()
         return None
-
-    def build_calls(self, shortlist, gainers_losers, open_positions):
-        """The short list of things worth acting on. Nothing else.
-
-        ---- WHAT THE WHOLE DASHBOARD IS FOR. 3 August 2026. ----
-
-            "user(my) worry should be about taking trades which are
-             sorted curated by bot. not by searching & calculating to
-             trade. thats can be done by anywhere if dashboard is not
-             efficient . today i almost lost my temper & loss moved to
-             20K at one time. but as markets are good & recovered today
-             which is not guaranteed on every day & i can't take trade
-             on the clumsy dashboards"
-
-        Every ingredient for this already existed and none of it was
-        ever assembled into an answer. The shortlist scored stocks. The
-        movement pass knew which were running. The chain knew BUY from
-        AVOID. The gate knew what was blocked. He got all four as
-        separate panels and had to do the join himself, by eye, while a
-        position moved against him.
-
-        This does the join.
-
-        A stock earns a place only if ALL of these are true:
-
-            it has a REASON        at least one chip -- a result, an
-                                   order, a filing. "without any thing
-                                   stock doesn't move, that something
-                                   is we need to find out"
-            it is MOVING NOW       the reason is being acted on by the
-                                   market, in the last fifteen minutes
-            the chain says GO      BUY or SHORT, never WAIT or AVOID
-            it is TRADEABLE        not blocked, not already held
-
-        Four filters, and the last two are the ones that make it short.
-        Six rows maximum, because a list he has to scroll is a list he
-        has to search.
-
-        Empty is a legitimate answer and is said out loud. A screen
-        that always finds six things to trade is a screen that will
-        find six things on a day with nothing worth doing.
-        """
-        rows = (shortlist or {}).get("rows") or []
-        if not rows:
-            return {"rows": [], "note": "nothing scored yet"}
-
-        gl = gainers_losers or {}
-        moving = {}
-        for side in ("gainers", "losers"):
-            for row in gl.get(side) or []:
-                if row.get("moving"):
-                    moving[row.get("symbol")] = row
-
-        held = set(open_positions or {})
-        out = []
-        for row in rows:
-            symbol = row.get("symbol")
-            if not symbol or symbol in held:
-                continue
-            state = str(row.get("chain_state") or "").upper()
-            if state not in ("BUY", "SHORT"):
-                continue
-            if not (row.get("support") or 0):
-                continue
-            live = moving.get(symbol)
-            if not live:
-                continue
-            if row.get("veto"):
-                continue
-
-            direction = "SHORT" if (live.get("recent_pct") or 0) < 0 else "BUY"
-            out.append({
-                "symbol": symbol,
-                "action": direction,
-                "ltp": row.get("ltp"),
-                "change_pct": row.get("change_pct"),
-                "recent_pct": live.get("recent_pct"),
-                "sector": row.get("sector"),
-                "grade": row.get("channel_grade"),
-                "grade_from": row.get("channel_grade_from"),
-                # The single strongest reason, already sorted by weight
-                # in core/shortlist.py. He gets one line, not five
-                # chips to weigh himself.
-                "why": (row.get("why") or [None])[0],
-                "why_all": row.get("why") or [],
-                "support": row.get("support"),
-                "against": row.get("against"),
-                "score": row.get("score"),
-                "news": (live.get("why_now") or {}).get("text"),
-                # Has the bot ever seen this stock trade? YASHO had a
-                # BUY button here on the first live day with zero price
-                # history behind it. 3 August 2026.
-                "coverage": _coverage(symbol),
-            })
-            if len(out) >= self.CALLS_MAX:
-                break
-
-        return {"rows": out,
-                "note": "" if out else
-                        "nothing meets the bar right now -- a reason, "
-                        "movement behind it, and a clear call"}
 
     def build_book(self, open_positions):
         """EVERY position you hold, wherever the order came from.
@@ -5159,79 +4206,6 @@ class DashboardState:
         return {"available": True, "today": today, "today_count": len(today),
                 "soon": soon[:20], "held_reporting_today": held,
                 "watchlist": watch}
-
-    def build_calendar(self):
-        """FOMC / RBI / CPI -- what is coming and whether it lands
-        inside a session.
-
-            "it doesn't know when FED meeting, RBI Meeting will
-             happen"              -- operator, 29 July 2026
-
-        Static dates, no network. Shown, never acted on: the operator
-        settled that himself -- FOMC resolves at 23:30 IST while he is
-        flat, so there is nothing to pause. RBI at ~10:00 IST is the
-        one that lands with positions open, and what to do about that
-        is his call, not a rule.
-        """
-        try:
-            from core.econ_calendar import recent, upcoming
-            out = upcoming()
-            # WHAT ALREADY HAPPENED, added 30 July 2026. upcoming() only
-            # looks forward, so last night's FOMC -- a date sitting in the
-            # bot's own FOMC_2026 list -- was invisible on the morning it
-            # mattered, and the panel showed the NEXT one 48 days out.
-            #
-            #     "last night FED meeting but today bot doesn't know
-            #      anything about that & why markets are weakly opened"
-            #
-            # The event that explains a tape is always in the past by the
-            # time you are trading it.
-            out["recent"] = recent()
-            return out
-        except Exception as exc:                           # noqa: BLE001
-            warn(f"[CALENDAR] Panel build failed: {exc}")
-            return None
-
-    def _preopen_cached(self):
-        """The pre-open book, built ONCE per session.
-
-        ---- 8.9 GB OF A FROZEN NUMBER. 29 August 2026 ----
-
-            "i need the bot to be precise & earn not to collection
-             agent"                        -- operator, 29 Aug 2026
-
-        NSE collects orders 09:00-09:08 and matches them 09:08-09:12
-        into one opening price per stock. After 09:12 the exchange
-        publishes NOTHING more: the book is finished.
-
-        build_preopen() was called on every snapshot cycle anyway.
-        Measured on 29 August:
-
-            snapshot payload   1,275,565 bytes
-            preopen            1,065,470 bytes = 84% of it
-            ~8,308 cycles a session -> 8.9 GB re-serialised
-
-        At 14:30 the bot was still rebuilding this morning's opening
-        auction, in full, every 2.6 seconds, for data that could not
-        have changed since 09:12. That is not collecting -- it is
-        re-packaging a finished thing, and it was 84% of every
-        dashboard refresh.
-
-        Rebuilt while the book is still forming (before 09:15), then
-        frozen for the day. Keyed on the DATE so tomorrow builds its
-        own, and a None result is never cached -- an empty answer at
-        09:02 must not become the answer at 11:00.
-        """
-        from datetime import date, datetime
-        today = date.today().isoformat()
-        cache = getattr(self, "_preopen_cache", None)
-        if cache and cache.get("day") == today and cache.get("book") is not None:
-            return cache["book"]
-        book = self.build_preopen()
-        # Only freeze it once the book is closed and real.
-        if book is not None and datetime.now().strftime("%H:%M") >= "09:15":
-            self._preopen_cache = {"day": today, "book": book}
-        return book
 
     def build_preopen(self):
         """NSE's 09:00-09:12 book -- where every stock opens, and the
@@ -5733,7 +4707,8 @@ class DashboardState:
         # Never overrides live data -- `if rows` returns above.
         if not rows:
             rows = self._gl_rows_from_the_close()
-        self._panel_ms["gl_rows"] = (time.perf_counter() - _gl_started) * 1000.0
+        self.__dict__.setdefault("_panel_ms", {})["gl_rows"] = (
+            time.perf_counter() - _gl_started) * 1000.0
         self._gl_rows_this_build = rows
         return rows
 
@@ -6177,6 +5152,14 @@ class DashboardState:
         result = {
             "sector_gainers": sector_gainers,
             "sector_losers": sector_losers,
+            # ---- EVERY SECTOR, FOR THE RANKER. 15 September 2026. ----
+            # The two lists above are the top 10 each way, for the screen.
+            # core/ranker.sector_moves() read ONLY those, so a sector in
+            # the middle of the table (~9 of 29 on a mixed day) had no
+            # move at all: RAYMOND and FIRSTCRY read "sector unknown" with
+            # their SECTOR filled in the master, and the "beating its
+            # sector" gate was silently skipped for every stock in them.
+            "sectors_all": [dict(r) for r in sector_rows],
             "built_at": datetime.now().strftime("%H:%M:%S"),
         }
         self._sector_gainers_losers_cache = result
@@ -6214,58 +5197,8 @@ class DashboardState:
             "built_at": stock["built_at"],
             "sector_gainers": sector["sector_gainers"],
             "sector_losers": sector["sector_losers"],
+            "sectors_all": sector.get("sectors_all") or [],
             "sector_built_at": sector["built_at"],
-        }
-
-    def _build_actions(self):
-        """The action log, SERVER-side (2026-07-28).
-
-        It lived in the browser first, and a page refresh wiped it. The
-        operator runs two or three screens, so a record only the
-        clicking screen can see is not a record -- he could click on one
-        monitor, watch another, and never learn the click died.
-
-        Held on the TradeController so it survives a refresh, appears on
-        every screen at once, and outlives a browser crash.
-        """
-        controller = getattr(self.engine, "trade_controller", None)
-        if controller is None or not hasattr(controller, "actions"):
-            return {"rows": [], "available": False}
-        try:
-            rows = controller.actions()
-        except Exception:                                  # noqa: BLE001
-            return {"rows": [], "available": False}
-        return {
-            "rows": rows,
-            "failures": sum(1 for r in rows if not r.get("ok")),
-            "available": True,
-        }
-
-    def _build_breakouts(self):
-        """Fresh Breakouts panel (2026-07-28).
-
-        Every structural signal the engine produced today, newest first,
-        INCLUDING the ones it refused. On 2026-07-28 the engine fired
-        breakouts on TVSMOTOR, NTPCGREEN, KTKBANK and dozens more, the
-        SHORT_ONLY regime refused all of them silently, and no panel
-        existed to show either fact. The operator watched TVS run with
-        no idea his own bot had already spotted it.
-
-        Fail-open: no feed wired (tests, dashboard_preview) returns an
-        empty panel, never an error.
-        """
-        feed = getattr(self.engine, "breakout_feed", None)
-        if feed is None:
-            return {"rows": [], "count": 0, "available": False}
-        try:
-            rows = feed.snapshot(limit=BREAKOUT_PANEL_COUNT)
-        except Exception:                                  # noqa: BLE001
-            return {"rows": [], "count": 0, "available": False}
-        return {
-            "rows": rows,
-            "count": len(rows),
-            "active": sum(1 for r in rows if r.get("status") == "ACTIVE"),
-            "available": True,
         }
 
     def _build_shortlist(self):
@@ -6413,27 +5346,6 @@ class DashboardState:
                         or datetime.now().strftime("%H:%M:%S"),
         }
 
-    def _build_announcements(self):
-        """Today's filings as they land. No throttle -- the watcher keeps
-        its own list in memory and this is a dict copy, so reading it on
-        every refresh costs nothing and the panel stays current.
-
-        `available: False` is deliberately different from an empty list.
-        "Nothing filed yet" and "we cannot see the news" must never look
-        the same to someone deciding whether to buy."""
-        if self.announcement_watcher is None:
-            return {"available": False, "rows": [], "count_today": 0,
-                    "note": "watcher not running"}
-        try:
-            snap = self.announcement_watcher.snapshot(
-                limit=ANNOUNCEMENT_PANEL_COUNT)
-            snap["available"] = True
-            return snap
-        except Exception as e:
-            warn(f"[NEWS] Panel build failed: {e}")
-            return {"available": False, "rows": [], "count_today": 0,
-                    "note": f"error: {e}"}
-
     def _build_news(self):
         """High-conviction news. Same shape as the announcements panel so
         the frontend treats them alike. `available: False` is deliberately
@@ -6541,6 +5453,9 @@ class DashboardState:
                 "fixed_target": fixed_target,
                 "rr": _rr(direction, position["entry_price"], last_price, initial_stop),
                 "entry_reason": position.get("entry_reason"),
+                # Why it was bought, in words -- see the closed rows.
+                "entry_why": position.get("entry_why"),
+                "reason_summary": position.get("reason_summary"),
                 # The operator's own column names, 30 July. CMP and MTM
                 # are what he says out loud; last_price and pnl are what
                 # the old dashboard reads. Both are sent -- renaming
@@ -7504,6 +6419,12 @@ class DashboardState:
                 "exit_price": exit_price,
                 "exit_time": _fmt_time(record.get("exit_time")),
                 "entry_reason": record.get("entry_reason"),
+                # WHY IT WAS BOUGHT, in words. 15 Sep 2026: "i want
+                # reason next to entry of any stock". entry_why is the
+                # ranker's sentence (from today's restart on);
+                # reason_summary is the older short form.
+                "entry_why": record.get("entry_why"),
+                "reason_summary": record.get("reason_summary"),
                 "exit_reason": record.get("exit_reason"),
                 "holding_seconds": record.get("holding_seconds"),
                 "initial_stop": initial_stop,
@@ -7596,77 +6517,6 @@ class DashboardState:
                 out["peak_at"] = _fmt_time(peak_at) if direction == "LONG" \
                     else None
         return out
-
-    def _build_risk_filters(self, entry_blocked):
-        """Surfaces exactly why a stock did or didn't trade today --
-        panic-flagged sectors (core/sector_monitor.py), the
-        news-contradiction / sector-panic block ledger
-        (core/engine.py's entry_blocked), frozen-feed symbols
-        (core/engine.py's get_frozen_symbols() -- see
-        FROZEN_PRICE_STREAK_CANDLES's config.py docstring, added
-        2026-07-23 after HFCL's feed froze for ~4 hours live), and
-        circuit-proximity symbols (core/engine.py's
-        get_circuit_flagged_symbols() -- see
-        CIRCUIT_PROXIMITY_PCT's config.py docstring, the PROACTIVE
-        follow-up added the same evening: close ahead of a circuit
-        lock, not just detect it after the fact)."""
-        blocked = []
-        for symbol, directions in entry_blocked.items():
-            for direction, reason in directions.items():
-                blocked.append({
-                    "symbol": symbol,
-                    "direction": direction,
-                    "reason": reason,
-                })
-        blocked.sort(key=lambda r: (r["symbol"], r["direction"]))
-
-        # ---- 45 ROWS SAYING ONE THING, 2 August 2026 ----
-        #
-        # On the live panel this list ran to about forty-five rows,
-        # every one of them reading
-        #
-        #     AADHARHFC   LONG   reports today, numbers not out yet
-        #     AAVAS       LONG   reports today, numbers not out yet
-        #     ...
-        #
-        # It occupied more of the page than gainers and losers put
-        # together and carried one fact: results are due and the bot
-        # will not act before they land. That is a COUNT, not a list.
-        #
-        # Grouped by reason, so the screen says "45 stocks: reports
-        # today, numbers not out yet" and the names are one click
-        # away. Nothing is dropped -- `blocked` is returned in full
-        # beside it, because a stock the bot refused is exactly what
-        # tools/refused_review.py exists to interrogate.
-        by_reason = {}
-        for row in blocked:
-            key = str(row.get("reason") or "no reason recorded")
-            by_reason.setdefault(key, []).append(row["symbol"])
-        grouped = sorted(
-            ({"reason": reason, "count": len(names),
-              "symbols": sorted(set(names))}
-             for reason, names in by_reason.items()),
-            key=lambda r: -r["count"])
-
-        panic_sectors = []
-        if self.sector_monitor is not None:
-            panic_sectors = sorted(self.sector_monitor.panicking_sectors())
-
-        frozen_symbols = self.engine.get_frozen_symbols()
-        circuit_flagged_symbols = self.engine.get_circuit_flagged_symbols()
-
-        return {
-            "panic_sectors": panic_sectors,
-            # The full list stays. tools/refused_review.py and the
-            # POST-MARKET tab both read it, and "which stocks did the
-            # bot refuse today" is a question worth being able to ask.
-            "blocked_symbols": blocked,
-            # What the LIVE tab shows: one line per reason with a count.
-            "blocked_by_reason": grouped,
-            "blocked_count": len(blocked),
-            "frozen_symbols": frozen_symbols,
-            "circuit_flagged_symbols": circuit_flagged_symbols,
-        }
 
     def _build_performance(self, closed_positions):
         """
@@ -7859,68 +6709,6 @@ class DashboardState:
             # 7,330.5 and "banknifty" 3,038.
             "index_suspect": (self.index_monitor.suspect(INDEX_EXPECTED_RANGE)
                               if self.index_monitor is not None else []),
-        }
-
-    def _build_book_analytics(self, open_positions, closed_positions):
-        """
-        2026-07-24 -- replaces the redundant green/red "Sectors" panel
-        (operator: it duplicated the Sector Heatmap). Shows what's
-        UNIQUE to the operator's own book: open exposure by sector
-        (concentration risk), today's net-of-cost P&L by sector (which
-        sectors the strategy actually works in), and a long-vs-short
-        scoreboard.
-        """
-        exposure = {}
-        long_open = short_open = 0
-        for symbol, pos in open_positions.items():
-            rec = self.master_loader.get_by_symbol(symbol)
-            sector = (rec.get("SECTOR") if rec else None) or "Unknown"
-            direction = pos.get("direction", "LONG")
-            e = exposure.setdefault(
-                sector, {"sector": sector, "long": 0, "short": 0, "notional": 0.0}
-            )
-            e["notional"] += pos["entry_price"] * pos["qty"]
-            if direction == "SHORT":
-                e["short"] += 1
-                short_open += 1
-            else:
-                e["long"] += 1
-                long_open += 1
-        exposure_rows = sorted(exposure.values(), key=lambda r: r["notional"], reverse=True)
-        for r in exposure_rows:
-            r["notional"] = round(r["notional"])
-
-        sector_pnl = {}
-        long_net = short_net = 0.0
-        for rec in closed_positions:
-            direction = rec.get("direction", "LONG")
-            pnl = rec.get("pnl")
-            if pnl is None:
-                pnl = _signed_pnl(direction, rec["entry_price"], rec["exit_price"], rec["qty"])
-            net = pnl - round_trip_charges(
-                rec["entry_price"], rec["exit_price"], rec["qty"], direction,
-                nights_held=nights_between(rec.get("entry_time"),
-                                           rec.get("exit_time")),
-            )
-            srec = self.master_loader.get_by_symbol(rec["symbol"])
-            sector = (srec.get("SECTOR") if srec else None) or "Unknown"
-            sector_pnl[sector] = sector_pnl.get(sector, 0.0) + net
-            if direction == "SHORT":
-                short_net += net
-            else:
-                long_net += net
-        sector_pnl_rows = sorted(
-            [{"sector": s, "net_pnl": round(v)} for s, v in sector_pnl.items()],
-            key=lambda r: r["net_pnl"], reverse=True,
-        )
-
-        return {
-            "exposure": exposure_rows,
-            "sector_pnl": sector_pnl_rows,
-            "long_open": long_open,
-            "short_open": short_open,
-            "long_realized_net": round(long_net),
-            "short_realized_net": round(short_net),
         }
 
     def _build_system_health(self, universe_size):

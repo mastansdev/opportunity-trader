@@ -90,16 +90,6 @@ def test_the_alert_only_guard_is_still_there_as_well():
     assert "_off and self.adopt_with_stops" in src
 
 
-def test_he_is_still_told_when_a_position_has_no_stop():
-    """WATCH ONLY is not BLIND. The 'no stop at Dhan' warning caught a
-    real gap on 13 August and must survive the change."""
-    src = (ROOT / "core" / "broker_sync.py").read_text(encoding="utf-8")
-    assert "unprotected" in src.lower() or "not protected" in src.lower()
-    page = (ROOT / "dashboard" / "static" / "board.html").read_text(
-        encoding="utf-8")
-    assert "NO STOP AT DHAN" in page
-
-
 def test_the_phantom_closes_are_left_in_the_record():
     """They are history and they stay. Deleting his trade record to
     make a number look better is not a fix -- the guard added in

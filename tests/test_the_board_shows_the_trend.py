@@ -76,36 +76,6 @@ def test_the_answer_is_cached_for_the_day():
     assert not calls, "second lookup hit the store again"
 
 
-def test_the_board_draws_it():
-    """---- IT MOVED OUT OF THE CHIPS. 30 August 2026. ----
-
-        "stock displayed on dashboard is not showing its price action
-         (uptrend , downtrend, sideways)"
-        "both"    -- asked whether he wanted the 7-day reading, today's
-                     shape, or both
-
-    It WAS drawn, as one chip among a dozen under "Why it is moving",
-    which is why he could not see it. It now has a Trend column of its
-    own, shared with today's shape, and the chip was removed in the
-    same change -- leaving both printed the same fact twice on one
-    row ("Duplicates of data is not acceptable at all", 29 August).
-
-    So the assertion moved with it: still drawn, still colour-coded by
-    direction, now in trendCell().
-    """
-    with open(BOARD, encoding="utf-8") as handle:
-        html = handle.read()
-    assert "function trendCell" in html
-    cell = html.split("function trendCell")[1].split("function exitLine")[0]
-    assert "r.trend" in cell and "structure" in cell
-    # Direction must be readable without stopping to think.
-    assert "PLAIN_TREND" in cell
-    table = html.split("const PLAIN_TREND")[1].split("};")[0]
-    assert '"--good-fg"' in table and '"--stop-fg"' in table
-    # And in day-to-day words -- no STRONG_UP reaches the screen.
-    assert '"climbing"' in table and '"sideways"' in table
-
-
 def test_the_row_carries_it():
     import inspect
     src = inspect.getsource(DashboardState)

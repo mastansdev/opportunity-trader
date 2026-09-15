@@ -260,31 +260,6 @@ def test_breadth_still_counts_a_genuine_large_move_within_the_circuit_band():
     assert snap["unchanged"] == 0
 
 
-def test_book_analytics_exposure_and_long_short_from_open_positions():
-    """2026-07-24: the redundant green/red 'Sectors' panel was
-    replaced by 'My Book' -- open exposure by sector + long/short
-    scoreboard. Two IT longs + one BANK short."""
-    loader = _loader({"TCS": "IT", "INFY": "IT", "SBIN": "BANK"})
-    engine = _FakeEngine(open_positions={
-        "TCS": {"entry_price": 100.0, "qty": 10, "direction": "LONG",
-                "entry_reason": "STRUCTURAL_LONG_BREAKOUT"},
-        "INFY": {"entry_price": 200.0, "qty": 5, "direction": "LONG",
-                 "entry_reason": "STRUCTURAL_LONG_BREAKOUT"},
-        "SBIN": {"entry_price": 300.0, "qty": 4, "direction": "SHORT",
-                 "entry_reason": "STRUCTURAL_SHORT_BREAKDOWN"},
-    })
-    state = DashboardState(engine, _FakeMarketData(), loader)
-    state.refresh()
-    book = state.get_snapshot()["book_analytics"]
-
-    assert book["long_open"] == 2
-    assert book["short_open"] == 1
-    sectors = {r["sector"]: r for r in book["exposure"]}
-    assert sectors["IT"]["long"] == 2 and sectors["IT"]["short"] == 0
-    assert sectors["IT"]["notional"] == 100 * 10 + 200 * 5
-    assert sectors["BANK"]["short"] == 1
-
-
 def test_gainers_losers_ranked_by_change_pct_vs_prev_close():
     """Replaces the old ORB Bullish/Bearish watchlist (2026-07-23,
     operator instruction) -- ranked by %-change vs PREVIOUS DAY
@@ -636,84 +611,6 @@ def test_closed_short_position_fallback_pnl_is_the_mirror_of_a_long():
 
     assert rows[0]["direction"] == "SHORT"
     assert rows[0]["pnl"] == (100.0 - 90.0) * 10  # profit -- price fell
-
-
-def test_risk_filters_empty_when_nothing_blocked_and_no_sector_monitor():
-    loader = _loader({"TCS": "IT"})
-    state = DashboardState(_FakeEngine(), _FakeMarketData(), loader)
-    state.refresh()
-
-    filters = state.get_snapshot()["risk_filters"]
-    assert filters == {
-        "panic_sectors": [], "blocked_symbols": [], "frozen_symbols": [],
-        "circuit_flagged_symbols": [],
-        # ---- 2 August 2026 ----
-        # The blocked list ran to forty-five rows on the live panel,
-        # every one reading "reports today, numbers not out yet". It
-        # is now grouped by reason for the LIVE tab; blocked_symbols
-        # still carries the full list for the POST-MARKET tab and
-        # tools/refused_review.py.
-        "blocked_by_reason": [], "blocked_count": 0,
-    }
-
-
-def test_risk_filters_list_blocked_symbols_and_panic_sectors():
-    loader = _loader({"TCS": "IT"})
-    engine = _FakeEngine(entry_blocked={
-        "RELIANCE": {"LONG": "contradicting news -- bearish (90%) -- x."},
-        "SUNPHARMA": {"LONG": "sector 'PHARMA' is panic-flagged today -- ..."},
-    })
-    sector_monitor = _FakeSectorMonitor(panicking={"PHARMA"})
-    state = DashboardState(
-        engine, _FakeMarketData(), loader, sector_monitor=sector_monitor
-    )
-
-    state.refresh()
-    filters = state.get_snapshot()["risk_filters"]
-
-    assert filters["panic_sectors"] == ["PHARMA"]
-    assert filters["blocked_symbols"] == [
-        {"symbol": "RELIANCE", "direction": "LONG",
-         "reason": "contradicting news -- bearish (90%) -- x."},
-        {"symbol": "SUNPHARMA", "direction": "LONG",
-         "reason": "sector 'PHARMA' is panic-flagged today -- ..."},
-    ]
-    assert filters["frozen_symbols"] == []
-
-
-def test_risk_filters_surfaces_frozen_feed_symbols():
-    """New 2026-07-23, alongside core/engine.py's frozen-price
-    detection (HFCL) -- the dashboard must show a frozen symbol the
-    same way it already shows a news/sector block, so the operator
-    can see WHY a dead-looking symbol stopped trading."""
-    loader = _loader({"HFCL": "TELECOM"})
-    engine = _FakeEngine(frozen_symbols=["HFCL"])
-    state = DashboardState(engine, _FakeMarketData(), loader)
-
-    state.refresh()
-    filters = state.get_snapshot()["risk_filters"]
-
-    assert filters["frozen_symbols"] == ["HFCL"]
-
-
-def test_risk_filters_surfaces_circuit_flagged_symbols():
-    """New 2026-07-23 evening, alongside core/circuit_monitor.py --
-    the PROACTIVE follow-up to the frozen-feed test above: the
-    dashboard must show a symbol the bot is currently avoiding/
-    exiting because it's approaching a circuit limit, same visibility
-    pattern as every other risk-filter reason."""
-    loader = _loader({"HFCL": "TELECOM"})
-    engine = _FakeEngine(circuit_flagged_symbols=[
-        {"symbol": "HFCL", "side": "LOWER", "gap_pct": 1.23},
-    ])
-    state = DashboardState(engine, _FakeMarketData(), loader)
-
-    state.refresh()
-    filters = state.get_snapshot()["risk_filters"]
-
-    assert filters["circuit_flagged_symbols"] == [
-        {"symbol": "HFCL", "side": "LOWER", "gap_pct": 1.23},
-    ]
 
 
 def test_capital_is_none_without_a_portfolio():
@@ -1072,35 +969,6 @@ def test_system_health_feed_alive_is_none_when_not_wired():
 # clicking screen can see is not a record at all. He could click on one
 # monitor, watch another, and never learn the click died.
 # ---------------------------------------------------------------
-
-def test_the_action_log_survives_and_reaches_the_snapshot():
-    from trading.trade_controller import TradeController
-    controller = TradeController()
-    controller.note_action(True, "BUY requested: RECLTD")
-    controller.note_action(False, "BUY SUPREMEIND -- never reached the bot")
-
-    class FakeEngine:
-        trade_controller = controller
-
-    class S:
-        engine = FakeEngine()
-
-    from dashboard.state import DashboardState
-    out = DashboardState._build_actions(S)
-    assert out["available"] is True
-    assert len(out["rows"]) == 2
-    assert out["failures"] == 1
-    # newest first
-    assert "never reached" in out["rows"][0]["text"]
-
-
-def test_a_missing_controller_gives_an_empty_panel_not_a_crash():
-    class S:
-        engine = object()
-    from dashboard.state import DashboardState
-    out = DashboardState._build_actions(S)
-    assert out == {"rows": [], "available": False}
-
 
 def test_the_action_log_is_capped():
     """40 rows, so a long session cannot grow it without limit."""

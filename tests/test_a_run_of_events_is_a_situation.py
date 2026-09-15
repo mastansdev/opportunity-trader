@@ -76,19 +76,6 @@ def test_it_never_raises_on_a_broken_store():
     assert broken.running_story("ATHERENERG", days=7, now=NOW) is None
 
 
-def test_the_row_and_the_board_both_carry_it():
-    import inspect
-    from dashboard.state import DashboardState
-    assert 'row["story"] = self._story_for(' in inspect.getsource(DashboardState)
-    import os
-    board = os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), "dashboard", "static", "board.html")
-    with open(board, encoding="utf-8") as handle:
-        html = handle.read()
-    assert "(r.story.stories || r.story.events) > 1" in html, \
-        "only a RUN is drawn -- one event is news, not a situation"
-
-
 # ==========================================================
 #  AND WHAT DID THE STOCK DO
 # ==========================================================
@@ -135,13 +122,3 @@ def test_the_day_move_is_open_to_close(store):
     assert "bars.c.open" in src
 
 
-def test_the_board_draws_the_outcome():
-    import os
-    board = os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), "dashboard", "static", "board.html")
-    with open(board, encoding="utf-8") as handle:
-        html = handle.read()
-    assert "st.told" in html, "the chip must show the outcomes"
-    assert "since_pct" in html
-    # Green only when the runs actually paid.
-    assert "paid ? " in html

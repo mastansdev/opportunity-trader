@@ -1061,11 +1061,24 @@ ENABLE_PEAK_TRAIL = True
 #
 # PROVISIONAL, like the rest of this week: measured on the four
 # sessions it was chosen on. PROFIT_LOCK_ENABLED = False removes it.
-PROFIT_LOCK_ENABLED = True
+#
+# ---- OFF, 15 September 2026: NOT HIS RULE. ----
+# He asked for rupee slabs (5K, then every 1K) and this percentage was
+# built instead. Replaced by PROFIT_SLAB_* below, exactly as he said it.
+PROFIT_LOCK_ENABLED = False
 # The gain that arms it, as a percent of the entry price.
 PROFIT_LOCK_ARM_PCT = 2.5
 # Once armed, the most it may give back from the highest price seen.
 PROFIT_LOCK_GIVEBACK_PCT = 0.5
+
+# HIS PROFIT SLABS -- core/trailing_stop.apply_profit_slab().
+#     "once mtm profit cross 5K then shift the Trailing stop loss to 5K
+#      price of that stock then increase for every 1 k upside movement"
+# Best MTM Rs 5,000 -> stop locks Rs 5,000; every further Rs 1,000 of
+# best MTM raises the lock Rs 1,000. Never lowers. Long only.
+PROFIT_SLAB_ENABLED = True
+PROFIT_SLAB_FIRST_RS = 5000.0
+PROFIT_SLAB_STEP_RS = 1000.0
 PEAK_TRAIL_PCT = 0.025
 
 # ---- A STOCK AT ITS HIGH HAS NOT STOPPED BEING BOUGHT. 3 Sep 2026 ----
@@ -3533,7 +3546,27 @@ DAILY_LOSS_CAP_ENABLED = False
 # PROVISIONAL, the same as the drift exit: measured on the four
 # sessions it was chosen on. It runs in PAPER and is judged on days it
 # has not seen. ENTRY_MAX_EXTENSION_PCT = None turns it off.
-ENTRY_MAX_EXTENSION_PCT = 2.0
+# ---- REMOVED BY HIM. 15 September 2026. ----
+#
+#     "i asked to check the strength on buying or selling side & price
+#      action stocks were made during the trades. not a fixed % to check
+#      the freshness. who asked u to do so?"      -- the operator
+#
+# He never asked for a fixed percentage. It refused ZENSARTECH all
+# morning (430 -> 479, +11%) for being "10.7% above the open". Replaced
+# by what he did ask for: ENTRY_NEEDS_BUYERS and
+# ENTRY_NEEDS_PRICE_FOLLOWING below, read in core/auto_entry.
+ENTRY_MAX_EXTENSION_PCT = None
+
+# The two checks he asked for, at the moment of buying:
+#   buyers   -- order flow: buyers must be ahead today AND still adding
+#               (core/order_flow.still_buying; running total when the
+#               minute store has too little session yet)
+#   price    -- since the stock was ranked, the price must not have
+#               fallen: SUNTV was bought 1.1% below its ranked price.
+# Direction only. No percentage.
+ENTRY_NEEDS_BUYERS = True
+ENTRY_NEEDS_PRICE_FOLLOWING = True
 
 # ---- AND THE LIST ITSELF MUST BE FRESH. ----
 #
@@ -3549,6 +3582,14 @@ ENTRY_MAX_EXTENSION_PCT = 2.0
 # -- it is there for the pathological case, a board that has stopped
 # rebuilding while the tick worker goes on handing out seats from it.
 ENTRY_RANK_MAX_AGE_SECONDS = 120
+
+# ---- ONE SEAT AT A TIME, TO THE BEST MOVER. 15 September 2026. ----
+# See core/auto_entry.take(). On 15 Sep all ten seats went by 09:18 to
+# the first names on the board while the day's #1 (EMUDHRA) and #5 (FSL)
+# were not yet on it.
+ENTRY_NOT_BEFORE = "09:20"       # scan the whole market first
+ENTRY_ONLY_ALIVE = True          # a seat only for a stock moving now
+ENTRY_MIN_GAP_SECONDS = 60       # one new position a minute, best first
 DRIFT_EXIT_ENABLED = True
 # How long a position gets to show something before this asks.
 DRIFT_EXIT_AFTER_MINUTES = 45
@@ -4285,6 +4326,11 @@ DASHBOARD_PORT = 8000
 # trading engine down, which is the one thing this must never
 # do.
 DASHBOARD_REFRESH_INTERVAL_SECONDS = 1
+
+# 15 Sep 2026: the board does not start a rebuild while more than this
+# many ticks are waiting. ~800 ticks arrive a second at the open, so this
+# is about two seconds of prices -- past that, prices go first.
+BOARD_YIELD_BACKLOG_TICKS = 2000
 
 # ---- HOW OFTEN THE BOT DECIDES TO BUY. 3 September 2026. ----
 #

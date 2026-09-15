@@ -91,15 +91,3 @@ def test_the_bots_own_closed_trade_still_blocks_it():
 
 # ------------------------------------ and the two books stay apart on screen
 
-def test_the_trade_tab_still_keeps_them_in_separate_tables():
-    """This is where "do not confuse them" is actually answered. If it
-    ever collapses back into one table, the request comes back and the
-    entry path is the wrong place to answer it."""
-    src = Path("dashboard/static/board.html").read_text(encoding="utf-8")
-    assert 'id="tradebot"' in src and 'id="tradeyours"' in src, (
-        "the two tables have been merged")
-    at = src.find("function drawTrade")
-    block = src[at:at + 3000]
-    assert "only_at_broker" in block, "his own-only stocks are not shown"
-    assert "quantity_differs" in block, (
-        "a stock they BOTH hold falls between the two tables again")

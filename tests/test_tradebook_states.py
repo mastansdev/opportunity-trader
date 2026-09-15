@@ -148,21 +148,6 @@ def test_could_not_ask_is_left_alone():
     assert "rows" not in out
 
 
-def test_the_labels_are_recomputed_even_when_the_orders_are_cached():
-    """The broker rows are cached for a few seconds; his book is not. A
-    row still showing HOLDING after he exited would be a lie with money
-    behind it."""
-    src = open("dashboard/state.py", encoding="utf-8").read()
-    block = src[src.index("def build_orders"):src.index("ORDER_STATE_RANK")]
-    assert "return self._label_orders(cached, open_positions)" in block
-    assert block.count("return cached") == 0
-
-
-def test_the_payload_passes_his_open_book_in():
-    src = open("dashboard/state.py", encoding="utf-8").read()
-    assert '"orders": self.build_orders(open_positions),' in src
-
-
 # ---------------------------------------------------------------
 # 4. WHAT REACHES THE GLASS
 # ---------------------------------------------------------------
@@ -170,59 +155,3 @@ def _html():
     return open("dashboard/static/index.html", encoding="utf-8").read()
 
 
-def test_the_state_is_carried_on_the_row_edge_not_only_in_words():
-    """     "without moving the mouse to check everytime"
-
-    Colour on the left border makes the panel readable from its shape.
-    A pill repeats it for anyone who does look."""
-    src = _html()
-    for cls in ("ot-tb-waiting", "ot-tb-failed", "ot-tb-holding",
-                "ot-tb-closed", "ot-tb-cancelled"):
-        assert "." + cls in src, cls
-    block = src[src.index(".ot-tb {"):src.index(".ot-tb-pill {")]
-    assert "border-left" in block
-
-
-def test_every_state_gets_a_different_colour():
-    src = _html()
-    assert ".ot-tb-waiting   { border-left-color:var(--amber)" in src
-    assert ".ot-tb-failed    { border-left-color:var(--red)" in src
-    assert ".ot-tb-holding   { border-left-color:var(--green)" in src
-
-
-def test_only_the_unresolved_row_moves():
-    """One moving thing on a trading screen, and it is the one that is
-    not finished. Anything else animating is noise."""
-    src = _html()
-    assert "@keyframes otBreathe" in src
-    assert ".ot-tb-waiting .ot-tb-pill { animation: otBreathe" in src
-    # And it respects the accessibility setting.
-    assert "prefers-reduced-motion" in src
-
-
-def test_the_three_stacked_tables_are_gone():
-    """Three headings and three tables in a 300px column is three
-    headings and no room."""
-    src = _html()
-    block = src[src.index("ONE LIST, COLOUR-CODED"):]
-    block = block[:block.index("</script>")]
-    assert "IN FLIGHT —" not in block
-    assert "o.rows" in block
-
-
-def test_the_summary_line_says_it_in_one_glance():
-    src = _html()
-    block = src[src.index("ONE LIST, COLOUR-CODED"):]
-    block = block[:block.index("</script>")]
-    for word in ("waiting", "failed", "holding", "closed", "cancelled"):
-        assert '"' + word + '"' in block, word
-
-
-def test_nothing_below_the_readable_floor():
-    """The panel he could not read is not fixed by making it smaller."""
-    src = _html()
-    import re
-    block = src[src.index("THE TRADEBOOK, READABLE ACROSS THE ROOM"):]
-    block = block[:block.index("prefers-reduced-motion")]
-    sizes = [float(m) for m in re.findall(r"font-size:\s*([0-9.]+)px", block)]
-    assert sizes and min(sizes) >= 12, sizes

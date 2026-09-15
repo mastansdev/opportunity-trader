@@ -130,63 +130,9 @@ def test_blocked_stocks_never_appear_in_a_group():
 # THE COMMAND LINE
 # ---------------------------------------------------------------
 
-def test_the_board_has_a_command_line(page):
-    assert 'id="cmd"' in page
-    assert "function runCommand(" in page
-
-
-def test_slash_focuses_it_and_escape_closes(page):
-    """The keyboard is the half that makes it a terminal. A Bloomberg
-    user never reaches for the mouse."""
-    assert 'e.key === "/"' in page
-    assert 'e.key === "Escape"' in page
-    assert 'e.key === "Enter" && e.target && e.target.id === "cmd"' in page
-
-
-def test_a_known_symbol_beats_a_tag(page):
-    """RELIANCE is a company, not a theme. If the tag branch ran first
-    the most common command on the terminal would do the wrong thing."""
-    fn = page[page.find("async function runCommand"):page.find("function drawBrain")]
-    assert "const known" in fn
-    known_at = fn.find("const known")
-    tag_at = fn.find("/api/tag/")
-    assert known_at < tag_at, "the tag lookup is checked before the symbol"
-
-
-def test_every_advertised_function_exists(page):
-    """A function on the HELP list that does nothing teaches him the
-    terminal lies. Each one must be dispatched."""
-    fn = page[page.find("const FUNCTIONS = {"):page.find("function drawBrain")]
-    for name in ("DES", "FA", "CN", "LINK", "SPLC", "OPP", "HELP"):
-        assert f"{name}:" in fn or f'"{name}"' in fn, name
-
-
-def test_a_tag_in_the_panel_is_clickable(page):
-    """LINK lists the groups; clicking one lists its members. That is
-    the chain walk, and without it every hop needs retyping."""
-    assert "data-tagq=" in page
-    assert 'closest("[data-tagq]")' in page
-
-
 # ---------------------------------------------------------------
 # THE LINE THAT MUST NOT MOVE
 # ---------------------------------------------------------------
-
-def test_it_does_not_claim_a_supply_chain_it_cannot_prove(page):
-    """Bloomberg's SPLC uses disclosed supplier/customer relationships.
-    This has classification tags. Both are useful; only one of them can
-    answer "who supplies Tata Steel", and it is not this one.
-
-    If the wording ever starts implying otherwise, he will act on a
-    relationship the bot invented.
-    """
-    src = (ROOT / "core" / "sector_map.py").read_text(encoding="utf-8")
-    assert "DISCLOSED supplier" in src, (
-        "core/sector_map.py no longer states what it cannot prove")
-    assert "supplies" in page.lower() or "disclosed contracts" in page.lower(), (
-        "the HELP text no longer tells him the chain is not a real "
-        "supplier->customer graph")
-
 
 # ---------------------------------------------------------------
 # WHY -- the question the refusal store cannot answer
@@ -223,36 +169,6 @@ def test_it_does_not_claim_a_supply_chain_it_cannot_prove(page):
 # That is a design decision, not a bug, and changing it changes the
 # entry rule. These tests hold the DIAGNOSIS visible so the decision
 # gets made deliberately rather than forgotten again.
-
-def test_why_is_on_the_function_list(page):
-    assert "WHY:" in page
-    assert "/api/why/" in page
-
-
-def test_it_says_the_refusal_store_cannot_name_the_stock(page):
-    """data/decisions.db refusals is (date, at, reason, n). No symbol.
-    Any answer claiming to read a stock's refusal history would be
-    invented, so WHY re-runs the gates live and says so."""
-    # WHITESPACE NORMALISED. The phrase is wrapped across a line in the
-    # docstring -- "with no\n        symbol column" -- so a raw
-    # substring test failed on a sentence that says exactly the right
-    # thing. Eighth time a test on this project has matched prose and
-    # been wrong about it; the fix is to compare meaning, not layout.
-    import re
-    src = (ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
-    block = src[src.find('@app.get("/api/why")'):src.find('@app.get("/api/links')]
-    flat = re.sub(r"\s+", " ", block)
-    assert "no symbol column" in flat or "carries no symbol" in flat, (
-        "/api/why no longer states that the refusal store cannot name "
-        "the stock -- an answer that implied otherwise would be invented")
-
-
-def test_the_panel_explains_the_one_session_rule(page):
-    """The single most useful sentence on the screen: why a stock in a
-    two-week rally reads as 'no reason found' on day four."""
-    assert "reason for exactly ONE session" in page
-    assert "why_moving" in page
-
 
 def test_the_freshness_gate_still_exists_and_is_deliberate():
     """If this ever changes, the diagnosis above stops being true and

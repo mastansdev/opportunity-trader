@@ -103,13 +103,9 @@ def _real_position_keys():
 # per call site and never extended merely to silence a failure. Each
 # entry means "checked, and safe because of a fallback", never
 # "unknown".
-KNOWN_UNVERIFIED = {
-    ("core/shock.py", "symbol"),
-    ("core/shock.py", "change_pct"),
-    ("core/shock.py", "pnl"),
-    ("dashboard/state.py", "change_pct"),
-    ("dashboard/state.py", "pnl"),
-}
+# 15 Sep 2026: emptied. core/shock.py was deleted with the shock panel,
+# and the two dashboard/state.py reads went with the removed panels.
+KNOWN_UNVERIFIED = set()
 
 
 def _position_key_reads():

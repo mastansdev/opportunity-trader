@@ -80,6 +80,44 @@ SHUT_AFTER_MINUTES = 16 * 60           # 16:00
 QUOTE_BATCH_SIZE = 900
 
 
+# ---- 293 STOCKS MISSING, EVERY CYCLE. 15 September 2026. ----
+#
+#     [CIRCUIT_MONITOR] THE BOARD IS SHORT: 900 of 1,193 stocks,
+#     293 missing (1 batch(es) failed)          -- 27 times by 09:45
+#
+# Dhan allows ONE quote request a second. This loop sent the second
+# batch -- and its retry -- straight after the first, and the dashboard's
+# index tiles (main.py index_quote) call the same endpoint on their own
+# schedule. So the second call was refused with an empty failure body.
+#
+# One spacer, shared by every caller of quote_data in this process:
+# wrap the function once in main.py and hand the wrapped one to both.
+QUOTE_MIN_GAP_SECONDS = 1.1
+
+
+def spaced(fn, min_gap=QUOTE_MIN_GAP_SECONDS, _sleep=None, _clock=None):
+    """Return fn, guaranteed never to be called twice within min_gap
+    seconds from any thread. The caller waits; nothing is dropped."""
+    import threading
+    import time as _time
+    sleep = _sleep or _time.sleep
+    clock = _clock or _time.monotonic
+    lock = threading.Lock()
+    last = [None]
+
+    def call(*args, **kwargs):
+        with lock:
+            if last[0] is not None:
+                wait = min_gap - (clock() - last[0])
+                if wait > 0:
+                    sleep(wait)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                last[0] = clock()
+    return call
+
+
 class CircuitMonitor:
     """
     quote_fn: callable(securities: dict[str, list[int]]) -> raw

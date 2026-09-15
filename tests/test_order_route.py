@@ -162,6 +162,7 @@ def test_main_keeps_a_separate_unproxied_client_for_reads():
     line, or NSE-adjacent traffic starts looking like a datacenter."""
     with open("main.py", encoding="utf-8") as handle:
         stripped = "\n".join(l.split("#")[0] for l in handle.read().splitlines())
-    assert "CircuitMonitor(dhan_rest_client.quote_data" in stripped
+    assert "spaced(dhan_rest_client.quote_data)" in stripped
+    assert "CircuitMonitor(quote_data" in stripped
     assert "broker_funds.starting_capital(dhan_rest_client)" in stripped
     assert "route_orders_through(dhan_rest_client" not in stripped

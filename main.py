@@ -36,6 +36,7 @@ from config import (
     ORB_WINDOW_END, ENABLE_MOMENTUM_LOCK,
     HEARTBEAT_INTERVAL_SECONDS,
     DASHBOARD_REFRESH_INTERVAL_SECONDS,
+    BOARD_YIELD_BACKLOG_TICKS,
     ENTRY_DECISION_INTERVAL_SECONDS,
 )
 from core import single_instance
@@ -194,8 +195,22 @@ def _command_reader(engine, stop_event):
 # never imported -- a NameError that only a live tick would have found.
 _CLOCK = {"worst": 0.0, "n": 0, "sum": 0.0, "said": None}
 
+# ---- IT READ +7s WITH NOTHING WAITING. 15 September 2026. ----
+#
+# After the board fix the tick queue sat at 0-80 and this still said
+# +7.5s, worst climbing ~60s every minute (505 -> 601 -> 673 -> 741).
+# The machine clock was right to 0.05s (w32tm vs time.google.com).
+#
+# The number was the measurement, not the bot. A quote update for a
+# stock that has not TRADED still carries the time of its last trade,
+# so a quiet stock's "gap" grows by a second every second and dragged
+# the average up. Only a tick whose last-traded time MOVED is a fresh
+# trade, and only that says how late the feed is. And the MEDIAN, so
+# one stuck stock cannot speak for 1,193.
+_CLOCK_SAMPLE_CAP = 20000
 
-def _clock_watch(tick_time, received_at, now=None, state=None):
+
+def _clock_watch(tick_time, received_at, now=None, state=None, symbol=None):
     """Measure the exchange's clock against this machine's.
 
     Returns the reported line when it reports, else None. Costs one
@@ -210,11 +225,19 @@ def _clock_watch(tick_time, received_at, now=None, state=None):
         gap = (received_at - tick_time).total_seconds()
     except Exception:                                      # noqa: BLE001
         return None
+    if symbol is not None:
+        last = clock.setdefault("last_ltt", {})
+        if last.get(symbol) == tick_time:
+            return None          # no new trade -- the stamp is stale
+        last[symbol] = tick_time
     # A tick stamped in the FUTURE means the offset runs the other way.
     # Kept signed so the direction is readable: positive means this
     # machine is behind the exchange.
     clock["n"] += 1
     clock["sum"] += gap
+    gaps = clock.setdefault("gaps", [])
+    if len(gaps) < _CLOCK_SAMPLE_CAP:
+        gaps.append(gap)
     if abs(gap) > abs(clock["worst"]):
         clock["worst"] = gap
     moment = time.monotonic() if now is None else now
@@ -227,14 +250,16 @@ def _clock_watch(tick_time, received_at, now=None, state=None):
         return None
     if moment - clock["said"] < CLOCK_REPORT_SECONDS or clock["n"] < 20:
         return None
-    average = clock["sum"] / clock["n"]
+    ordered = sorted(clock.get("gaps") or [clock["sum"] / clock["n"]])
+    average = ordered[len(ordered) // 2]
     line = (f"[CLOCK] The exchange's timestamps run {average:+.1f}s from "
-            f"this machine on average over {clock['n']} ticks (worst "
+            f"this machine (median of {clock['n']} fresh trades, worst "
             f"{clock['worst']:+.1f}s). Positive means this machine is "
             f"BEHIND the exchange. Feed latency and clock offset are "
             f"both in this number.")
     (warn if abs(average) > CLOCK_DRIFT_WARN_SECONDS else diagnostic)(line)
-    clock.update({"worst": 0.0, "n": 0, "sum": 0.0, "said": moment})
+    clock.update({"worst": 0.0, "n": 0, "sum": 0.0, "said": moment,
+                  "gaps": []})
     return line
 
 
@@ -506,7 +531,11 @@ def main():
     # capital is read from this same client in LIVE. Re-binding it here
     # a second time would have been harmless but it would have made two
     # places look like the source of truth.
-    circuit_monitor = CircuitMonitor(dhan_rest_client.quote_data, EXCHANGE_SEGMENT)
+    # One quote request a second, across every caller -- see
+    # core/circuit_monitor.spaced (293 stocks missing, 15 Sep 2026).
+    from core.circuit_monitor import spaced
+    quote_data = spaced(dhan_rest_client.quote_data)
+    circuit_monitor = CircuitMonitor(quote_data, EXCHANGE_SEGMENT)
 
     # Clean-corpus recorder (2026-07-25) -- writes every closed candle
     # of this session to the replay bench's store, so the strategy can
@@ -811,6 +840,22 @@ def main():
         engine.load_positions(saved_positions)
     if saved_trailing_stops:
         engine.trailing_stop.load_state(saved_trailing_stops)
+        # A snapshot saved before 15 Sep 2026 has no entry or peak, so
+        # neither the 1:1 lock nor his rupee slabs could ever move the
+        # stop of a position carried through the restart. The position
+        # book has both numbers -- fill them in, never overwrite.
+        for _sym, _pos in (engine.open_positions or {}).items():
+            _st = engine.trailing_stop._state.get(_sym)
+            if not _st:
+                continue
+            _entry = _pos.get("entry_price")
+            if _entry and not _st.get("entry"):
+                _st["entry"] = _entry
+            if not _st.get("base_stop"):
+                _st["base_stop"] = _pos.get("initial_stop") or _st.get("stop")
+            if not _st.get("peak") and _entry:
+                _st["peak"] = max(float(_entry),
+                                  float(_pos.get("peak_price") or 0))
     if saved_portfolio:
         # ---- THE BROKER OWNS THE CAPITAL IN LIVE. 5 August 2026. ----
         #
@@ -1335,7 +1380,7 @@ def main():
         # close BEFORE 09:15 -- the tick feed has not spoken yet and
         # the tiles used to read "no feed" through the whole hour he
         # spends deciding. 4 August 2026.
-        index_quote=dhan_rest_client.quote_data,
+        index_quote=quote_data,
         # 183 dividends/splits/demergers with ex-dates. Wired into
         # main.py since the start, never handed to the dashboard --
         # so a veto the bot applies was invisible to the operator.
@@ -1754,7 +1799,7 @@ def main():
             except queue.Empty:
                 pass          # a quiet second still gets a decision
             else:
-                _clock_watch(tick_time, received_at)
+                _clock_watch(tick_time, received_at, symbol=symbol)
                 try:
                     market_data.on_tick(
                         symbol, price, tick_time, now=received_at,
@@ -1912,14 +1957,29 @@ def main():
                 # would be invisible to the ranker.
                 warn(f"[BOARD] Rebuild failed ({exc}). Keeping the last "
                      f"board; retrying.")
-            # Pace it. A rebuild that finishes quickly must not spin
-            # this thread at 100% CPU on a laptop that is also running
-            # the feed -- and the panels it reads do not change faster
-            # than this anyway.
-            waited = time.monotonic() - started
-            if stop.wait(max(DASHBOARD_REFRESH_INTERVAL_SECONDS - waited,
-                             0.2)):
+            # ---- THE BOARD RAN NONSTOP AND STARVED THE PRICES. ----
+            #      15 September 2026.
+            #
+            # This rested 0.2s between rebuilds that took 40-125s, so
+            # it held Python's lock almost all the time. The tick worker
+            # shares that lock: between 09:19 and 09:30 it handled ~20
+            # ticks a minute while 598,000 queued, and AFCONS was sold
+            # on a low it had already left. Moving the rebuild to its
+            # own thread on 14 Sep moved the weight; it did not remove
+            # it.
+            #
+            # Two rules, both simple:
+            #   1. rest at least as long as the rebuild took (the board
+            #      gets at most half the time, never all of it);
+            #   2. while prices are queued, do not start another one --
+            #      the price thread always goes first.
+            took = time.monotonic() - started
+            if stop.wait(max(DASHBOARD_REFRESH_INTERVAL_SECONDS - took,
+                             took, 1.0)):
                 break
+            while tick_queue.qsize() > BOARD_YIELD_BACKLOG_TICKS:
+                if stop.wait(0.5):
+                    return
 
 
     def _print_dashboard_banner():

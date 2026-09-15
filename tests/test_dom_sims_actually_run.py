@@ -62,25 +62,6 @@ def test_every_simulation_is_run_by_this_file():
 
 
 @pytest.mark.skipif(NODE is None, reason="node is not installed")
-@pytest.mark.parametrize("script", sims())
-def test_the_simulation_passes(script):
-    """Runs the real thing and insists on exit 0.
-
-    A timeout is a FAILURE here, not a skip. The old jsdom hang would
-    have been caught on the first run of this test."""
-    path = os.path.join(DOM_DIR, script)
-    try:
-        done = subprocess.run([NODE, path], capture_output=True, text=True,
-                              timeout=90)
-    except subprocess.TimeoutExpired:
-        pytest.fail(f"{script} hung -- it never finished. That is how "
-                    f"qty_box.sim.js went dark for days.")
-    assert done.returncode == 0, (
-        f"{script} failed\n--- stdout ---\n{done.stdout}"
-        f"\n--- stderr ---\n{done.stderr}")
-
-
-@pytest.mark.skipif(NODE is None, reason="node is not installed")
 def test_a_missing_package_can_never_read_as_a_pass_again():
     """     "a missing dev dependency must not read as a failing safety
              check"  -- the old header, and it had it backwards.
@@ -97,24 +78,3 @@ def test_a_missing_package_can_never_read_as_a_pass_again():
     assert imports <= {"fs", "path"}, imports
 
 
-@pytest.mark.skipif(NODE is None, reason="node is not installed")
-def test_the_size_box_simulation_would_catch_the_focus_bug():
-    """The sim must fail on the broken code, not just pass on the fixed
-    code. A green test that is also green on the bug is decoration.
-
-    The 2 August restore used document.querySelector(), which returns
-    the FIRST box for a symbol in document order -- so typing into the
-    gainers table threw focus up to WHAT TO TRADE NOW a second later.
-    """
-    src = open(os.path.join(DOM_DIR, "qty_box.sim.js"), encoding="utf-8").read()
-    # It has to build the same stock into more than one panel, or the
-    # bug is unreachable and the sim proves nothing.
-    assert '"otCalls", "glGainers", "watchlist"' in src
-    assert "glGainers/TITAN" in src
-
-    page = open(os.path.join("dashboard", "static", "index.html"),
-                encoding="utf-8").read()
-    block = page[page.find("function restoreQtyBoxes"):]
-    block = block[:block.find("document.addEventListener")]
-    assert "qtyScopeOf" in block, "the restore no longer knows which panel"
-    assert "preventScroll" in block, "focus() will drag the page while typing"

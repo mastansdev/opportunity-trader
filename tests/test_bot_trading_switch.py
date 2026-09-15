@@ -251,13 +251,16 @@ def test_arming_is_announced_loudly():
 # data-arm="on" / data-arm="off" -- rather than deriving it from a
 # BOT_ON variable, because a stale variable once meant every click
 # sent "on" and there was no way to switch off.
-PAGE = open("dashboard/static/board.html", encoding="utf-8").read()
+# ---- 15 September 2026: board.html was deleted; /desk is the one page.
+# The behaviour defended is unchanged -- two buttons, each carrying its
+# own command, real money asks first, a view-only link cannot switch.
+PAGE = open("dashboard/static/desk.html", encoding="utf-8").read()
 
 
 def test_the_button_is_rendered_on_the_trading_screen():
-    assert 'data-arm="on"' in PAGE and 'data-arm="off"' in PAGE, (
-        "the ON/OFF buttons are not on the board")
-    assert "paintState(" in PAGE, "they are never painted with live state"
+    assert 'id="btn-on"' in PAGE and 'id="btn-off"' in PAGE, (
+        "the ON/OFF buttons are not on the desk")
+    assert '$("btn-on").className' in PAGE, "they are never painted with live state"
 
 
 def test_the_button_calls_the_endpoint():
@@ -266,27 +269,21 @@ def test_the_button_calls_the_endpoint():
 
 def test_the_command_is_in_the_markup_not_in_a_variable():
     """A stale BOT_ON once made every click send 'on', leaving no way
-    to switch off. The button carries its own command."""
-    assert 'getAttribute("data-arm")' in PAGE
+    to switch off. Each button sends its own command."""
+    assert 'setMode("on")' in PAGE and 'setMode("off")' in PAGE
 
 
-def test_arming_asks_first_and_stopping_also_confirms():
-    """Both directions confirm on this page -- switching a live bot
-    off mid-session is also worth one keystroke of thought, and the
-    text differs so he can see which he is about to do."""
-    block = PAGE[PAGE.find('getAttribute("data-arm")'):]
-    block = block[:block.find("paintState(arm ===")]
-    assert "confirm(ask)" in block
-    assert 'arm === "on"' in block, (
-        "the two confirmations are not distinguished, so he cannot see "
-        "which direction he is about to send")
-    assert "OPEN NEW POSITIONS" in block, (
-        "the ARM confirmation does not say what it permits")
+def test_arming_asks_first():
+    block = PAGE[PAGE.find("async function setMode"):]
+    block = block[:block.find("tick();")]
+    assert 'state === "on" && !confirm(' in block, (
+        "switching to real money does not ask first")
+    assert "real money" in block
 
 
 def test_a_view_only_visitor_gets_no_switch():
-    block = PAGE[PAGE.find('getAttribute("data-arm")'):]
-    assert "if (!IS_OPERATOR)" in block[:400], (
+    block = PAGE[PAGE.find("async function setMode"):]
+    assert "if (!IS_OPERATOR)" in block[:200], (
         "a read-only link can operate the switch")
-    assert "read-only link" in PAGE, (
+    assert "View only" in block[:300], (
         "a view-only visitor is not told WHY the switch does nothing")

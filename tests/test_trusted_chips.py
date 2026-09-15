@@ -94,11 +94,6 @@ def _fn(src, name):
 # ---------------------------------------------------------------
 # 1. THE THREE ARE RECOGNISED, AND NOTHING ELSE IS
 # ---------------------------------------------------------------
-def test_the_three_patterns_exist(page):
-    for const in ("TRUST_EXCELLENT", "TRUST_CLEAN", "TRUST_ONEOFF"):
-        assert f"const {const}" in page, f"{const} is missing"
-
-
 @pytest.mark.parametrize("chip,expected", [
     # The real chip strings, as core/shortlist.py emits them.
     ("PULSE: Excellent results", "up"),
@@ -126,130 +121,15 @@ def test_only_the_measured_three_are_trusted(chip, expected):
     assert got == expected, chip
 
 
-def test_not_clean_is_not_the_same_chip_as_one_off(page):
-    """They read alike and measured OPPOSITE ways:
-
-        ONE-OFF     n=25   -1.61%   28% up
-        NOT CLEAN   n=28   +0.42%   61% up
-
-    The pattern is anchored at the start of the chip so "NOT CLEAN:
-    earnings quality ONE-OFF" cannot be caught by either rule."""
-    oneoff = re.compile(r"^ONE-?OFF\b", re.I)
-    clean = re.compile(r"^CLEAN\s*\|", re.I)
-    text = "NOT CLEAN: earnings quality ONE-OFF"
-    assert not oneoff.match(text)
-    assert not clean.match(text)
-
-
 # ---------------------------------------------------------------
 # 2. THEY COME FIRST -- THE PSPPROJECT FAILURE
 # ---------------------------------------------------------------
-def test_the_trusted_chips_are_sorted_ahead_of_the_rest(page):
-    cell = _fn(page, "function whyCell")
-    assert "trusted.concat(others)" in cell, (
-        "the measured chips must be ordered ahead of the others -- "
-        "PSPPROJECT had CLEAN at position 4 of 8, inside the collapsed "
-        "+N, because the row was in arrival order")
-
-
-def test_the_inline_slot_grows_rather_than_hiding_a_trusted_chip(page):
-    """WHY_INLINE is 3. A stock carrying EXCELLENT, CLEAN and a
-    one-off has three trusted chips already -- a fixed cap of 3 would
-    be fine, but four would silently collapse one. The cap is the
-    LARGER of WHY_INLINE and the trusted count."""
-    cell = _fn(page, "function whyCell")
-    assert "Math.max(WHY_INLINE, trusted.length)" in cell
-
-
-def test_nothing_is_ever_dropped(page):
-    """The standing rule: 'do not throw away any information we are
-    receiving'. The tail moves behind the +N, it does not vanish."""
-    cell = _fn(page, "function whyCell")
-    assert "const rest" in cell and "rest.length" in cell
-    assert "why-more" in page
-
-
 # ---------------------------------------------------------------
 # 3. THE TWO NEW BADGES
 # ---------------------------------------------------------------
-def test_the_double_badge_needs_both_and_no_warning(page):
-    cell = _fn(page, "function whyCell")
-    assert "hasExcellent && hasClean && !hasOneOff" in cell, (
-        "DOUBLE is the two-publisher agreement. A one-off on the same "
-        "row means they do NOT agree, and it must not print.")
-
-
-def test_the_double_badge_carries_its_own_evidence(page):
-    """A badge the operator cannot interrogate is a badge he has to
-    take on faith. The hover states the sample size."""
-    assert "3.04%" in page and "22 occasions" in page
-
-
-def test_the_skip_badge_fires_on_the_contradiction(page):
-    cell = _fn(page, "function whyCell")
-    assert "hasOneOff && (hasExcellent || hasClean)" in cell
-
-
-def test_the_skip_badge_admits_it_has_no_evidence(page):
-    """THE ONE THAT MATTERS. 3 samples. The badge must say there is no
-    measurement -- not imply the warning wins, and not imply the
-    positive wins."""
-    i = page.find("sl-skip\"")
-    assert i != -1
-    tip = page[i:i + 700]
-    assert "3 times" in tip
-    assert "No measurement exists" in tip
-
-
-def test_no_badge_asserts_a_direction_on_three_samples(page):
-    """A red row would be a verdict. The 3 samples we have averaged
-    slightly POSITIVE, so red would be wrong in the one direction the
-    data faintly points."""
-    i = page.find("sl-skip\"")
-    tip = page[i:i + 700]
-    assert "Treat it as a pass" in tip
-    for word in ("avoid this stock", "will fall", "sell"):
-        assert word not in tip.lower()
-
-
 # ---------------------------------------------------------------
 # 4. EVERYTHING ELSE IS QUIETENED
 # ---------------------------------------------------------------
-def test_untrusted_chips_are_muted(page):
-    chip = _fn(page, "function chipHtml")
-    assert "sl-muted" in chip
-
-
-def test_conflict_is_never_muted(page):
-    """It scores zero on purpose and its whole job is to be the loudest
-    thing on the row. Greying it would invert that."""
-    chip = _fn(page, "function chipHtml")
-    assert 'if (!/^CONFLICT:/.test(w)) cls += " sl-muted"' in chip
-
-
-def test_a_trusted_chip_returns_before_the_old_cascade(page):
-    """PULSE: Excellent also matches the older /^PULSE: (Excellent|
-    Great|Good)/ rule below it. Falling through would repaint it as an
-    ordinary green chip and undo the separation."""
-    chip = _fn(page, "function chipHtml")
-    early = chip[:chip.find('let cls = "sl-chip"')]
-    assert "return" in early and "sl-trust" in early
-
-
 # ---------------------------------------------------------------
 # 5. THE STYLES EXIST
 # ---------------------------------------------------------------
-@pytest.mark.parametrize("cls", [
-    ".sl-trust", ".sl-trust-up", ".sl-trust-dn",
-    ".sl-double", ".sl-skip", ".sl-muted",
-])
-def test_every_new_class_has_a_rule(page, cls):
-    assert re.search(re.escape(cls) + r"\s*\{", page), f"{cls} has no CSS"
-
-
-def test_the_measurements_are_written_down_next_to_the_styling(page):
-    """The operator's condition was 'only if they are genuine'. The
-    numbers that answered it live beside the code they justify, so the
-    next person to change this has to argue with the evidence."""
-    for fact in ("+3.04%", "+2.17%", "+0.81%", "-1.61%"):
-        assert fact in page, f"the {fact} measurement is not recorded"

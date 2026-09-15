@@ -160,15 +160,6 @@ def test_a_missing_database_is_not_an_error(tmp_path, monkeypatch):
     assert st._gl_rows_from_the_close() == []
 
 
-def test_the_board_says_which_session_it_is_showing():
-    text = BOARD.read_text(encoding="utf-8", errors="replace")
-    assert "at_close" in text, (
-        "board.html never reads at_close -- it will print a closing "
-        "price with no indication that it is one")
-    assert "CLOSE (not live)" in text, (
-        "the board does not tell him the prices are a close")
-
-
 def test_the_panel_lifts_the_label_to_the_top():
     """Row-by-row inspection is not a label. The page reads one flag."""
     state_py = (ROOT / "dashboard" / "state.py").read_text(

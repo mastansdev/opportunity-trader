@@ -234,6 +234,21 @@ STEPS = [
     #
     # BEFORE "universe", which reads the membership when it decides
     # what is tradeable tomorrow.
+    # ---- A COMPANY THAT ENTERS A BUSINESS CARRIES IT. 15 Sep 2026. ----
+    #
+    #     "add newly entering sectors to the stocks like = ULTRATECH
+    #      cement add wires, cables business along with cement"
+    #
+    # tools/record_sector_impact.py was run by hand, so an entry was
+    # remembered only when someone thought to. It now runs every close,
+    # and a company's OWN confirmed filing ("NAME: CO commences
+    # production of ...") adds that business to its THEMES -- see
+    # core/sector_impact.confirmed_entry() for how strict that is.
+    ("businesses", "Record new-business entries and add them to the company",
+     ["tools/record_sector_impact.py"],
+     "UltraTech made wires & cables from 1 Sep while its row said CEMENT, "
+     "so a cables move never counted it."),
+
     ("membership", "Refresh the NIFTY 50 and F&O lists",
      ["tools/index_members.py"],
      "F&O membership decides which stocks stop trading at 15:15 for the "

@@ -267,7 +267,7 @@ UNCLASSIFIED_MIN_TURNOVER_RS = 5 * 10 ** 7      # Rs 5 crore
 
 def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
            corporate_actions=None, min_turnover=MIN_TURNOVER_RS,
-           remarks=None, seen_recently=True):
+           remarks=None, seen_recently=True, name=None):
     """
     The whole YES/NO decision for one symbol. Pure function -- no I/O,
     no network, no clock. Returns (subscribe_bool, reason_string); the
@@ -287,7 +287,13 @@ def decide(symbol, bhav=None, sector="", excluded=None, bands=None,
 
     # -- checks that need no market data, so they work even offline --
 
-    if symbol in excluded or looks_like_a_fund(symbol):
+    # ---- THE NAME, WHEN THERE IS ONE. 15 September 2026. ----
+    # core/universe_builder.looks_like_a_fund() learned on 5 Sep that the
+    # company NAME decides -- "SDL" in "SSDL" read SARASWATI SAREE DEPOT
+    # LIMITED as a state development loan. The news matcher passes the
+    # name; this call never did, so SSDL was stamped "ETF" every morning
+    # and could never be traded. Found by the 15 Sep master audit.
+    if symbol in excluded or looks_like_a_fund(symbol, name):
         return False, "ETF / SGB / SME -- not on our board"
 
     # ---- A BLANK SECTOR CELL IS OUR GAP, NOT THE MARKET'S ----
@@ -550,6 +556,7 @@ def apply(rows, bhav_index, excluded=None, bands=None,
             # old fail-open behaviour is kept exactly.
             seen_recently=(symbol in seen_recently
                            if seen_recently is not None else True),
+            name=row.get("COMPANY NAME"),
         )
         row[SUBSCRIBE_COL] = YES if ok else NO
         row[REASON_COL] = "" if ok else reason

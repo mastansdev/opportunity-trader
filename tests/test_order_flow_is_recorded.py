@@ -411,24 +411,28 @@ def test_a_new_day_does_not_inherit_yesterdays_pressure():
     assert order_flow.pressure("TESTCO")["buy"] == 10.0
 
 
-def test_auto_entry_uses_the_flow_only_to_rescue():
-    """The one place it is allowed, and the shape that makes it safe.
+def test_auto_entry_uses_the_flow_to_rescue_and_at_entry():
+    """Two places now, each with its own shape.
 
-    still_buying() may overrule a row the PRICE test already called
-    faded. It may never call one faded, never open an entry on its
-    own, and never act on a missing or inferred reading.
+    1. _faded(): still_buying() may overrule a row the PRICE test
+       already called faded, never call one faded.
+    2. refuse_reason() (15 Sep 2026, his instruction: "check the
+       strength on buying or selling side"): a REAL reading that says
+       sellers are ahead or buying stopped refuses the entry. A missing
+       reading still refuses nothing -- tests/test_buyers_and_price_at_entry.py.
     """
     text = (ROOT / "core/auto_entry.py").read_text(encoding="utf-8",
                                                    errors="ignore")
-    # Code only. The comment above the rescue explains it at length,
-    # and scanning raw text would count its own explanation.
     code = "\n".join(line for line in text.splitlines()
                      if not line.strip().startswith("#"))
-    # Three is the minimum a single rescue costs: the import, the
-    # call, and reading the key off the result. A fourth means it has
-    # been used somewhere else.
-    assert code.count("still_buying") <= 3, (
-        "order_flow has spread beyond the single rescue in _faded()")
+    gate = text.split("def refuse_reason")[1].split("\ndef ")[0]
+    assert "still_buying(symbol)" in gate
+    assert "if flow is not None" in gate, "a missing reading must not refuse"
+    # Anywhere else would be a third use nobody decided on.
+    gate_code = code.split("def refuse_reason")[1].split("\ndef ")[0]
+    outside = code.replace(gate_code, "")
+    assert outside.count("still_buying") <= 3, (
+        "order_flow has spread beyond _faded() and the entry gate")
     body = text.split("def _faded")[1].split("\ndef ")[0]
     assert "still_buying" in body, "the rescue is not in _faded()"
     # The rescue returns False (not faded). Nothing in this block may

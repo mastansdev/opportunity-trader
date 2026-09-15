@@ -362,6 +362,155 @@ def _connect(path=None):
     return conn
 
 
+# ------------------------------------------------------------------
+# a company that has ENTERED a business carries it from then on
+# ------------------------------------------------------------------
+#
+# ---- 15 September 2026. ----
+#
+#     "add newly entering sectors to the stocks like = ULTRATECH cement
+#      add wires, cables business along with cement; RAYMOND = Textile,
+#      now DEFENCE adding into raymond"            -- the operator
+#
+# The master held one frozen description per company. UltraTech has been
+# producing wires & cables since 1 September and its row still said
+# CEMENT only, so a wires-and-cables sector move never counted it and
+# "who else does this land on" never found it the next time.
+#
+# The business goes into THEMES -- what the company DOES -- and nowhere
+# else. Not SECTOR: that is one bucket per stock and feeds the "beating
+# its sector" gate, which must keep comparing UltraTech with cement. Not
+# KEYWORDS: core/news_impact.py reads KEYWORDS as the company's IDENTITY,
+# so "DEFENCE" there would file every defence headline as RAYMOND's own
+# news.
+#
+# STRICTER THAN THE MEMORY ABOVE, because this writes to the file every
+# other part of the bot trusts. Over 11 September's store the detector
+# found ~50 entries and only a handful were real; the rest were results
+# cards ("Diversified | Diversified"), investor-presentation OCR, "Reliance
+# MULLS foray", and Reliance's ice-cream launch filed under MANGALAM. So a
+# business is added only when ALL hold:
+#   * the headline is the company's own filing card: "NAME: CO ..."
+#   * it is not hedged (mulls, plans to, may, considering, talks ...)
+#   * it is not a results card or an investor presentation
+#   * the business is specific -- not DIVERSIFIED, INDUSTRIAL, EXPORTS...
+# A missed entry can be added by hand; a false one mis-groups a company.
+_OWN_FILING = re.compile(r"^\W*[A-Z0-9][A-Z0-9 .&'()\-]{2,60}:\s*CO\b\.?")
+_HEDGED = re.compile(
+    r"\b(mulls?|plans?\s+to|planning|may|might|could|consider(?:s|ing)?|"
+    r"explor(?:e|es|ing)|evaluat(?:e|es|ing)|talks?|in\s+talks|likely|"
+    r"proposes?|proposal|to\s+study|sources)\b", re.IGNORECASE)
+_NOT_AN_ANNOUNCEMENT = re.compile(
+    r"investor\s+presentation|results\b|pulse\s+rating|earnings\s+release",
+    re.IGNORECASE)
+GENERIC_BUSINESSES = frozenset({
+    "DIVERSIFIED", "INDUSTRIAL", "EXPORTS", "INFRASTRUCTURE", "CONSUMER",
+    "AUTO", "FINANCIAL SERVICES", "LENDING", "MANUFACTURING", "RETAIL",
+    "SERVICES", "TRADING", "ENGINEERING", "CAPITAL GOODS",
+})
+
+
+def confirmed_entry(symbol, headline):
+    """The specific businesses this company's OWN filing says it has
+    entered, or []. Stricter than impact_of() -- this one writes."""
+    text = str(headline or "")
+    if not _OWN_FILING.match(text.upper()):
+        return []
+    if _HEDGED.search(text) or _NOT_AN_ANNOUNCEMENT.search(text):
+        return []
+    got = impact_of(symbol, text)
+    if not got:
+        return []
+    tags = [got["business"]] + list(got.get("also_named") or [])
+    upper = text.upper()
+    subject = upper.split(":", 1)[0]
+    # The business must be what the entry words are ABOUT: it has to sit
+    # right after them. "ENTERS TRAVEL SEGMENT ... BEYOND FOOD" is an
+    # entry into travel, and "EXPANDS INTO EASTERN INDIA" into a place.
+    windows = [(m.start(), m.end() + ENTRY_OBJECT_CHARS)
+               for m in ENTRY_SIGNALS.finditer(text)]
+    own = _own_description(symbol)
+    out = []
+    for tag in tags:
+        if tag in GENERIC_BUSINESSES or tag in subject or tag in own:
+            continue        # generic, or its own name / existing business
+        at = [m.start() for m in re.finditer(
+            r"(?<![A-Z0-9])" + re.escape(tag) + r"(?![A-Z0-9])", upper)]
+        if any(lo <= a <= hi for a in at for lo, hi in windows):
+            out.append(tag)
+    return out
+
+
+#: False under pytest (tests/conftest.py): record() is exercised by the
+#: suite, and a test must never write into data/master_stocks.csv.
+WRITES_TO_THE_REAL_MASTER = True
+
+#: How far after the entry words the business may sit.
+#: "COMMENCES COMMERCIAL PRODUCTION OF 11 LAKH KM WIRES" is 16 characters.
+ENTRY_OBJECT_CHARS = 40
+
+
+def _own_description(symbol):
+    """The company's own name and business, upper-case, from the master."""
+    try:
+        from core import sector_map
+        row = sector_map._row_of(symbol) or {}
+    except Exception:                                      # noqa: BLE001
+        row = {}
+    return " ".join(str(row.get(c) or "") for c in
+                    ("COMPANY NAME", "SECTOR", "INDUSTRY", "CORE BUSINESS")).upper()
+
+
+def add_businesses(symbol, businesses, why="", path=None):
+    """Append businesses to a company's THEMES in the master. Adds only
+    what is missing, never removes, never touches another column.
+    Returns the list actually added."""
+    from core import subscribe_list
+    if path is None and not WRITES_TO_THE_REAL_MASTER:
+        return []            # tests: see tests/conftest.py
+    path = path or subscribe_list.MASTER_CSV_PATH
+    name = str(symbol or "").strip().upper()
+    wanted = [str(b).strip().upper() for b in (businesses or []) if str(b).strip()]
+    if not name or not wanted:
+        return []
+    try:
+        import csv
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+    except Exception as exc:                               # noqa: BLE001
+        diagnostic(f"[SECTOR] could not read the master to add {name}'s "
+                   f"business ({exc})")
+        return []
+    added = []
+    for row in rows:
+        if str(row.get("SYMBOL") or "").strip().upper() != name:
+            continue
+        have = [t.strip() for t in re.split(r"[|,]", row.get("THEMES") or "")
+                if t.strip()]
+        upper = {t.upper() for t in have}
+        added = [b for b in wanted if b not in upper]
+        if added:
+            row["THEMES"] = " | ".join(have + added)
+        break
+    if not added:
+        return []
+    try:
+        subscribe_list.write_master(rows, path)
+    except Exception as exc:                               # noqa: BLE001
+        diagnostic(f"[SECTOR] could not write {name}'s new business ({exc})")
+        return []
+    reset()
+    try:
+        from core import sector_map
+        sector_map.reset()
+        sector_map._TAG_CACHE = None
+    except Exception:                                      # noqa: BLE001
+        pass
+    decision(f"[SECTOR] {name} now also carries {', '.join(added)} in its "
+             f"THEMES" + (f" -- {why[:140]}" if why else ""))
+    return added
+
+
 def record(symbol, headline, day, source=None, db_path=None, daily_db=None):
     """Write down who was hit, and what each of them did that day.
 
@@ -371,6 +520,14 @@ def record(symbol, headline, day, source=None, db_path=None, daily_db=None):
     got = impact_of(symbol, headline)
     if not got:
         return 0
+    # The company's own confirmed entry becomes part of what it does.
+    try:
+        entered = confirmed_entry(symbol, headline)
+        if entered:
+            add_businesses(symbol, entered,
+                           why=f"{str(day)[:10]}: {str(headline or '')[:120]}")
+    except Exception as exc:                               # noqa: BLE001
+        diagnostic(f"[SECTOR] could not add {symbol}'s new business ({exc})")
     day = str(day)[:10]
     rows = [(got["entrant"], "ENTRANT")]
     rows += [(s, "INCUMBENT") for s in got["incumbents"]]

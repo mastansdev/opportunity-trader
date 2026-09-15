@@ -279,6 +279,36 @@ def _no_wall_clock_dependence(monkeypatch):
 
     monkeypatch.setattr(engine_module, "_ORB_RECONCILE_DEADLINE_T",
                         dtime(23, 59, 59))
+    # 15 Sep 2026: process_tick refuses automatic exits before 09:15 on
+    # the machine clock. Pinned to midday so a suite run at 08:00 gives
+    # the same answer; the guard's own test sets the clock itself.
+    from datetime import datetime as _dt
+    monkeypatch.setattr(engine_module.Engine, "_wall_clock",
+                        staticmethod(lambda: _dt(2026, 9, 15, 12, 0)))
+    # 15 Sep 2026: the seat discipline in auto_entry.take() (09:20 start,
+    # alive only, one a minute) is OFF by default in tests so the entry
+    # mechanism keeps its coverage; tests/test_one_seat_at_a_time.py
+    # switches it on and tests it.
+    import config as _config
+    monkeypatch.setattr(_config, "ENTRY_NOT_BEFORE", None)
+    monkeypatch.setattr(_config, "ENTRY_ONLY_ALIVE", False)
+    monkeypatch.setattr(_config, "ENTRY_MIN_GAP_SECONDS", 0)
+    # Same for the buyers / price-following entry checks: off by default,
+    # tested in tests/test_buyers_and_price_at_entry.py.
+    monkeypatch.setattr(_config, "ENTRY_NEEDS_BUYERS", False)
+    monkeypatch.setattr(_config, "ENTRY_NEEDS_PRICE_FOLLOWING", False)
+    # 15 Sep 2026: production switched the % profit lock OFF for his
+    # rupee slabs. The % lock's code still has tests, so it stays ON
+    # here and the slabs stay OFF; tests/test_his_profit_slabs.py turns
+    # the slabs on and the lock off, which is production.
+    monkeypatch.setattr(_config, "PROFIT_LOCK_ENABLED", True)
+    monkeypatch.setattr(_config, "PROFIT_SLAB_ENABLED", False)
+    # 15 Sep 2026: sector_impact.record() now adds a confirmed new
+    # business to the company's THEMES. The suite calls record(); it must
+    # never write the real master. A test that wants the write passes an
+    # explicit path.
+    from core import sector_impact as _si
+    monkeypatch.setattr(_si, "WRITES_TO_THE_REAL_MASTER", False)
 
 
 @pytest.fixture(autouse=True)

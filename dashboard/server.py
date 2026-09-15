@@ -230,13 +230,6 @@ def build_app(dashboard_state, trade_controller, master_loader,
     # This is a local, single-operator dashboard. Re-reading a 60 KB file
     # per page load costs nothing and means a UI change is one refresh
     # away instead of one restart.
-    def _load_index_html():
-        try:
-            with open(INDEX_PATH, "r", encoding="utf-8") as f:
-                return f.read()
-        except OSError as exc:
-            return f"<pre>dashboard/static/index.html unreadable: {exc}</pre>"
-
     def _token_matches(candidate) -> bool:
         if operator_token is None:
             return True
@@ -259,24 +252,14 @@ def build_app(dashboard_state, trade_controller, master_loader,
     # it still carries panels the clean screen has not absorbed yet
     # (watchlist, some POST tables) and I am not throwing data away to
     # tidy a route.
-    @app.get("/full", response_class=HTMLResponse)
-    def index(token: str = ""):
-        if _token_matches(token):
-            html = _load_index_html().replace(
-                _TOKEN_PLACEHOLDER,
-                f'window.__OPERATOR_TOKEN__ = "{operator_token or ""}";',
-            )
-        else:
-            html = _load_index_html()  # placeholder empty -- view-only
-        # No-store, 2026-07-24: the operator restarted the bot with a
-        # new dashboard (the "Resume New Entries" button) but the
-        # browser kept serving the OLD cached page -- the button, and
-        # the corrected banner text, never showed. Telling the browser
-        # never to cache this HTML means a restart's UI changes are
-        # always picked up on the next plain refresh, no hard-reload
-        # needed. (The page pulls all live data over the websocket
-        # anyway, so there's nothing to gain from caching the shell.)
-        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+    # ---- ONE PAGE. 15 September 2026. ----
+    #
+    #     "bot is doing too many things which we left & i asked you to
+    #      delete them completely"                    -- the operator
+    #
+    # /full (index.html, 6,893 lines) and /board (board.html) are
+    # deleted. He uses /desk and nothing else; every old address now
+    # lands there, token carried, so a bookmark still works.
 
     # ---- THE SCREEN. 4 August 2026. ----
     #
@@ -360,6 +343,8 @@ def build_app(dashboard_state, trade_controller, master_loader,
     @app.get("/old")
     @app.get("/")
     @app.get("/app")
+    @app.get("/board")
+    @app.get("/full")
     def _to_the_board(token: str = ""):
         where = "/desk" + (f"?token={token}" if token else "")
         return RedirectResponse(where, status_code=307)
@@ -524,43 +509,6 @@ def build_app(dashboard_state, trade_controller, master_loader,
     # The React screen IS the dashboard, so it answers on "/". The old
     # page stays reachable at /screen and /old as a fallback if the CDN
     # that serves React is ever unreachable at 09:15.
-    @app.get("/board", response_class=HTMLResponse)
-    def one_table_board(token: str = ""):
-        """ONE table. 9 August 2026.
-
-            "tomorrow we will fix the dashboard with only one table.
-             no more top 50/20/10 gainers tables."
-
-        Served at /board, NOT at "/", until he has seen it on a live
-        morning. The same rule the React screen followed on 6 August:
-        a new page is offered beside the working one, never in place of
-        it, because a mistake here costs a session.
-        """
-        path = os.path.join(os.path.dirname(INDEX_PATH), "board.html")
-        try:
-            with open(path, "r", encoding="utf-8") as handle:
-                html = handle.read()
-        except OSError as exc:                             # noqa: BLE001
-            return f"<pre>dashboard/static/board.html unreadable: {exc}</pre>"
-
-        # ---- THE BOARD CAN TRADE NOW. 11 August 2026. ----
-        #
-        #     "where is BUY button & QTY ?"
-        #
-        # /board was read-only because it was served raw -- the token
-        # placeholder was never replaced, so IS_OPERATOR was false and
-        # the page drew "view only" on every row. He trades by hand;
-        # that made the whole screen useless to him.
-        #
-        # Same replacement, same placeholder, same rule as "/" and
-        # /screen: without the operator link the string stays empty and
-        # the page draws no BUY control at all -- refused at the button
-        # rather than at the endpoint.
-        if _token_matches(token):
-            html = html.replace(
-                _TOKEN_PLACEHOLDER,
-                f'window.__OPERATOR_TOKEN__ = "{operator_token or ""}";')
-        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/mode")
     def trading_mode():

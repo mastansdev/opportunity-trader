@@ -210,28 +210,3 @@ def test_the_order_is_stable_between_refreshes(db):
 # ---------------------------------------------------------------
 # 3. THE PANEL FORWARDS AND HIGHLIGHTS
 # ---------------------------------------------------------------
-def test_the_two_top_tiers_are_highlighted():
-    page = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = page[page.find("const LEAD = {"):]
-    block = block[:block.find("const mini =")]
-    assert "EXCEPTIONAL" in block and "STRONG" in block
-    assert "MIXED" not in block and "WEAK" not in block, (
-        "only the two he named get lifted -- highlighting everything "
-        "highlights nothing")
-
-
-def test_the_highlight_classes_exist_in_the_stylesheet():
-    page = open("dashboard/static/index.html", encoding="utf-8").read()
-    for cls in (".wl-lead", ".wl-second", ".wl-muted"):
-        assert cls + " " in page or cls + "{" in page, f"{cls} not styled"
-
-
-def test_weak_is_not_faded():
-    """Their guide: the tier counts how many frameworks AGREE. Fading
-    WEAK would assert the company is bad, which it does not say."""
-    page = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = page[page.find("const chip = (r) =>"):]
-    block = block[:block.find("const col =")]
-    assert "wl-muted" in block
-    assert 'call === "AVOID"' in block, (
-        "the mute is about an ANSWERED call, not about the tier")

@@ -60,7 +60,7 @@ Author : H&M Opportunity Trader
 """
 
 from config import ENABLE_SLOT_ROTATION
-from datetime import time as dtime
+from datetime import datetime, time as dtime
 
 LONG = "LONG"
 
@@ -775,6 +775,49 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None,
                     f"part of the move worth having has gone "
                     f"(measured: 61 such trades lost 25,026)")
 
+    # ---- WHO IS WINNING, AND IS THE PRICE FOLLOWING. 15 Sep 2026. ----
+    #
+    #     "i asked to check the strength on buying or selling side &
+    #      price action stocks were made during the trades. not a fixed
+    #      % to check the freshness"                 -- the operator
+    #
+    # Two questions, asked at the moment of buying, direction only:
+    #
+    #   1. BUYERS. Are buyers ahead today and still adding? The same
+    #      reading the BUYING_DRIED_UP exit already trusts. Before the
+    #      minute store has enough session, the live running total says
+    #      at least whether buyers or sellers are ahead.
+    #   2. PRICE. Since the board ranked it, has the price held or gone
+    #      up? SUNTV was ranked at 476.94 and bought at 471.64.
+    #
+    # No reading is not a refusal -- the rule this file keeps for the
+    # tick and the flow. A reading that says sellers, or a falling
+    # price, is.
+    from config import ENTRY_NEEDS_BUYERS, ENTRY_NEEDS_PRICE_FOLLOWING
+    if ENTRY_NEEDS_PRICE_FOLLOWING:
+        drift = _num(row.get("drift_since_rank_pct"))
+        if drift is not None and drift < 0:
+            return (f"price fell {abs(drift):.1f}% since it was ranked -- "
+                    f"the price is not following")
+    if ENTRY_NEEDS_BUYERS:
+        try:
+            from core.order_flow import pressure, still_buying
+            flow = still_buying(symbol)
+            if flow is not None:
+                if not flow.get("still_buying"):
+                    side = ("sellers are ahead today" if not flow.get("positive")
+                            else "buying has stopped growing")
+                    return (f"{side} (buy-sell {flow.get('delta'):,.0f}, was "
+                            f"{flow.get('was'):,.0f} "
+                            f"{flow.get('minutes')} min ago)")
+            else:
+                live = pressure(symbol)
+                if live is not None and live.get("delta", 0) <= 0:
+                    return (f"sellers are ahead today (buy-sell "
+                            f"{live.get('delta'):,.0f})")
+        except Exception as exc:                           # noqa: BLE001
+            _broke("order flow at entry", exc)
+
     held = {str(s).upper() for s in (held or [])}
     if symbol in held:
         return "already holding it -- no pyramiding"
@@ -1453,6 +1496,60 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                         "score": _num(row.get("score"))})
             continue
 
+        # ---- ONE SEAT AT A TIME, TO THE BEST MOVER. 15 Sep 2026. ----
+        #
+        #     "whats the use of bot trading if it fill random stock &
+        #      unmoving stock while good moving stock waiting for seat &
+        #      why i need to keep everything ON rotation on ? why can't
+        #      bot take the best moving stock instead of racing to fill
+        #      with shit stocks with shit reasons"     -- the operator
+        #
+        # This loop sorted the field best-first and then gave a seat to
+        # EVERY row that passed, in the same second. At 09:16 the board
+        # held its first handful of names, so all ten seats went by
+        # 09:18 -- KEC, MPHASIS, SWSOLAR, TMPV, INFY, NEWGEN, TENNIND --
+        # while EMUDHRA, the day's #1 at score 74, was first seen at
+        # 09:18 and FSL (#5) at 09:21. Rotation is a patch for seats
+        # wasted like that; the fix is not wasting them.
+        #
+        # Three rules, all simple:
+        #   1. nothing before ENTRY_NOT_BEFORE -- the whole market is
+        #      scanned before the first seat is given;
+        #   2. the seat goes only to a stock MOVING NOW (liveness
+        #      "alive"): not fading, not "cannot say";
+        #   3. ONE new position per ENTRY_MIN_GAP_SECONDS, and it is the
+        #      best of the field at that moment -- so the next seat is
+        #      decided on a fresh ranking, not in the same breath.
+        # A pace, not a limit: every seat can still fill, one best
+        # mover at a time.
+        from config import (ENTRY_NOT_BEFORE, ENTRY_MIN_GAP_SECONDS,
+                            ENTRY_ONLY_ALIVE)
+        clock = now or datetime.now()
+        if ENTRY_NOT_BEFORE and clock.strftime("%H:%M") < ENTRY_NOT_BEFORE:
+            out.append({"symbol": symbol, "taken": False,
+                        "why": f"scanning the market until {ENTRY_NOT_BEFORE} "
+                               f"before the first seat",
+                        "score": _num(row.get("score"))})
+            continue
+        if ENTRY_ONLY_ALIVE and str(row.get("state") or "").lower() != "alive":
+            out.append({"symbol": symbol, "taken": False,
+                        "why": "not moving right now -- a seat goes only to "
+                               "a stock that is",
+                        "score": _num(row.get("score"))})
+            continue
+        last_at = getattr(engine, "_last_auto_entry_at", None)
+        if ENTRY_MIN_GAP_SECONDS and last_at is not None:
+            try:
+                since = (clock - last_at).total_seconds()
+            except TypeError:
+                since = None
+            if since is not None and 0 <= since < float(ENTRY_MIN_GAP_SECONDS):
+                out.append({"symbol": symbol, "taken": False,
+                            "why": f"next seat in {ENTRY_MIN_GAP_SECONDS - since:.0f}s "
+                                   f"-- one at a time, to the best mover then",
+                            "score": _num(row.get("score"))})
+                continue
+
         plan = row["plan"]
         # ---- HIS FORMAT, AND NO SCORE. 19 August 2026. ----
         #
@@ -1562,6 +1659,10 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                         row.get("drift_since_rank_pct")),
                     "reason_kind": (row.get("news_kind")
                                     or row.get("reason_kind")),
+                    # The sentence he sees on the board for this pick,
+                    # kept on the trade. 15 September 2026.
+                    "entry_why": (str(row.get("why"))[:300]
+                                  if row.get("why") else None),
                     "reason_pct_of_company": _reason_size(row, symbol),
                 }
             except Exception:                              # noqa: BLE001
@@ -1575,6 +1676,10 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                         "why": f"the order path refused it ({exc})"})
             continue
         held.add(symbol)
+        try:
+            engine._last_auto_entry_at = now or datetime.now()
+        except Exception:                                  # noqa: BLE001
+            pass
         _journal_pick(engine, row, True, detail)
         out.append({"symbol": symbol, "taken": True, "why": detail,
                     "score": _num(row.get("score"))})

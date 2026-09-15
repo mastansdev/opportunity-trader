@@ -109,31 +109,3 @@ def test_the_book_is_not_called_in_sync_when_they_differ():
 
 # ------------------------------------------------- and the page reads it
 
-def test_the_trade_tab_renders_that_bucket():
-    """The half that was missing. The bucket has always been in the
-    payload; nothing drew it."""
-    from pathlib import Path
-
-    src = Path("dashboard/static/board.html").read_text(encoding="utf-8")
-    at = src.find("function drawTrade")
-    assert at > 0
-    block = src[at:at + 3000]
-    assert "quantity_differs" in block, (
-        "his half of a shared symbol is still shown nowhere")
-    assert "only_at_broker" in block, (
-        "the stocks only he holds have stopped being shown")
-
-
-def test_his_row_goes_to_HIS_table():
-    """Pushed into `mine`, never `bot`. A row of his in the bot's table
-    is the MARINE complaint from earlier the same day, backwards."""
-    from pathlib import Path
-
-    src = Path("dashboard/static/board.html").read_text(encoding="utf-8")
-    # The FIRST "quantity_differs" in the file is the note explaining
-    # this fault. The loop is the one hanging off broker_sync.
-    at = src.find("broker_sync || {}).quantity_differs")
-    assert at > 0, "nothing reads the bucket off the payload"
-    block = src[at:at + 300]
-    assert "mine.push" in block, block
-    assert "bot.push" not in block, block

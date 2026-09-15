@@ -70,6 +70,25 @@ HEADLINE = ("ULTRATECH CEMENT: CO. COMMENCES COMMERCIAL PRODUCTION OF "
             "INFRASTRUCTURE")
 
 
+@pytest.fixture(autouse=True)
+def _ultratech_as_it_was_on_1_september(monkeypatch):
+    """His example is UltraTech ENTERING wires & cables on 1 September.
+    On 15 September the master learned that business, so on the live
+    master UltraTech is no longer an entrant -- correctly. These tests
+    are about the event as it happened, so UltraTech is taken back out
+    of the wires and cables holders here."""
+    real = si.business_tags
+    si.reset()
+
+    def before():
+        return {tag: (frozenset(s - {"ULTRACEMCO"}) if tag in ("WIRES", "CABLES")
+                      else s) for tag, s in real().items()}
+    monkeypatch.setattr(si, "business_tags", before)
+    monkeypatch.setattr(si, "_own_description",
+                        lambda symbol: "ULTRATECH CEMENT LIMITED CEMENT"
+                        if symbol == "ULTRACEMCO" else "")
+
+
 @pytest.fixture()
 def store(tmp_path):
     return str(tmp_path / "sector_impact.db")

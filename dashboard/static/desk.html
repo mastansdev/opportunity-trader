@@ -249,7 +249,20 @@ tr.hand td{background:var(--sunk)}
 
     <div class="card">
       <div class="hd"><b>Open now</b>
-        <span class="sub">the only thing that can still hurt you</span></div>
+        <span class="sub">the only thing that can still hurt you</span>
+        <!-- EXIT ALL, BROUGHT BACK. 15 September 2026.
+             "i didn't find that option at all in new dashboards. that
+              option we maintained at earliest dashboard & later not
+              brought into next versions"
+             It lived on index.html; this page replaced it and the
+             button never came along. POST /api/exit_all had no caller.
+             Closes only the BOT's own positions, never his Dhan ones. -->
+        <button id="exitall" onclick="doExitAll()" style="float:right;font:inherit;
+          font-size:12px;font-weight:600;padding:3px 10px;border-radius:6px;
+          cursor:pointer;border:1px solid #c0392b;background:#fdecea;color:#a93226">EXIT ALL</button>
+        <button id="resumeall" onclick="doResume()" style="float:right;margin-right:6px;font:inherit;
+          font-size:12px;font-weight:600;padding:3px 10px;border-radius:6px;
+          cursor:pointer;border:1px solid #1e8449;background:#e9f7ef;color:#1e8449">RESUME BUYING</button></div>
       <div class="scroll" id="open"></div>
     </div>
 
@@ -1211,12 +1224,41 @@ async function doSell(sym){
   }catch(e){ alert("The request never arrived: " + e); }
 }
 
+async function doExitAll(){
+  if (!IS_OPERATOR){ alert("View-only link -- nothing was sent."); return; }
+  if (!confirm("EXIT ALL -- close every position the bot opened?\n"
+             + "(Your own Dhan positions are not touched.)")) return;
+  var pause = confirm("ALSO stop new entries until you resume?\n\n"
+             + "OK = exit AND pause buying\nCancel = exit only, keep buying");
+  try{
+    var res = await fetch("/api/exit_all" + (pause ? "?pause=true" : ""), {method:"POST",
+      headers:{"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+    var j = await res.json();
+    alert(j.success ? ("EXIT ALL sent" + (pause ? " -- new entries PAUSED" : " -- buying continues"))
+                    : ("Refused: " + (j.error || j.detail || "unknown")));
+  }catch(e){ alert("The request never arrived: " + e); }
+}
+
+async function doResume(){
+  if (!IS_OPERATOR){ alert("View-only link -- nothing was sent."); return; }
+  if (!confirm("RESUME new entries? The bot may buy again straight away.")) return;
+  try{
+    var res = await fetch("/api/resume_entries", {method:"POST",
+      headers:{"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+    var j = await res.json();
+    alert(j.success ? "Buying RESUMED" : ("Refused: " + (j.error || j.detail || "unknown")));
+  }catch(e){ alert("The request never arrived: " + e); }
+}
+
 /* ---------------- 4. what am I holding ---------------- */
 function drawOpen(d){
   var rows = rowsOf(d.open_positions);
   if (!rows.length){
     $("open").innerHTML = '<p class="empty">Nothing open.</p>'; return; }
-  $("open").innerHTML = '<table><thead><tr><th>Stock</th>'
+  /* 15 Sep 2026: "tracking of the entry time to exit time with time
+     stamps will give user more data" -- the snapshot has carried
+     entry_time / exit_time all along; this page never drew them. */
+  $("open").innerHTML = '<table><thead><tr><th>Stock</th><th>Bought at</th>'
     + '<th class="num">Qty</th><th class="num">Bought</th><th class="num">Now</th>'
     + '<th class="num">P&amp;L</th><th>Stop &mdash; how close</th><th>Why you own it</th>'
     + (IS_OPERATOR ? '<th></th>' : '') + '</tr></thead><tbody>'
@@ -1252,6 +1294,7 @@ function drawOpen(d){
       var near = (px && stop && px > stop) ? Math.max(0, Math.min(100,
         100 - ((px - stop) / px * 100) * 12)) : 0;
       return '<tr><td><b>'+esc(r.symbol)+'</b></td>'
+        + '<td class="dim">'+esc(r.entry_time||"—")+'</td>'
         + '<td class="num">'+esc(r.qty)+'</td>'
         + '<td class="num">'+inr2(entry)+'</td>'
         + '<td class="num">'+inr2(px)+'</td>'
@@ -1261,7 +1304,7 @@ function drawOpen(d){
            : inr2(stop) + (px ? ' · '+((px-stop)/px*100).toFixed(1)+'% away' : '')
              + '<div class="stopbar"><i style="width:'+near+'%"></i></div>')
         + '</td>'
-        + '<td class="dim" style="font-size:11.5px">'+esc(r.entry_reason||r.reason_summary||"")+'</td>'
+        + '<td class="dim" style="font-size:11.5px">'+esc(r.entry_why||r.reason_summary||r.entry_reason||"")+'</td>'
         + (IS_OPERATOR ? '<td><button class="skip" style="padding:4px 10px;'
             + 'font-size:11px" onclick="doSell(\''+esc(r.symbol)+'\')">Sell</button></td>' : '')
         + '</tr>';
@@ -1280,6 +1323,7 @@ function drawClosed(d){
     var p = num(r.pnl) || 0;
     if (byHand) hand += p; else bot += p;
     return '<tr class="'+(byHand?"hand":"")+'"><td><b>'+esc(r.symbol)+'</b></td>'
+      + '<td class="dim">'+esc(r.entry_time||"—")+' → '+esc(r.exit_time||"—")+'</td>'
       + '<td class="num">'+inr2(r.entry_price)+'</td>'
       + '<td class="num">'+inr2(r.exit_price)+'</td>'
       + '<td class="num">'+esc(r.qty)+'</td>'
@@ -1292,16 +1336,16 @@ function drawClosed(d){
           ? r.holding_minutes : (num(r.holding_seconds)/60))+'</td>'
       + '<td class="dim">'+esc(String(r.exit_reason||"").replace(/_/g," ").toLowerCase())+'</td></tr>';
   }).join("");
-  $("closed").innerHTML = '<table><thead><tr><th>Stock</th><th class="num">In</th>'
+  $("closed").innerHTML = '<table><thead><tr><th>Stock</th><th>Bought → Sold</th><th class="num">In</th>'
     + '<th class="num">Out</th><th class="num">Qty</th>'
     + '<th class="num">P&amp;L</th><th class="num">Charges</th>'
     + '<th class="num">Held</th><th>Why it ended</th></tr></thead><tbody>'
     + body
-    + '<tr class="foot"><td colspan="4">The bot’s own trades</td>'
+    + '<tr class="foot"><td colspan="5">The bot’s own trades</td>'
     + '<td class="num">'+pnl(bot)+'</td><td colspan="2"></td></tr>'
-    + '<tr class="foot"><td colspan="4">Closed by hand</td>'
+    + '<tr class="foot"><td colspan="5">Closed by hand</td>'
     + '<td class="num">'+pnl(hand)+'</td><td colspan="2"></td></tr>'
-    + '<tr class="foot"><td colspan="4">Day</td>'
+    + '<tr class="foot"><td colspan="5">Day</td>'
     + '<td class="num">'+pnl(bot+hand)+'</td><td colspan="2"></td></tr>'
     + '</tbody></table>';
 }
@@ -1338,9 +1382,21 @@ function drawRest(d){
 
   /* --- Trade: paper / real / his own --- */
   var closed = rowsOf(d.closed_positions);
+  /* ---- EVERY BUY, IN AND OUT, AND WHY. 15 September 2026. ----
+   *     "in trade tab give me those details of every buy with time in &
+   *      out , reason of entry & exit , time held , qty held , P&L,
+   *      Charges"
+   * Open positions are listed too, marked still open. */
   var tradeCols = [
-    ["Stock","symbol"], ["In", function(r){ return inr2(r.entry_price); }, 1],
-    ["Out", function(r){ return inr2(r.exit_price); }, 1],
+    ["Stock","symbol"],
+    ["Time in", function(r){ return esc(r.entry_time || "—"); }],
+    ["Time out", function(r){ return r._open ? '<b>still open</b>' : esc(r.exit_time || "—"); }],
+    ["Held", function(r){
+      if (r._open) return "—";
+      return mins(r.holding_minutes !== undefined && r.holding_minutes !== null
+        ? r.holding_minutes : (num(r.holding_seconds)/60)); }, 1],
+    ["In", function(r){ return inr2(r.entry_price); }, 1],
+    ["Out", function(r){ return r._open ? "—" : inr2(r.exit_price); }, 1],
     /* ---- OUR MONEY IS THE NET AMOUNT. 6 September 2026. ----
      *
      *     "our money or profit is NET Amount after charges"
@@ -1357,12 +1413,18 @@ function drawRest(d){
     ["Charges", function(r){
       return (r.charges === null || r.charges === undefined)
         ? "—" : inr2(r.charges); }, 1],
-    ["Why it ended", function(r){
-      return esc(String(r.exit_reason||"").replace(/_/g," ").toLowerCase()); }]
+    ["Why bought", function(r){
+      return '<span style="font-size:11.5px">' + esc(r.entry_why || r.reason_summary
+        || String(r.entry_reason||"").replace(/_/g," ").toLowerCase() || "—") + '</span>'; }],
+    ["Why sold", function(r){
+      return r._open ? "—"
+        : esc(String(r.exit_reason||"").replace(/_/g," ").toLowerCase()); }]
   ];
   var isReal = switchIsOn(d);
-  simple("paper", isReal ? [] : closed.filter(function(r){
-    return !HAND.test(String(r.exit_reason||"")); }), tradeCols,
+  var openNow = rowsOf(d.open_positions).map(function(r){
+    var o = {}; for (var k in r) o[k] = r[k]; o._open = true; return o; });
+  simple("paper", isReal ? [] : openNow.concat(closed.filter(function(r){
+    return !HAND.test(String(r.exit_reason||"")); })), tradeCols,
     isReal ? "The switch is ON — today's trades are real, and are in the next table."
            : "No paper trade has closed today.");
   simple("real", isReal ? closed.filter(function(r){

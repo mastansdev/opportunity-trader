@@ -75,14 +75,6 @@ BOARD_MUST_READ = {
 
 
 @pytest.mark.parametrize("field", sorted(BOARD_MUST_READ))
-def test_the_trading_screen_reads_it(field):
-    text = BOARD.read_text(encoding="utf-8", errors="replace")
-    assert field in text, (
-        f"board.html never reads snapshot['{field}'] -- "
-        f"{BOARD_MUST_READ[field]}. That is the screen he trades from.")
-
-
-@pytest.mark.parametrize("field", sorted(BOARD_MUST_READ))
 def test_the_snapshot_publishes_what_the_board_reads(field):
     """A page reading a field state.py stopped publishing renders an
     empty cell forever and looks like a working panel with no data."""
@@ -110,59 +102,9 @@ FULL_MUST_READ = {
 }
 
 
-@pytest.mark.parametrize("field", sorted(FULL_MUST_READ))
-def test_the_diagnostics_screen_reads_it(field):
-    text = FULL.read_text(encoding="utf-8", errors="replace")
-    assert field in text, (
-        f"index.html never reads snapshot['{field}'] -- "
-        f"{FULL_MUST_READ[field]}. It is not on /board either, so the "
-        f"bot computes it and nobody can see it.")
-
-
 # ---------------------------------------------------------------
 # 3. YOU CAN GET BETWEEN THEM
 # ---------------------------------------------------------------
-
-def test_the_board_links_to_the_diagnostics_screen():
-    text = BOARD.read_text(encoding="utf-8", errors="replace")
-    assert 'id="tofull"' in text, (
-        "the board has no link to /full -- he has to remember a URL")
-    assert '"/full"' in text
-
-
-def test_the_diagnostics_screen_links_back():
-    text = FULL.read_text(encoding="utf-8", errors="replace")
-    assert 'id="otToBoard"' in text, (
-        "/full has no way back to the trading screen")
-
-
-@pytest.mark.parametrize("page,element,target", [
-    (BOARD, "tofull", "/full"),
-    (FULL, "otToBoard", "/board")])
-def test_the_link_carries_the_token(page, element, target):
-    """A link that drops the token lands him on a read-only screen,
-    where the BUY button and the ON switch simply are not drawn. That
-    reads as "the dashboard is broken".
-
-    Checks the MECHANISM, not proximity: board.html sets the href in a
-    script at the bottom of the file, so a window measured forwards
-    from the anchor tag finds nothing and proves nothing.
-    """
-    text = page.read_text(encoding="utf-8", errors="replace")
-    assert element in text, f"{page.name} has no {element} link"
-    # The href must be built from the CURRENT page's token, so a
-    # view-only link stays view-only on the far side.
-    assert 'URLSearchParams(location.search).get("token")' in text, (
-        f"{page.name} does not read the token off its own URL")
-    assert target in text, f"{page.name} does not point at {target}"
-    built = [line for line in text.splitlines()
-             if ".href" in line and target in line]
-    assert built, (
-        f"{page.name} never assigns an href pointing at {target}")
-    assert any("token" in line for line in built), (
-        f"{page.name} builds the {target} link without the token -- he "
-        f"lands on a screen with no BUY button and no ON switch")
-
 
 # ---------------------------------------------------------------
 # 4. THE RETIRED PAGES STAY RETIRED

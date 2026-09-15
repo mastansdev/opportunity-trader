@@ -134,20 +134,6 @@ def test_mixed_shapes_do_not_lose_the_batch(log):
 
 # ---------------------------------------------------------- on the screen
 
-def test_the_board_has_somewhere_to_show_it():
-    import io
-
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    board = io.open(os.path.join(root, "dashboard", "static", "board.html"),
-                    encoding="utf-8").read()
-    assert 'data-tab="refused"' in board
-    assert 'id="refused-pane"' in board
-    switch = board.split("const name = b.dataset.tab;")[1][:400]
-    assert '"refused"' in switch, (
-        "a tab whose name is not in the switcher list is a dead button")
-    assert "s.refused_today" in board
-
-
 def test_the_row_carries_it_to_the_page():
     import inspect
 

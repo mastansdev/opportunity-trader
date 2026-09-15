@@ -216,24 +216,6 @@ def test_a_missing_price_gives_no_pnl_rather_than_zero():
 # ---------------------------------------------------------------
 # 5. IT REACHES THE PAGE, AND THE SCOLDING IS GONE
 # ---------------------------------------------------------------
-def test_the_book_is_in_the_payload_and_drawn():
-    src = open("dashboard/state.py", encoding="utf-8").read()
-    assert '"book": self.build_book(open_positions),' in src
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    assert "function renderBook" in html
-    assert "renderBook(snap.book)" in html
-    assert 'id="otBook"' in html
-    assert html.index('id="otBook"') < html.index('id="tabNav"'), (
-        "the book must sit above the tabs -- it is the answer to 'what "
-        "do I own', which is true on every tab")
-
-
-def test_the_word_mismatch_is_gone_from_the_screen():
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    assert 'badge.textContent = "MISMATCH"' not in html
-    assert "before trading further" not in html
-
-
 def test_the_log_no_longer_calls_a_hand_placed_trade_a_fault():
     """It warned every sixty seconds that the books "DO NOT MATCH"
     because he had bought something from the Dhan app."""

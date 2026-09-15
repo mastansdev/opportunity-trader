@@ -135,12 +135,24 @@ def test_telegram_has_both_words_and_says_what_each_does():
     assert "arm or disarm new entries" not in src
 
 
-def test_it_comes_back_trading_after_a_restart():
-    """Off on every restart, like the switch. A process that comes back
-    while he is away comes back trading -- a pause that silently
-    outlived the session would be a bot that never buys again."""
+def test_there_is_one_pause_and_the_buying_lane_reads_it():
+    """15 Sep 2026: the dashboard said "new entries PAUSED" and the
+    ranked lane -- the one that buys -- never read that flag. Now
+    Engine.entries_paused is a view of trade_controller's flag, so the
+    dashboard button and Telegram PAUSE are the same switch.
+
+    It survives a restart (main.py restore_pause_state, 25 July: a crash
+    must never silently resume buying); preflight names the file."""
+    from core.engine import Engine
+    engine = Engine()
+    engine.trade_controller._write_pause_flag = lambda paused: None
+    assert engine.entries_paused is False
+    engine.trade_controller.request_pause_new_entries()   # dashboard
+    assert engine.entries_paused is True
+    engine.entries_paused = False                         # Telegram RESUME
+    assert engine.trade_controller.is_new_entries_paused() is False
     src = (ROOT / "core" / "engine.py").read_text(encoding="utf-8")
-    assert "self.entries_paused = False" in src
+    assert "self.entries_paused = False" not in src
 
 
 # ---------------------------------------------------------------

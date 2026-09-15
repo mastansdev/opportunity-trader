@@ -531,16 +531,27 @@ class TrailingStopEngine:
     # Restart persistence (core/state_store.py)
     # --------------------------------------------------
 
+    # ---- A RESTART DROPPED THE PEAK AND THE ENTRY. 15 Sep 2026. ----
+    #
+    # export_state() kept stop, recent and direction only. peak, entry,
+    # base_stop and locked were lost on every restart, so for a position
+    # carried through one the 1:1 lock had no entry to measure risk from,
+    # and the profit protection had no peak -- it silently never moved
+    # the stop again. Found while building his rupee slabs; nothing was
+    # open across today's two restarts, so no trade was hit.
+    _CARRIED = ("peak", "entry", "base_stop", "locked", "has_event")
+
     def export_state(self):
         """Plain-dict snapshot, safe to json.dump directly."""
-        return {
-            symbol: {
-                "stop": s["stop"],
-                "recent": list(s["recent"]),
-                "direction": s["direction"],
-            }
-            for symbol, s in self._state.items()
-        }
+        out = {}
+        for symbol, s in self._state.items():
+            row = {"stop": s["stop"], "recent": list(s["recent"]),
+                   "direction": s["direction"]}
+            for key in self._CARRIED:
+                if key in s:
+                    row[key] = s[key]
+            out[symbol] = row
+        return out
 
     def load_state(self, state):
         """Restores from a snapshot produced by export_state().
@@ -553,3 +564,66 @@ class TrailingStopEngine:
                 "recent": list(s.get("recent", s.get("recent_lows", []))),
                 "direction": s.get("direction", LONG),
             }
+            for key in self._CARRIED:
+                if key in s:
+                    self._state[symbol][key] = s[key]
+
+    # ---- HIS PROFIT SLABS, EXACTLY AS HE SAID THEM. 15 Sep 2026. ----
+    #
+    #     "once mtm profit cross 5K then shift the Trailing stop loss to
+    #      5K price of that stock then increase for every 1 k upside
+    #      movement"                                -- 14 September 2026
+    #
+    # Built that night as a PERCENTAGE instead (arm at +2.5%, give back
+    # 0.5%) -- not his rule. He caught it on 15 Sep. This is his rule:
+    #
+    #     best MTM reached   stop locks
+    #     Rs 5,000           Rs 5,000
+    #     Rs 6,000           Rs 6,000   ... up Rs 1,000 at a time, never down
+    #
+    #     stop price = entry + locked rupees / quantity
+    #
+    # Rupees need the quantity, which this file does not keep -- the
+    # engine passes it in. LONG only. Only ever raises the stop.
+    def apply_profit_slab(self, symbol, qty):
+        """Raise the stop to his rupee slab. Returns the new stop, or None."""
+        try:
+            from config import (PROFIT_SLAB_ENABLED, PROFIT_SLAB_FIRST_RS,
+                                PROFIT_SLAB_STEP_RS)
+        except Exception:                                      # noqa: BLE001
+            return None
+        if not PROFIT_SLAB_ENABLED:
+            return None
+        state = self._state.get(symbol)
+        if not state or state.get("direction") != LONG:
+            return None
+        try:
+            entry = float(state.get("entry") or 0)
+            peak = float(state.get("peak") or 0)
+            qty = float(qty or 0)
+            first = float(PROFIT_SLAB_FIRST_RS)
+            step = float(PROFIT_SLAB_STEP_RS)
+        except (TypeError, ValueError):
+            return None
+        if entry <= 0 or peak <= 0 or qty <= 0 or first <= 0 or step <= 0:
+            return None
+        # A paisa of float error: exactly Rs 5,000 computes as 4,999.9999.
+        best = (peak - entry) * qty + 1e-6
+        if best < first:
+            return None
+        import math
+        locked = first + step * math.floor((best - first) / step)
+        stop = round(entry + locked / qty, 2)
+        if stop <= (state.get("stop") or 0):
+            return None
+        state["stop"] = stop
+        if state.get("slab") != locked:
+            state["slab"] = locked
+            try:
+                from core.logger import decision
+                decision(f"[SLAB] {symbol}: best profit Rs {best:,.0f} -- "
+                         f"stop moved to {stop:.2f}, locking Rs "
+                         f"{locked:,.0f} on {qty:.0f} shares.")
+            except Exception:                                  # noqa: BLE001
+                pass
+        return stop

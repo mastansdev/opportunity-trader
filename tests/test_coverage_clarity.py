@@ -158,34 +158,3 @@ def test_a_share_of_day_is_computed_when_the_value_is_known():
 # ---------------------------------------------------------------
 # 3. IT REACHES EVERY BUTTON
 # ---------------------------------------------------------------
-def test_the_calls_panel_carries_it():
-    src = open("dashboard/state.py", encoding="utf-8").read()
-    block = src[src.index("def build_calls"):]
-    block = block[:block.index("def build_causes")] \
-        if "def build_causes" in block else block
-    assert '"coverage": _coverage(symbol),' in block
-
-
-def test_the_screen_says_it_in_plain_words():
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    assert "no price history" in html
-    assert ".ot-nohist" in html
-
-
-def test_the_badge_is_a_caution_colour_not_an_error_colour():
-    """It is a fact about the BOT's knowledge, not a judgement on the
-    stock. Red would read as 'this stock is bad'."""
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = html[html.index(".ot-nohist {"):]
-    block = block[:block.index("}")]
-    assert "--amber" in block
-    assert "--red" not in block
-
-
-def test_a_known_stock_gets_no_badge_at_all():
-    """Clutter on every row would make the exception invisible, which
-    is the whole problem this is fixing."""
-    html = open("dashboard/static/index.html", encoding="utf-8").read()
-    block = html[html.index("WHAT THE BOT ACTUALLY KNOWS"):]
-    block = block[:block.index("'</div>'")]
-    assert "r.coverage.known === false" in block

@@ -73,10 +73,12 @@ def _why(row, **kw):
 # FRESHNESS OF THE MOVE
 # ---------------------------------------------------------------
 
-def test_a_stock_that_has_already_run_is_refused():
-    """THE MEASUREMENT. 61 trades bought 2%+ extended lost 25,026."""
-    why = _why(_row(extension_pct=4.2))
-    assert why and "above the day's open" in why
+def test_a_stock_that_has_already_run_is_no_longer_refused_for_it():
+    """15 Sep 2026: the fixed 2% gate was removed by him -- "not a fixed
+    % to check the freshness. who asked u to do so?". It refused
+    ZENSARTECH (430 -> 479). Buyers and price-following decide now; see
+    tests/test_buyers_and_price_at_entry.py."""
+    assert _why(_row(extension_pct=10.7)) is None
 
 
 def test_a_fresh_move_is_allowed():
@@ -85,8 +87,8 @@ def test_a_fresh_move_is_allowed():
     assert _why(_row(extension_pct=0.8)) is None
 
 
-def test_the_boundary_refuses():
-    assert _why(_row(extension_pct=2.0)) is not None
+def test_there_is_no_percentage_boundary_any_more():
+    assert _why(_row(extension_pct=2.0)) is None
     assert _why(_row(extension_pct=1.99)) is None
 
 

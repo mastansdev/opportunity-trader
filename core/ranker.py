@@ -344,7 +344,13 @@ def sector_moves(gainers_losers, movers=None):
     stocks actually moving, not of a precomputed basket.
     """
     out = {}
-    for key in ("sector_gainers", "sector_losers"):
+    # EVERY sector first (15 Sep 2026): the gainers/losers lists are the
+    # top 10 each way and left the middle of the table with no move --
+    # "sector unknown" and the excess gate skipped. They remain the
+    # fallback for a payload that does not carry the full list.
+    keys = (("sectors_all",) if (gainers_losers or {}).get("sectors_all")
+            else ("sector_gainers", "sector_losers"))
+    for key in keys:
         for row in (gainers_losers or {}).get(key) or []:
             name = row.get("sector")
             move = _num(row.get("avg_change_pct"))
