@@ -1028,6 +1028,12 @@ def build_app(dashboard_state, trade_controller, master_loader,
         """
         return _json_safe(dashboard_state.card_for(symbol))
 
+    @app.get("/api/market")
+    def market_cause():
+        """Why the whole market is moving. Read-only, cached a minute
+        -- see DashboardState.market_cause(). 15 September 2026."""
+        return _json_safe(dashboard_state.market_cause())
+
     def _require_operator(request: Request):
         # ---- THE PAGE AND THE SERVER DISAGREED. 5 August 2026. ----
         #

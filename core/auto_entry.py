@@ -793,12 +793,25 @@ def refuse_reason(row, engine, now=None, held=None, max_positions=None,
     # No reading is not a refusal -- the rule this file keeps for the
     # tick and the flow. A reading that says sellers, or a falling
     # price, is.
-    from config import ENTRY_NEEDS_BUYERS, ENTRY_NEEDS_PRICE_FOLLOWING
-    if ENTRY_NEEDS_PRICE_FOLLOWING:
-        drift = _num(row.get("drift_since_rank_pct"))
-        if drift is not None and drift < 0:
-            return (f"price fell {abs(drift):.1f}% since it was ranked -- "
-                    f"the price is not following")
+    # ---- CANDLES, NOT ONE TICK. 15 September 2026 (evening). ----
+    #
+    #     "check the previous formed candles & volume, price action
+    #      formed"                                     -- the operator
+    #
+    # The drift check refused FSL for "price fell 0.0% since ranked", a
+    # one-tick dip. Price action is now read off the last closed
+    # 1-minute candles, their volume, VWAP and the ranked price -- see
+    # core/price_action.py for the four questions.
+    from config import ENTRY_NEEDS_BUYERS, ENTRY_NEEDS_PRICE_ACTION
+    if ENTRY_NEEDS_PRICE_ACTION:
+        from core import price_action
+        pa = price_action.for_symbol(engine, symbol, row.get("ltp"),
+                                     ranked_price=row.get("ranked_ltp"),
+                                     now=now)
+        if pa is not None:
+            row["price_action"] = pa.get("why")
+            if not pa.get("ok"):
+                return pa.get("why")
     if ENTRY_NEEDS_BUYERS:
         try:
             from core.order_flow import pressure, still_buying
@@ -1661,8 +1674,12 @@ def take(rows, engine, now=None, security_id_of=None, held=None,
                                     or row.get("reason_kind")),
                     # The sentence he sees on the board for this pick,
                     # kept on the trade. 15 September 2026.
-                    "entry_why": (str(row.get("why"))[:300]
-                                  if row.get("why") else None),
+                    # The price action it was bought on rides along, so
+                    # the Trade tab's "Why bought" shows the candles too.
+                    "entry_why": ((" | price action: ".join(
+                                      x for x in (str(row.get("why") or "")[:300],
+                                                  str(row.get("price_action") or ""))
+                                      if x)) or None),
                     "reason_pct_of_company": _reason_size(row, symbol),
                 }
             except Exception:                              # noqa: BLE001

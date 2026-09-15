@@ -301,6 +301,20 @@ def _text(value):
     return "" if text.lower() == "nan" else text.upper()
 
 
+def _day_range(seen, row):
+    """(day_high, day_low): the WIDER of the ticks this process saw and
+    the exchange's own day high/low on the quote row. See the note at
+    the call site -- a restart must not shrink the day. 15 Sep 2026."""
+    seen = seen or {}
+    row = row or {}
+    highs = [v for v in (_num(seen.get("high")), _num(row.get("high")))
+             if v and v > 0]
+    lows = [v for v in (_num(seen.get("low")), _num(row.get("low")))
+            if v and v > 0]
+    return ((max(highs) if highs else seen.get("high")),
+            (min(lows) if lows else seen.get("low")))
+
+
 def _num(value):
     """A number, or None. Never a string and never a guess.
 
@@ -1682,6 +1696,48 @@ class DashboardState:
         except Exception as exc:                           # noqa: BLE001
             return {"found": False, "symbol": symbol, "error": str(exc)}
 
+    def market_cause(self):
+        """Why the whole market is moving -- core/market_cause.py.
+
+        15 September 2026: "does bot knows any specific reason triggered
+        all markets are falling ?" -- and "it must not slow down my bot
+        trading". So it is built only when the desk asks (/api/market),
+        at most once a minute, off data already in memory plus one
+        read-only query. Never on the tick path, never in the entry loop.
+        """
+        now_s = time.monotonic()
+        held = getattr(self, "_market_cause_cache", None)
+        if held and now_s - held[0] < 60.0:
+            return held[1]
+        try:
+            from core import market_cause
+            try:
+                indices = self.indices() or {}
+            except Exception:                              # noqa: BLE001
+                indices = {}
+            sectors = ((self._sector_gainers_losers_cache or {})
+                       .get("sectors_all") or [])
+            flows = None
+            if getattr(self, "market_flows", None) is not None:
+                try:
+                    flows = self.market_flows.snapshot()
+                except Exception:                          # noqa: BLE001
+                    flows = None
+            stories = []
+            if self.stock_events is not None:
+                try:
+                    stories = self.stock_events.recent(
+                        limit=300, scope="MARKET")
+                except Exception:                          # noqa: BLE001
+                    stories = []
+            out = market_cause.explain(indices, sectors, flows, stories)
+        except Exception as exc:                           # noqa: BLE001
+            out = {"available": False, "sentence": f"failed ({exc})",
+                   "facts": [], "drivers": []}
+        out["built_at"] = datetime.now().strftime("%H:%M:%S")
+        self._market_cause_cache = (now_s, out)
+        return out
+
     def build_premarket(self):
         """The overnight world -- 18 numbers from core/premarket.py.
         Built 28 July, never shown."""
@@ -2419,9 +2475,24 @@ class DashboardState:
                 band = bands.get(symbol) or {}
                 if seen or band:
                     row = dict(row)
+                # ---- A RESTART SHRANK THE DAY. 15 September 2026. ----
+                #
+                # This REPLACED the row's range with the ticks this process
+                # has seen. After main.py was restarted at 10:30, FSL's
+                # "day low" was its post-restart low near 283, not the
+                # exchange's 250.15 -- so at 286-290, sitting at 88-96% of
+                # its real range (the candle store's reading), it was
+                # refused "faded to X% of its day range -- the move is
+                # over" 1,050 times from 10:30:13. RAYMOND, 1,229 times from
+                # 10:31:08, while at 59-69% of its real range. Both started
+                # the minute of the restart.
+                #
+                # The row already carries the exchange's own day high and
+                # low from the Dhan quote ("high"/"low"). The day's range
+                # can only be the WIDER of the two -- the same rule
+                # auto_entry.price_now already keeps.
                 if seen:
-                    row["day_high"] = seen.get("high")
-                    row["day_low"] = seen.get("low")
+                    row["day_high"], row["day_low"] = _day_range(seen, row)
                 ltp = row.get("ltp")
                 upper = band.get("upper_circuit_limit")
                 lower = band.get("lower_circuit_limit")

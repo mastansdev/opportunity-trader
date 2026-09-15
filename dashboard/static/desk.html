@@ -233,6 +233,17 @@ tr.hand td{background:var(--sunk)}
 
   <div class="strip" id="strip"></div>
 
+  <!-- WHY THE WHOLE MARKET IS MOVING. 15 September 2026.
+       "does bot knows any specific reason triggered all markets are
+        falling ?" -- core/market_cause.py, fetched once a minute. -->
+  <div class="card" id="mkt" hidden style="margin-bottom:10px">
+    <div class="hd"><b>Market</b><span class="sub" id="mkt-facts"></span></div>
+    <div style="padding:8px 15px 11px;font-size:12.5px">
+      <div id="mkt-sentence" style="font-weight:600;margin-bottom:4px"></div>
+      <div id="mkt-drivers"></div>
+    </div>
+  </div>
+
   <!-- ================= LIVE ================= -->
   <div class="pane" id="live-pane">
     <div class="cols">
@@ -1791,5 +1802,26 @@ async function tick(){
   }
 }
 tick(); setInterval(tick, 3000);
+
+async function marketTick(){
+  try{
+    var res = await fetch("/api/market", {cache:"no-store"});
+    if (!res.ok) return;
+    var m = await res.json();
+    if (!m || !m.sentence) return;
+    $("mkt").hidden = false;
+    var cls = m.direction === "FALLING" ? "down" : (m.direction === "RISING" ? "up" : "");
+    $("mkt-sentence").className = cls;
+    $("mkt-sentence").textContent = m.sentence;
+    $("mkt-facts").textContent = (m.facts || []).join(" · ")
+      + (m.built_at ? " · " + m.built_at : "");
+    $("mkt-drivers").innerHTML = (m.drivers || []).map(function(d){
+      return '<div style="padding:2px 0"><b>' + esc(d.driver) + '</b> '
+        + '<span class="dim">(' + d.stories + ' stories, latest ' + esc(d.latest_at) + ')</span> '
+        + esc(d.headline) + '</div>';
+    }).join("");
+  }catch(e){ /* the market line must never break the board */ }
+}
+marketTick(); setInterval(marketTick, 60000);
 </script>
 </body></html>

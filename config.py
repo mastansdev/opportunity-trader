@@ -3555,18 +3555,22 @@ DAILY_LOSS_CAP_ENABLED = False
 # He never asked for a fixed percentage. It refused ZENSARTECH all
 # morning (430 -> 479, +11%) for being "10.7% above the open". Replaced
 # by what he did ask for: ENTRY_NEEDS_BUYERS and
-# ENTRY_NEEDS_PRICE_FOLLOWING below, read in core/auto_entry.
+# ENTRY_NEEDS_PRICE_ACTION below, read in core/auto_entry.
 ENTRY_MAX_EXTENSION_PCT = None
 
 # The two checks he asked for, at the moment of buying:
 #   buyers   -- order flow: buyers must be ahead today AND still adding
 #               (core/order_flow.still_buying; running total when the
 #               minute store has too little session yet)
-#   price    -- since the stock was ranked, the price must not have
-#               fallen: SUNTV was bought 1.1% below its ranked price.
+#   price    -- the price action formed on its last 1-minute candles:
+#               no new low, not below its ranked price while still
+#               falling, more volume on rising candles than falling,
+#               above VWAP (core/price_action.py). 15 Sep evening: this
+#               replaced "price must not have fallen since ranked", which
+#               refused FSL for a 0.0% one-tick dip.
 # Direction only. No percentage.
 ENTRY_NEEDS_BUYERS = True
-ENTRY_NEEDS_PRICE_FOLLOWING = True
+ENTRY_NEEDS_PRICE_ACTION = True
 
 # ---- AND THE LIST ITSELF MUST BE FRESH. ----
 #
@@ -3587,7 +3591,11 @@ ENTRY_RANK_MAX_AGE_SECONDS = 120
 # See core/auto_entry.take(). On 15 Sep all ten seats went by 09:18 to
 # the first names on the board while the day's #1 (EMUDHRA) and #5 (FSL)
 # were not yet on it.
-ENTRY_NOT_BEFORE = "09:20"       # scan the whole market first
+# 15 Sep evening: the 09:20 start is REMOVED. He never set that time --
+# "i asked the seat filling must happen after all checks not a race".
+# The checks themselves hold the first seat back: price action needs
+# three closed 1-minute candles (core/price_action.py). None = off.
+ENTRY_NOT_BEFORE = None
 ENTRY_ONLY_ALIVE = True          # a seat only for a stock moving now
 ENTRY_MIN_GAP_SECONDS = 60       # one new position a minute, best first
 DRIFT_EXIT_ENABLED = True

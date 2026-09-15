@@ -296,7 +296,7 @@ def _no_wall_clock_dependence(monkeypatch):
     # Same for the buyers / price-following entry checks: off by default,
     # tested in tests/test_buyers_and_price_at_entry.py.
     monkeypatch.setattr(_config, "ENTRY_NEEDS_BUYERS", False)
-    monkeypatch.setattr(_config, "ENTRY_NEEDS_PRICE_FOLLOWING", False)
+    monkeypatch.setattr(_config, "ENTRY_NEEDS_PRICE_ACTION", False)
     # 15 Sep 2026: production switched the % profit lock OFF for his
     # rupee slabs. The % lock's code still has tests, so it stays ON
     # here and the slabs stay OFF; tests/test_his_profit_slabs.py turns

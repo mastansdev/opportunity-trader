@@ -204,16 +204,34 @@ def test_no_new_sector_was_invented(rows):
     so."""
     used = {(r.get("SECTOR") or "").strip() for r in rows}
     used.discard("")
-    assert len(used) == 29, f"sector count moved to {len(used)}: {sorted(used)}"
+    # 15 Sep 2026: "change raymond sector to engineering & defence." --
+    # the operator named this one himself. It is the only sector allowed
+    # outside the 29, and its cost is stated where it is tested below.
     assert set(SECTOR.values()) <= used
+    used -= OPERATOR_NAMED_SECTORS
+    assert len(used) == 29, f"sector count moved to {len(used)}: {sorted(used)}"
 
 
 def test_no_sector_ended_up_with_only_one_stock(rows):
     from collections import Counter
     tally = Counter((r.get("SECTOR") or "").strip() for r in rows)
     tally.pop("", None)
-    thin = {s: n for s, n in tally.items() if n < 2}
+    thin = {s: n for s, n in tally.items()
+            if n < 2 and s not in OPERATOR_NAMED_SECTORS}
     assert not thin, f"a sector of one cannot lead the sector gate: {thin}"
+
+
+# Sectors the operator named for a company himself. RAYMOND alone in
+# ENGINEERING & DEFENCE has no sector average (a sector needs 3 priced
+# names), so the ranker's "beating its sector" check is skipped for it
+# and a sector panic cannot block it. He was told on 15 Sep 2026.
+OPERATOR_NAMED_SECTORS = {"ENGINEERING & DEFENCE"}
+
+
+def test_raymond_is_where_he_put_it(rows):
+    got = {r["SYMBOL"]: r for r in rows}
+    if "RAYMOND" in got:
+        assert got["RAYMOND"]["SECTOR"] == "ENGINEERING & DEFENCE"
 
 
 def test_the_derived_columns_use_existing_values(rows):

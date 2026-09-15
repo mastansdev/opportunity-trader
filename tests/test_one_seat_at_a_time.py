@@ -20,7 +20,7 @@ from tests.test_a_broken_check_refuses_the_trade import _Engine
 @pytest.fixture(autouse=True)
 def _discipline_on(monkeypatch):
     import config
-    monkeypatch.setattr(config, "ENTRY_NOT_BEFORE", "09:20")
+    monkeypatch.setattr(config, "ENTRY_NOT_BEFORE", None)
     monkeypatch.setattr(config, "ENTRY_ONLY_ALIVE", True)
     monkeypatch.setattr(config, "ENTRY_MIN_GAP_SECONDS", 60)
 
@@ -42,10 +42,14 @@ def _take(engine, rows, now):
     return sent
 
 
-def test_nothing_is_bought_before_the_market_is_scanned():
-    engine = _Engine()
-    assert _take(engine, [_row("KEC"), _row("MPHASIS")],
-                 datetime(2026, 9, 15, 9, 16, 33)) == []
+def test_there_is_no_fixed_clock_start():
+    """15 Sep evening: he never set 09:20 -- "the seat filling must happen
+    after all checks not a race". The checks hold the seat, not a clock."""
+    import pathlib
+    import re
+    text = (pathlib.Path(__file__).resolve().parents[1] / "config.py").read_text(
+        encoding="utf-8")
+    assert re.search(r"^ENTRY_NOT_BEFORE = None\b", text, re.M)
 
 
 def test_ten_candidates_do_not_take_ten_seats_in_one_second():
