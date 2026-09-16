@@ -125,7 +125,14 @@ def shares_for(price, margin_pct, budget=None):
     """How many shares Rs <budget> of margin buys. Always rounds DOWN --
     225.7 becomes 225, never 226, so the commitment can never exceed the
     operator's own ceiling."""
-    budget = MTF_MARGIN_PER_POSITION_RS if budget is None else budget
+    # 16 Sep 2026: the size he set on the dashboard, with the config
+    # constant as the fallback. See core/position_size.py.
+    if budget is None:
+        try:
+            from core.position_size import per_position_rs
+            budget = per_position_rs(default=MTF_MARGIN_PER_POSITION_RS)
+        except Exception:                                  # noqa: BLE001
+            budget = MTF_MARGIN_PER_POSITION_RS
     try:
         per_share = float(price) * float(margin_pct)
         if per_share <= 0:

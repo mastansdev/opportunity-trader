@@ -4701,7 +4701,12 @@ class Engine:
                     return (self._cap_by_risk(qty, price, stop_distance,
                                               symbol)
                             if cap_by_risk else qty)
-            budget = MTF_MARGIN_PER_POSITION_RS
+            # 16 Sep 2026: his dashboard size, config as the fallback.
+            try:
+                from core.position_size import per_position_rs
+                budget = per_position_rs(default=MTF_MARGIN_PER_POSITION_RS)
+            except Exception:                              # noqa: BLE001
+                budget = MTF_MARGIN_PER_POSITION_RS
             qty = max(1, int(budget // float(price))) if price else 1
             return (self._cap_by_risk(qty, price, stop_distance, symbol)
                     if cap_by_risk else qty)

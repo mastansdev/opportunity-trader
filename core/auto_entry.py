@@ -1227,7 +1227,9 @@ def price_now(row, price_of):
     try:
         old_plan = row.get("plan") or {}
         if old_plan.get("ok") and row.get("ltp"):
-            from config import MTF_MARGIN_PER_POSITION_RS
+            from config import MTF_MARGIN_PER_POSITION_RS as _CONFIG_SIZE
+            from core.position_size import per_position_rs
+            MTF_MARGIN_PER_POSITION_RS = per_position_rs(default=_CONFIG_SIZE)
             from core.position_plan import plan as _position_plan
             value = _num(old_plan.get("value_rs"))
             pct = (MTF_MARGIN_PER_POSITION_RS / value) if value else None

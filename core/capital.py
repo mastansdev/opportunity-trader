@@ -178,8 +178,18 @@ def own_cash_per_position(live=None):
     `live` is still accepted so the caller need not change and so the
     signature still says out loud that this question was once answered
     two different ways. It is ignored: see the note above.
+
+    ---- HE SETS IT ON THE DASHBOARD NOW. 16 September 2026. ----
+    "reduce per position to 25000 so i get 3 seats on my current capital
+     & why do not u gave option to select capital allocation on
+     dashboard." The constant below is the fallback for when nothing has
+     been set; core/position_size.py holds the live figure.
     """
-    return OWN_CASH_PER_POSITION_RS
+    try:
+        from core.position_size import per_position_rs
+        return per_position_rs(default=OWN_CASH_PER_POSITION_RS)
+    except Exception:                                      # noqa: BLE001
+        return OWN_CASH_PER_POSITION_RS
 
 # A sanity ceiling so a bad capital read cannot open 400 slots. Not a
 # trading rule -- a guard against a broker API returning nonsense.
@@ -272,7 +282,7 @@ def slots(capital_rs, held=0, floor_rs=None, per_position_rs=None):
     except (TypeError, ValueError):
         capital = 0.0
     floor = FREE_CASH_FLOOR_RS if floor_rs is None else float(floor_rs)
-    per = (OWN_CASH_PER_POSITION_RS if per_position_rs is None
+    per = (own_cash_per_position() if per_position_rs is None
            else float(per_position_rs))
     held = int(held or 0)
 

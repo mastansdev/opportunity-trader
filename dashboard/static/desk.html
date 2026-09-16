@@ -213,6 +213,15 @@ tr.hand td{background:var(--sunk)}
     </div>
     <div class="sw">
       <span id="switchwhy"></span>
+      <!-- CAPITAL PER POSITION. 16 September 2026.
+           "why do not u gave option to select capital allocation on
+            dashboard." -- his own cash per seat, one number, live. -->
+      <span class="dim" style="font-size:11px">per position &#8377;</span>
+      <input id="persize" type="number" min="5000" max="200000" step="1000"
+             style="width:78px;font-size:12px;padding:3px 5px"
+             title="Your own cash in one position. Capital divided by this = seats.">
+      <button id="btn-size">Set</button>
+      <span class="dim" style="font-size:11px" id="seatlab"></span>
       <span class="dim" style="font-size:11px" id="modelab"></span>
       <button id="btn-on">ON &mdash; real</button>
       <button id="btn-off">OFF &mdash; paper</button>
@@ -1693,6 +1702,31 @@ async function setMode(state){
 $("btn-on").addEventListener("click", function(){ setMode("on"); });
 $("btn-off").addEventListener("click", function(){ setMode("off"); });
 
+/* ---- CAPITAL PER POSITION. 16 September 2026. ----
+   Capital / this = how many stocks the bot can hold at once. */
+async function setPerPosition(){
+  if (!IS_OPERATOR) return alert("View only — no operator link.");
+  var rs = Number($("persize").value);
+  if (!rs) return alert("Type an amount in rupees first.");
+  if (!confirm("Put ₹" + rs.toLocaleString("en-IN")
+               + " of your own cash into each position?")) return;
+  try{
+    var res = await fetch("/api/per_position/" + rs, {method:"POST",
+      headers:{"X-Operator-Token": window.__OPERATOR_TOKEN__}});
+    var j = {}; try{ j = await res.json(); }catch(_){ }
+    if (!res.ok || j.success === false){
+      alert("Refused: " + (j.error || j.detail || ("HTTP " + res.status)));
+    } else {
+      alert("Now " + j.message
+        + (j.seats ? " — " + j.seats + " position(s) on ₹"
+             + Math.round(j.capital_rs).toLocaleString("en-IN") : "")
+        + "\n\n" + (j.note || ""));
+    }
+  }catch(e){ alert("It never reached the bot: " + e); }
+  tick();
+}
+$("btn-size").addEventListener("click", setPerPosition);
+
 /* ==========================================================
    THE SEARCH BOX
    ==========================================================
@@ -1838,5 +1872,19 @@ async function marketTick(){
   }catch(e){ /* the market line must never break the board */ }
 }
 marketTick(); setInterval(marketTick, 60000);
+
+/* The size he set, and what it buys him in seats. */
+async function sizeTick(){
+  try{
+    var s = await fetch("/api/per_position", {cache:"no-store"}).then(r=>r.json());
+    if (!s || !s.per_position_rs) return;
+    var box = $("persize");
+    if (document.activeElement !== box) box.value = Math.round(s.per_position_rs);
+    $("seatlab").textContent = s.seats
+      ? ("= " + s.seats + " position" + (s.seats > 1 ? "s" : ""))
+      : "";
+  }catch(e){ /* never break the board */ }
+}
+sizeTick(); setInterval(sizeTick, 30000);
 </script>
 </body></html>

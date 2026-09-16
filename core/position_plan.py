@@ -156,8 +156,16 @@ def plan(entry, side, day_low=None, day_high=None, atr=None,
         return {"ok": False, "why": "no price"}
 
     risk_rs = RISK_PER_TRADE_RS if risk_rs is None else float(risk_rs)
-    budget_rs = (MTF_MARGIN_PER_POSITION_RS if budget_rs is None
-                 else float(budget_rs))
+    # 16 Sep 2026: his dashboard setting decides the size; the config
+    # constant is the fallback. core/position_size.py.
+    if budget_rs is None:
+        try:
+            from core.position_size import per_position_rs
+            budget_rs = per_position_rs(default=MTF_MARGIN_PER_POSITION_RS)
+        except Exception:                                  # noqa: BLE001
+            budget_rs = MTF_MARGIN_PER_POSITION_RS
+    else:
+        budget_rs = float(budget_rs)
 
     # ---- ONE WIDTH, AND HE PICKED IT. 29 August 2026. ----
     #

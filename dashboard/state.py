@@ -4092,7 +4092,8 @@ class DashboardState:
         # marked, not scolded -- he said outright that going bigger from
         # the Dhan app is his call to make.
         try:
-            from config import MTF_MARGIN_PER_POSITION_RS as cap
+            from core.position_size import per_position_rs
+            cap = per_position_rs()
         except Exception:                                  # noqa: BLE001
             cap = 100_000.0
         value = (price or avg or 0) * (qty or 0)

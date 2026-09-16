@@ -262,7 +262,7 @@ def _tests_run_in_paper(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_wall_clock_dependence(monkeypatch):
+def _no_wall_clock_dependence(monkeypatch, tmp_path):
     """The ORB exchange-reconcile is only allowed to run within a few
     minutes of 09:30 (see _reconcile_orb_once -- a restart at 10:36 was
     re-widening every range to the running day high). That guard reads
@@ -297,6 +297,13 @@ def _no_wall_clock_dependence(monkeypatch):
     # tested in tests/test_buyers_and_price_at_entry.py.
     monkeypatch.setattr(_config, "ENTRY_NEEDS_BUYERS", False)
     monkeypatch.setattr(_config, "ENTRY_NEEDS_PRICE_ACTION", False)
+    # 16 Sep 2026: his per-position size lives in data/position_size.json.
+    # Tests must never read the live file -- they would size on whatever
+    # he last set on the dashboard. Pointed at a path that does not
+    # exist, so every caller falls back to its own config constant.
+    import core.position_size as _size
+    monkeypatch.setattr(_size, "PATH", str(tmp_path / "no_position_size.json"))
+    monkeypatch.setattr(_size, "_cache", {"value": None, "mtime": None})
     # 15 Sep 2026: production switched the % profit lock OFF for his
     # rupee slabs. The % lock's code still has tests, so it stays ON
     # here and the slabs stay OFF; tests/test_his_profit_slabs.py turns

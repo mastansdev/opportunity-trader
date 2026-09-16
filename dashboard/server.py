@@ -1619,6 +1619,48 @@ def build_app(dashboard_state, trade_controller, master_loader,
                          "positions either way; this arms the RANKED "
                          "list only -- breakout entries stay on alert")}
 
+    # ---- HOW MUCH GOES INTO ONE POSITION. 16 September 2026. ----
+    #
+    #     "reduce per position to 25000 so i get 3 seats on my current
+    #      capital & why do not u gave option to select capital
+    #      allocation on dashboard."            -- the operator
+    #
+    # It used to be two constants in source files that had to agree.
+    # core/position_size.py is now the one place, and this is how he
+    # sets it. Operator token required -- it sizes real orders.
+    @app.get("/api/per_position")
+    def read_per_position():
+        """The current size and what it means in seats. Read-only."""
+        from core.position_size import per_position_rs, seats_for
+        try:
+            portfolio = getattr(dashboard_state, "portfolio", None)
+            capital = float(getattr(portfolio, "starting_capital", None))
+        except (TypeError, ValueError):
+            capital = None
+        size = per_position_rs()
+        return {"per_position_rs": size, "capital_rs": capital,
+                "seats": seats_for(capital) if capital else None}
+
+    @app.post("/api/per_position/{rupees}")
+    def set_per_position(rupees: float, request: Request):
+        _require_operator(request)
+        from core.position_size import set_per_position_rs, seats_for
+        ok, message = set_per_position_rs(rupees, who="dashboard")
+        if not ok:
+            return {"success": False, "error": message}
+        capital = None
+        try:
+            portfolio = getattr(dashboard_state, "portfolio", None)
+            capital = float(getattr(portfolio, "starting_capital", None))
+        except (TypeError, ValueError):
+            capital = None
+        return {"success": True, "per_position_rs": float(rupees),
+                "message": message,
+                "capital_rs": capital,
+                "seats": seats_for(capital) if capital else None,
+                "note": ("new entries are sized on it from the next buy; "
+                         "open positions are untouched")}
+
     # ---- THE SECOND SWITCH IS GONE. 5 September 2026. ----
     #
     #     "yes remove breakout_armed too"
